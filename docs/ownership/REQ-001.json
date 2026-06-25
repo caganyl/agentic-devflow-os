@@ -1,0 +1,34 @@
+{
+  "$schema": "./schema.json",
+  "schema_version": 1,
+  "req_id": "REQ-001",
+  "title": "MCP Hook Lifecycle Synthetic Validation",
+  "status": "approved",
+  "approval": {
+    "approved_by": "Çağan Yılmaz",
+    "approved_at": "2026-06-25"
+  },
+  "references": {
+    "requirement": "docs/product/requirements/REQ-001-mcp-hook-lifecycle-synthetic-validation.md",
+    "acceptance_criteria": "docs/product/acceptance-criteria/AC-REQ-001-mcp-hook-lifecycle-synthetic-validation.md",
+    "contracts": [],
+    "contract_exception": {
+      "reason": "REQ-001 yalnızca offline ve sentetik audit lifecycle validation testleri üretir; external API, event veya database contractı yoktur.",
+      "approved_by": "Çağan Yılmaz",
+      "approved_at": "2026-06-25"
+    },
+    "adrs": [
+      "docs/architecture/adr/ADR-005-mcp-tooling-control-plane.md",
+      "docs/architecture/adr/ADR-006-mcp-audit-logging-and-runtime-enforcement.md"
+    ]
+  },
+  "owners": [
+    {
+      "agent": "qa-automation",
+      "write_paths": [
+        "tests/mcp_hook_lifecycle"
+      ],
+      "notes": "Yalnızca REQ-001 kapsamındaki offline, sentetik ve deterministik MCP hook lifecycle validation testleri. Production kodu, hook config, settings, credential, network veya MCP bağlantısı kapsam dışıdır."
+    }
+  ]
+}
