@@ -1,7 +1,8 @@
 # ADR-002: Task Ownership Manifest
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-25
+- **Acceptance Date:** 2026-06-25
 - **Owner:** Human maintainer
 - **Related controls:** PROJECT_CONSTITUTION.md, CLAUDE.md,
   ADR-001-role-based-hook-enforcement.md
@@ -121,8 +122,16 @@ hook seviyesinde değildir.
 - Gerçek REQ-XXX manifest dosyaları bu PR'da oluşturulmaz; bu PR yalnızca
   standart ve şablonu tanımlar.
 
+## Acceptance Evidence
+
+- PR #5 ile task ownership manifest sözleşmesi merge edildi.
+- `docs/ownership/REQ-XXX.json` yapısı, schema/template ve validator
+  eklendi.
+- Branch/REQ-ID eşleşmesi, owner path overlap koruması ve governance
+  dosyası koruması test edildi.
+
 ## Approval
 
 - **Required approver:** Human maintainer
-- **Approval status:** Pending
-- **Approval evidence:** Reviewed pull request and merge to main
+- **Approval status:** Accepted
+- **Approval evidence:** PR #5 reviewed and merged to main (2026-06-25)

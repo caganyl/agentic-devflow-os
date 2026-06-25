@@ -1,7 +1,8 @@
 # ADR-001: Role-Based Hook Enforcement
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-25
+- **Acceptance Date:** 2026-06-25
 - **Owner:** Human maintainer
 - **Related controls:** PROJECT_CONSTITUTION.md, CLAUDE.md, AGENT_CAPABILITY_MATRIX.md
 
@@ -75,8 +76,18 @@ enforcement sonraki ADR ile eklenecektir.
 - Hook testleri gerçek tool çağrısından önce manuel JSON probe'ları ve
   smoke testlerle doğrulanır.
 
+## Acceptance Evidence
+
+- PR #4 ile role-based hook enforcement merge edildi.
+- Merkezi `.claude/hooks/enforce-role-boundaries.sh` eklendi.
+- Role path sınırları, Bash sınırları ve planning-only Delivery Lead
+  davranışı test edildi.
+- İnsan maintainer, hook ve `.claude/settings.json` gibi governance
+  dosyaları için son yetki sahibi olmaya devam eder; bu ADR'nin kabulü bu
+  sınırı değiştirmez.
+
 ## Approval
 
 - **Required approver:** Human maintainer
-- **Approval status:** Pending
-- **Approval evidence:** Reviewed pull request and merge to main
+- **Approval status:** Accepted
+- **Approval evidence:** PR #4 reviewed and merged to main (2026-06-25)
