@@ -66,8 +66,9 @@ hook lifecycle davranışını doğrulamak.
 Bu spike'ın hedefi yalnızca şu iki ölçülebilir runtime kanıtını üretmektir:
 
 1. **Controlled successful path:** Claude Code command hook, built-in `Read`
-   çağrısında tetiklenir; yerel audit writer ADR-006/MCP Audit Event Contract
-   şemasına uygun event üretir; `Read` tool normal akışa devam eder.
+   çağrısında tetiklenir; non-canonical, sanitised local runtime evidence
+   record üretilir (bu kayıt MCP Audit Event Contract'a uygun canonical
+   audit event değildir); `Read` tool normal akışa devam eder.
 2. **Controlled failure path:** Audit writer unavailable olduğunda hook
    fail-closed davranır; `PreToolUse` deny üretir; `Read` tool çalışmaz;
    dış dispatch gerçekleşmez.
@@ -120,17 +121,41 @@ Hook yalnızca gerekli güvenli metadata'yı işler; raw tool input, dosya
 içeriği, prompt, URL, token, header, secret, PII, exception metni veya
 reason persist etmez.
 
-### 5. 15 Alanlık Kapalı Şema ile Audit Event Üretimi
+### 5. 7 Alanlık Non-Canonical Sanitised Runtime Evidence Record
 
-Local audit event, ADR-006 ve MCP Audit Event Contract içindeki tam 15
-alanlık closed schema ile üretilir. 15 alan dışında hiçbir alan persist
-edilmez.
+REQ-002 yalnızca non-canonical, sanitised local runtime evidence record
+üretir. Bu kayıt bir audit event değildir ve MCP Audit Event Contract'a
+uygun canonical 15 alanlık schema ile üretilmez; bu contract'ı
+doğruladığını iddia etmez.
 
-### 6. Privacy-Preserving Runtime Referanslar
+Evidence record yalnızca şu 7 alanı taşır; bu alanların dışında hiçbir
+alan persist edilmez:
 
-`session_reference` ve `operation_reference` alanlarına ait session veya
-operation runtime kimlikleri raw biçimde persist edilmez; yalnızca test-only
-privacy-preserving referanslar kullanılır.
+| Alan                      | Zorunlu Değer / Enum                                                                                         |
+|---------------------------|--------------------------------------------------------------------------------------------------------------|
+| `evidence_schema_version` | —                                                                                                            |
+| `evidence_id`             | Yalnızca disposable local workspace random test referansı; session_id, tool_use_id veya raw agent identity'den türetilmez |
+| `timestamp`               | —                                                                                                            |
+| `hook_event`              | `PreToolUse` (sabit)                                                                                         |
+| `tool_class`              | `builtin_read` (sabit)                                                                                       |
+| `test_path`               | `writer_available` veya `writer_unavailable`                                                                 |
+| `observation`             | `allow_observed` veya `deny_observed`                                                                        |
+
+Evidence record içinde kesinlikle şunlar yer almaz: `mcp_server`,
+`mcp_tool`, `unclassified`, `tool_input`, dosya yolu, dosya içeriği,
+prompt, URL, token, credential, secret, session ID, tool use ID, raw
+hook payload, serbest metin note/message/reason/exception text.
+
+### 6. Runtime Identity Sızıntısı Olmaması
+
+Evidence record içinde session ID, tool use ID, raw agent identity veya
+başka bir runtime tanımlayıcı persist edilmez. `evidence_id` yalnızca
+disposable local workspace içinde üretilen random test referansıdır;
+Claude Code'un iç session veya operation kimliklerinden türetilmez.
+
+`session_reference`, `operation_reference` veya `agent_type` gibi
+canonical MCP Audit Event Contract alanları bu evidence record içinde
+yer almaz.
 
 ### 7. Controlled Successful Path
 
@@ -199,7 +224,7 @@ Tüm ayrıntılı kabul kriterleri ayrı bir dosyada tanımlanmıştır:
 | AC-001 | Disposable local workspace ve temporary configuration oluşturma sınırları                         |
 | AC-002 | `/hooks` veya eşdeğer runtime doğrulamasıyla yalnızca `Read` matcher'lı hook'un görünmesi        |
 | AC-003 | Gerçek built-in `Read` çağrısında hook'un çalıştığına dair local evidence                        |
-| AC-004 | Üretilen audit event'in tam olarak 15 alan taşıması                                               |
+| AC-004 | Üretilen non-canonical evidence record'ın tam olarak 7 alanlı sanitised schema ile uyumlu olması |
 | AC-005 | Raw input, dosya içeriği, URL, prompt, token, PII, file path, reason veya exception text sızıntısının olmaması |
 | AC-006 | Raw runtime reference'ların persist edilmemesi                                                    |
 | AC-007 | Audit writer başarılı olduğunda tool call'ın gereksiz deny almaması                               |
@@ -259,6 +284,45 @@ Tüm ayrıntılı kabul kriterleri ayrı bir dosyada tanımlanmıştır:
 - Gerçek MCP bağlantısı ve production audit enforcement hâlâ No-Go'dur.
 - ADR-005, ADR-006 ve SEC-ADR-005 connection preconditions geçerliliğini
   korur.
+
+### Acceptance Amendment — 2026-06-25
+
+Human maintainer acceptance kararı aşağıdaki evidence-model clarification
+ile amend edilmiştir:
+
+- **Built-in `Read`, MCP tool değildir.** REQ-002 built-in `Read` spike'ı
+  canonical `MCP_AUDIT_EVENT_CONTRACT.md` audit event'i üretmez,
+  doğrulamaz veya yerine geçmez.
+- REQ-002 yalnızca non-canonical, sanitised local runtime evidence record
+  üretir. Bu record tam olarak **7 alan** taşır:
+
+  | Alan                      | Zorunlu Değer / Enum                                                                                         |
+  |---------------------------|--------------------------------------------------------------------------------------------------------------|
+  | `evidence_schema_version` | —                                                                                                            |
+  | `evidence_id`             | Yalnızca disposable local workspace random test referansı; raw runtime identity'den türetilmez              |
+  | `timestamp`               | —                                                                                                            |
+  | `hook_event`              | `PreToolUse` (sabit)                                                                                         |
+  | `tool_class`              | `builtin_read` (sabit)                                                                                       |
+  | `test_path`               | `writer_available` veya `writer_unavailable`                                                                 |
+  | `observation`             | `allow_observed` veya `deny_observed`                                                                        |
+
+- Evidence record içinde kesinlikle şunlar yer almaz: `mcp_server`,
+  `mcp_tool`, `unclassified`, `session_reference`, `operation_reference`,
+  `agent_type`, `policy_decision`, `outcome`, `failure_category`, raw
+  payload, tool input, file path, file content, prompt, URL, token, secret,
+  session ID, tool use ID, reason, exception text veya serbest metin alanları.
+
+**Governance anlamı:**
+
+- REQ-002'nin Accepted statüsü korunur; acceptance date değişmez
+  (2026-06-25).
+- Scope genişletilmez.
+- Gerçek MCP bağlantısına, MCP audit contract validation'a, production
+  hook'a veya production audit enforcement'a izin verilmez.
+- AC-011 post-spike human maintainer incelemesi bu amendment ile
+  kapatılmaz.
+- ADR-005, ADR-006, MCP Audit Event Contract ve SEC-ADR-005 No-Go
+  kapıları değişmez.
 
 ---
 
@@ -343,12 +407,14 @@ Canonical referanslar:
    stdout payload, vb.) Claude Code hook runtime dokümantasyonuna bağlıdır;
    bu detay implementation adımında netleştirilmelidir.
 
-4. **Privacy-preserving reference üretim yöntemi:** `session_reference`
-   ve `operation_reference` alanlarının test-only privacy-preserving
-   biçimde nasıl üretileceği (local sayaç, sabit prefix, vb.) bu REQ
-   kapsamında seçilmez; implementation sırasında belirlenir.
+4. **`evidence_id` üretim yöntemi:** Evidence record'daki `evidence_id`
+   alanının disposable local workspace içinde nasıl üretileceği (UUID,
+   lokal sayaç, sabit prefix + random suffix, vb.) bu REQ kapsamında
+   seçilmez; implementation sırasında belirlenir. Bu referans hiçbir
+   koşulda session_id, tool_use_id veya raw runtime tanımlayıcıdan
+   türetilmez.
 
-5. **Local artifact formatı:** Üretilen local audit event'inin hangi
-   formatta (JSON satırı, dosya) ve nerede (geçici dosya yolu)
-   saklanacağı implementation kararıdır; bu REQ yalnızca 15 alanlık
-   kapalı şema zorunluluğunu ve yasak veri sınırlarını tanımlar.
+5. **Local artifact formatı:** Üretilen non-canonical evidence record'ın
+   hangi formatta (JSON satırı, dosya) ve nerede (geçici dosya yolu)
+   saklanacağı implementation kararıdır; bu REQ yalnızca 7 alanlık
+   evidence schema zorunluluğunu ve yasak veri sınırlarını tanımlar.
