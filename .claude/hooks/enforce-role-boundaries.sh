@@ -34,7 +34,7 @@ is_governed_agent() {
     delivery-lead|product-analyst|solution-architect|contract-broker|\
     frontend-engineer|backend-engineer|database-engineer|qa-automation|\
     security-red-team|integration-release|ai-data-engineer|evalops-reviewer|\
-    design-reviewer)
+    design-reviewer|governance-operations-author)
       return 0
       ;;
     *)
@@ -251,6 +251,14 @@ case "$TOOL_NAME" in
       integration-release)
         ALLOWED_PATHS=("docs/release" "docs/handoffs")
         ;;
+      governance-operations-author)
+        ALLOWED_PATHS=(
+          "docs/operations"
+          "docs/templates"
+          "docs/ownership/README.md"
+          "docs/ownership/REGISTRY_BRANCH_RUNBOOK.md"
+        )
+        ;;
       evalops-reviewer)
         ALLOWED_PATHS=(
           "evals/datasets/adversarial"
@@ -287,7 +295,7 @@ case "$TOOL_NAME" in
         deny "Role-boundary protection: delivery-lead is planning-only and cannot run Bash commands."
         exit 0
         ;;
-      product-analyst|solution-architect|contract-broker|design-reviewer)
+      product-analyst|solution-architect|contract-broker|design-reviewer|governance-operations-author)
         deny "Role-boundary protection: $AGENT_TYPE has no Bash authority. Use documented read/write tools only."
         exit 0
         ;;
