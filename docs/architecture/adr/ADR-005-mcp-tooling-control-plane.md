@@ -1,8 +1,9 @@
 # ADR-005 — MCP Tooling Control Plane and External Tool Access Model
 
 - **ADR-ID:** ADR-005
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-25
+- **Acceptance date:** 2026-06-25
 - **Owner:** Human maintainer
 - **Related controls:** PROJECT_CONSTITUTION.md, CLAUDE.md, AGENTS.md,
   ADR-001-role-based-hook-enforcement.md,
@@ -307,11 +308,13 @@ tutarlı):
 
 ## İnsan Onay Kapıları
 
-- Bu ADR'nin kendisi `Proposed` durumdadır; insan onayı alınmadan
-  `Accepted` sayılmaz.
-- Herhangi bir MCP'nin gerçek bir hesaba/ortama bağlanması, ayrı bir insan
-  onayı (ve mümkünse ayrı bir takip ADR'si veya en azından bu ADR'nin
-  "Accepted" hale gelmesi) gerektirir.
+- Bu ADR'nin policy kararı insan maintainer tarafından kabul edilmiş ve
+  `Accepted` durumuna geçirilmiştir (bkz. "Acceptance Evidence"). Bu kabul
+  yalnızca policy kararını kapsar; aşağıdaki maddeler ve "Security
+  Follow-up / Connection Preconditions" bölümü değişmeden geçerlidir.
+- Herhangi bir MCP'nin gerçek bir hesaba/ortama bağlanması, bu ADR'nin
+  `Accepted` olmasından **bağımsız olarak**, ayrı bir insan onayı (ve
+  mümkünse ayrı bir takip ADR'si) gerektirir.
 - Herhangi bir MCP'ye write-capable yetki eklenmesi, PROJECT_CONSTITUTION.md
   §3'teki insan onay kapıları kapsamına girer ve ayrı bir ADR gerektirir.
 - Gerçek bağlantı öncesi smoke test/capability validation sonucu insan
@@ -397,6 +400,40 @@ tutarlı):
   işaretlenmiştir ve insan maintainer/Delivery Lead tarafından ayrıca
   planlanmalıdır.
 
+## Acceptance Evidence
+
+Bu bölüm, ADR-005'in **policy kararının** human maintainer tarafından kabul
+edilmesine ilişkin doğrulanmış kanıtları kayıt altına alır. Bu kabul
+yalnızca aşağıdaki policy paketini kapsar; hiçbir gerçek MCP bağlantısını,
+credential'ı veya write-capable erişimi yetkilendirmez (bkz. "Security
+Follow-up / Connection Preconditions").
+
+- MCP tooling control-plane policy paketi (bu ADR) PR #13 ile merge
+  edilmiştir.
+- `docs/decisions/MCP_AGENT_CAPABILITY_MATRIX.md` policy dokümanı PR #13
+  kapsamında merge edilmiştir.
+- Security Red Team ilk review'unda **Conditional Go** sonucu verilmiş ve
+  somut güvenlik bulguları (untrusted MCP output/prompt injection,
+  Playwright environment/side-effect sınırı, GitHub credential/read-path
+  secret riski, audit logging önkoşulu, credential saklama önkoşulu)
+  tespit edilmiştir.
+- Bu bulgular policy seviyesinde bu ADR'nin ilgili bölümlerine
+  ("Untrusted MCP Output / Indirect Prompt Injection İlkesi", Playwright/
+  GitHub modellerindeki bağlantı/credential ön koşulları, "İnsan Onay
+  Kapıları" altındaki audit logging ve credential saklama ön koşulları) ve
+  `MCP_AGENT_CAPABILITY_MATRIX.md`'ye işlenmiştir.
+- Security Red Team ikinci geçiş review'unda yine **Conditional Go**
+  sonucu verilmiştir:
+  - Policy-level kabul için güvenlik açısından uygun bulunmuştur.
+  - Gerçek MCP bağlantısı için audit logging, capability validation,
+    environment-specific smoke test, security follow-up kaydı ve insan
+    onayı olmadan **No-Go** kararı verilmiştir.
+- `docs/quality/security-reports/SEC-ADR-005-MCP-CONNECTION-PRECONDITIONS.md`
+  security follow-up kaydı PR #14 ile merge edilmiştir.
+- Bu acceptance anında repository'de hiçbir MCP `Active`, `Configured` veya
+  `Connected` durumda değildir; tüm MCP satırları
+  `MCP_AGENT_CAPABILITY_MATRIX.md`'de "Planned" olarak işaretlidir.
+
 ## Consequences
 
 - MCP entegrasyonları için açık, yazılı bir politika çerçevesi oluşur;
@@ -441,11 +478,13 @@ bu ADR yalnızca repository içi Git-tracked dokümanlara dayanır.
 - Yeni dosyalar: `docs/architecture/adr/ADR-005-mcp-tooling-control-plane.md`,
   `docs/decisions/MCP_AGENT_CAPABILITY_MATRIX.md`.
 - Var olan hiçbir dosya bu paket kapsamında değiştirilmemiştir.
-- Bu ADR `Accepted` olmadan önce: (1) insan maintainer review/onayı,
-  (2) MCP runtime enforcement mekanizmasının nasıl teknik olarak
-  bağlanacağına ilişkin bir takip kararı (ayrı ADR/PR), (3) "Security
-  Follow-up / Connection Preconditions" bölümünde belirtilen security
-  follow-up/handoff kaydının oluşturulması beklenmektedir.
+- Bu ADR'nin `Accepted` duruma geçmesi için gereken (1) insan maintainer
+  review/onayı ve (3) "Security Follow-up / Connection Preconditions"
+  bölümünde belirtilen security follow-up kaydı (bkz. "Acceptance
+  Evidence") tamamlanmıştır. (2) MCP runtime enforcement mekanizmasının
+  nasıl teknik olarak bağlanacağına ilişkin takip kararı (ayrı ADR/PR)
+  henüz tamamlanmamıştır ve "Open Questions" bölümünde açık kalmaktadır;
+  bu, gerçek MCP bağlantısı için ayrı bir zorunlu kapıdır.
 - Bu ADR'nin kabulünden sonra, ilgili handoff dokümanının (varsa) bu
   kararı yansıtacak şekilde güncellenmesi insan maintainer/Delivery Lead
   tarafından planlanmalıdır; bu güncelleme bu paketin kapsamı dışındadır.
@@ -453,8 +492,16 @@ bu ADR yalnızca repository içi Git-tracked dokümanlara dayanır.
 ## Approval
 
 - **Required approver:** Human maintainer
-- **Approval status:** Proposed — insan onayı alınmadan `Accepted` sayılmaz.
-- **Approval evidence:** Beklemede.
+- **Approval status:** Accepted
+- **Acceptance date:** 2026-06-25
+- **Evidence references:**
+  - PR #13
+  - PR #14
+  - `docs/quality/security-reports/SEC-ADR-005-MCP-CONNECTION-PRECONDITIONS.md`
+- **Scope note:** Bu acceptance yalnızca bu ADR'nin policy kararını kapsar.
+  Hiçbir gerçek MCP bağlantısı, credential, token, endpoint veya
+  write-capable erişim bu acceptance ile yetkilendirilmemiştir (bkz.
+  "Security Follow-up / Connection Preconditions").
 
 ## Open Questions
 
