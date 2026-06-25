@@ -42,3 +42,7 @@ npm-debug.log*
 pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Python bytecode and test caches
+__pycache__/
+*.py[cod]
