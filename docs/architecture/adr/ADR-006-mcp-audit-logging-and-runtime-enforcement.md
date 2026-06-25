@@ -1,8 +1,9 @@
 # ADR-006 — MCP Audit Logging and Runtime Enforcement Model
 
 - **ADR-ID:** ADR-006
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-25
+- **Acceptance date:** 2026-06-25
 - **Owner:** Human maintainer
 - **Related controls:** PROJECT_CONSTITUTION.md, CLAUDE.md, AGENTS.md,
   ADR-001-role-based-hook-enforcement.md,
@@ -882,11 +883,46 @@ NotebookLM ve Obsidian bu ADR'nin yazımında **kaynak olarak
 kullanılmamıştır**; bu ADR yalnızca repository içi Git-tracked
 dokümanlara dayanır.
 
+## Acceptance Evidence
+
+Bu bölüm, ADR-006'nın **politika ve mimari tasarım kararının** human
+maintainer tarafından kabul edilmesine ilişkin doğrulanmış kanıtları
+kayıt altına alır. Bu kabul yalnızca audit logging ve runtime enforcement
+**mimari ve güvenlik tasarımını** kapsar; hiçbir gerçek MCP bağlantısını,
+credential'ı, hook implementasyonunu, audit sink seçimini, vendor kararını
+veya write-capable erişimi yetkilendirmez.
+
+- ADR-006 ve `MCP_AUDIT_EVENT_CONTRACT.md`, PR #16 ile merge edildi.
+- Security Red Team ilk review'unda beş tasarım bulgusu belirledi:
+  - Bulgu 1: Audit integrity / tamper evidence gereksinimi.
+  - Bulgu 2: Out-of-band ve non-recursive audit writer zorunluluğu.
+  - Bulgu 3: Unknown tool identity için `unclassified` + deny modeli.
+  - Bulgu 4: Durable write acknowledgment / TOCTOU kapanışı.
+  - Bulgu 5: `operation_reference` collision-resistance zorunluluğu.
+- Bu beş bulgu ADR-006 ve `MCP_AUDIT_EVENT_CONTRACT.md` içinde bağlayıcı
+  policy gate'lere dönüştürüldü (bkz. "12."–"16." bölümleri ve
+  "Consequences").
+- Security Red Team ikinci geçişte `GO` sonucu verdi.
+- İkinci review ayrıca closed-schema data minimization (15 alanlık kapalı
+  şema, serbest metin alanının yasaklılığı) ve human-visible failure
+  signal ayrımının (audit event payload'ından bağımsız, out-of-band
+  kavram) doğru biçimde tanımlandığını doğruladı.
+- Bu acceptance anında repository'de hiçbir MCP `Active`, `Configured`
+  veya `Connected` değildir; `MCP_AGENT_CAPABILITY_MATRIX.md`'deki tüm
+  satırlar "Planned" durumundadır.
+- Gerçek MCP bağlantısı; hook implementasyonu, audit sink seçimi,
+  sentetik hook payload doğrulaması, MCP bazlı capability validation,
+  environment-specific smoke test ve insan onayı olmadan **No-Go**'dur.
+
 ## Approval
 
 - **Required approver:** Human maintainer
-- **Approval status:** Proposed (insan onayı alınana kadar `Accepted`
-  durumuna geçirilmeyecektir)
+- **Approval status:** Accepted
+- **Acceptance date:** 2026-06-25
+- **Evidence references:**
+  - PR #16
+  - Security Red Team first-pass review
+  - Security Red Team second-pass review
 - **Approval scope note:** Bu ADR yalnızca audit logging ve runtime
   enforcement **mimari tasarımını** kapsar. Bu ADR'nin onaylanması
   hiçbir gerçek MCP bağlantısını, credential'ı, audit logger
