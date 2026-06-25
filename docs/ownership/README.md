@@ -126,6 +126,23 @@ kontrollerinin yerini almaz.
 
 `ADR-001-role-based-hook-enforcement.md`, Frontend/Backend/Database/QA/
 AI-Data Engineer rolleri için path enforcement'ı bu manifest standardı
-oluşturulana kadar erteledi. Bu manifest ve validator yayınlandıktan sonra,
-hook ve CI enforcement'ın `--authorize-agent` modunu kullanarak bu rolleri
-de teknik olarak kilitlemesi sonraki bir ADR/PR kapsamındadır.
+oluşturulana kadar erteledi. `ADR-003-ownership-runtime-enforcement.md` ile
+bu erteleme sona erdi: runtime enforcement artık aktiftir.
+
+`.claude/hooks/enforce-role-boundaries.sh`, bu beş implementer agent'ın
+(`frontend-engineer`, `backend-engineer`, `database-engineer`,
+`qa-automation`, `ai-data-engineer`) her `Edit`/`Write` çağrısında bu
+script'in `--authorize-agent` modunu çağırarak şu koşulları birlikte
+kontrol eder: mevcut branch `req-XXX-kisa-aciklama` desenine uyuyor mu,
+branch'teki `XXX`'e karşılık gelen `docs/ownership/REQ-XXX.json` manifesti
+var mı, manifest `approved` durumda mı, çağrıyı yapan agent manifestte
+owner olarak tanımlı mı ve hedef dosya yolu o agent'ın kendi `write_paths`
+alanının altında mı. Bu koşullardan biri sağlanmazsa çağrı reddedilir
+(fail-closed); ayrıntılar için `ADR-003-ownership-runtime-enforcement.md`'e
+bakın.
+
+Bu runtime enforcement yalnızca Claude'un `Edit`/`Write` araç çağrılarını
+kapsar. Bash üzerinden yapılan dosya değişikliklerini veya normal
+terminalden yapılan manuel değişiklikleri tek başına kapsamaz; bunlar için
+merge-time CI diff enforcement **sonraki aşamadır** ve henüz bu pakette
+eklenmemiştir.

@@ -70,6 +70,78 @@ raise SystemExit(1)
 PY
 }
 
+
+is_implementer_agent() {
+  case "$1" in
+    frontend-engineer|backend-engineer|database-engineer|qa-automation|ai-data-engineer)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+repository_relative_path() {
+  local raw_path="$1"
+
+  python3 - "$ROOT" "$raw_path" <<'PYTHON'
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1]).resolve(strict=False)
+raw = Path(sys.argv[2]).expanduser()
+target = raw if raw.is_absolute() else root / raw
+target = target.resolve(strict=False)
+
+try:
+    print(target.relative_to(root).as_posix())
+except ValueError:
+    raise SystemExit(1)
+PYTHON
+}
+
+authorize_implementer_write() {
+  local file_path="$1"
+  local branch req_digits manifest_path target_path authorization_error
+
+  branch="$(git -C "$ROOT" branch --show-current 2>/dev/null || true)"
+
+  if [[ ! "$branch" =~ ^req-([0-9]{3,})-.+$ ]]; then
+    deny "Ownership-manifest protection: implementer agents may write only on a branch matching req-XXX-kisa-aciklama. Current branch: ${branch:-detached-or-unknown}"
+    return 1
+  fi
+
+  req_digits="${BASH_REMATCH[1]}"
+  manifest_path="$ROOT/docs/ownership/REQ-${req_digits}.json"
+
+  if [ ! -f "$manifest_path" ]; then
+    deny "Ownership-manifest protection: approved manifest not found for branch $branch. Expected: docs/ownership/REQ-${req_digits}.json"
+    return 1
+  fi
+
+  if ! target_path="$(repository_relative_path "$file_path")"; then
+    deny "Ownership-manifest protection: target path is outside the repository and cannot be authorized: $file_path"
+    return 1
+  fi
+
+  if ! authorization_error="$(
+    python3 "$ROOT/scripts/validate_ownership_manifest.py" \
+      --manifest "$manifest_path" \
+      --root "$ROOT" \
+      --branch "$branch" \
+      --authorize-agent "$AGENT_TYPE" \
+      --target "$target_path" \
+      2>&1
+  )"; then
+    authorization_error="$(printf '%s' "$authorization_error" | tr '\n' ' ' | tr -s ' ')"
+    deny "Ownership-manifest protection: ${authorization_error:-manifest authorization failed}"
+    return 1
+  fi
+
+  return 0
+}
+
 bash_has_blocked_operation() {
   local command="$1"
 
@@ -155,6 +227,11 @@ case "$TOOL_NAME" in
 
     if [ "$AGENT_TYPE" = "delivery-lead" ]; then
       deny "Role-boundary protection: delivery-lead is planning-only and cannot create or edit files."
+      exit 0
+    fi
+
+    if is_implementer_agent "$AGENT_TYPE"; then
+      authorize_implementer_write "$FILE_PATH" || exit 0
       exit 0
     fi
 
