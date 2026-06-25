@@ -22,7 +22,10 @@ Model") altında planlanan **herhangi bir gerçek MCP bağlantısından önce**
 yerine getirilmesi gereken güvenlik ön koşullarını ve insan onay noktalarını
 canonical biçimde kayıt altına alır. Bu doküman:
 
-- ADR-005'in status alanını değiştirmez (ADR-005 hâlâ `Proposed`).
+- ADR-005'in status alanını değiştirmez (ADR-005, PR #13 kapsamında `Accepted`
+  durumuna geçirilmiştir; acceptance date: 2026-06-25 — bu kabul yalnızca
+  policy kararını kapsar; gerçek MCP bağlantısı için "Bağlantı Öncesi Zorunlu
+  Kapılar" listesi değişmeden açık kalmaktadır).
 - Hiçbir MCP'nin `Active`, `Configured`, `Connected` veya kullanıma hazır
   olduğunu iddia etmez.
 - Hiçbir token, endpoint, API key, secret, vendor kurulumu veya komut
@@ -56,7 +59,7 @@ bağlantı için sonuç **No-Go**'dur.
 
 ## Bağlantı Öncesi Zorunlu Kapılar
 
-- [ ] ADR-005 insan maintainer tarafından kabul edildi (`Accepted` durumuna
+- [x] ADR-005 insan maintainer tarafından kabul edildi (`Accepted` durumuna
       geçti).
 - [ ] MCP output'larının untrusted data olduğu ve içindeki talimatların
       action authority olmadığı doğrulandı.
