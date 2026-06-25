@@ -5,19 +5,20 @@
 | Alan               | Değer                                                                                      |
 |--------------------|--------------------------------------------------------------------------------------------|
 | **Requirement ID** | REQ-002                                                                                    |
-| **Status**         | Proposed                                                                                   |
+| **Status**         | Accepted                                                                                   |
 | **Title**          | Local Hook Audit Runtime Spike                                                             |
 | **Date**           | 2026-06-26                                                                                 |
+| **Acceptance Date**| 2026-06-25                                                                                 |
 | **Author**         | Product Analyst                                                                            |
 | **Branch**         | product-req-002-local-hook-audit-runtime                                                   |
 | **AC Reference**   | `docs/product/acceptance-criteria/AC-REQ-002-local-hook-audit-runtime-spike.md`           |
 
 ---
 
-> **Durum notu:** Bu requirement `Proposed` statüsündedir. İnsan maintainer
-> acceptance kararı olmadan runtime spike uygulanamaz. Bu requirement gerçek
-> MCP bağlantısını, production audit sink'i veya credential kullanımını
-> onaylamaz.
+> **Durum notu:** Bu requirement `Accepted` statüsündedir (2026-06-25).
+> Human maintainer acceptance kararı yalnızca disposable local runtime spike
+> implementation'ı için verilmiştir. Bu requirement gerçek MCP bağlantısını,
+> production audit sink'i veya credential kullanımını onaylamaz.
 
 ---
 
@@ -246,6 +247,21 @@ Tüm ayrıntılı kabul kriterleri ayrı bir dosyada tanımlanmıştır:
 
 ---
 
+## Acceptance Evidence
+
+- REQ-002 ve AC-REQ-002 proposal paketi PR #25 ile merge edilmiştir.
+- Human maintainer yalnızca disposable local runtime spike için implementation
+  onayı vermiştir (2026-06-25).
+- Runtime spike yalnızca built-in `Read` + `PreToolUse` davranışını
+  doğrulayacaktır.
+- Temporary configuration repository içine commit edilmeyecek ve spike
+  sonunda temizlenecektir.
+- Gerçek MCP bağlantısı ve production audit enforcement hâlâ No-Go'dur.
+- ADR-005, ADR-006 ve SEC-ADR-005 connection preconditions geçerliliğini
+  korur.
+
+---
+
 ## Human Approval Gates
 
 Bu requirement'ın implementation'a geçmesi için aşağıdaki insan onay
@@ -281,6 +297,10 @@ Implementation'a başlanmadan önce:
   (AC-010).
 - Handoff güncellemesi Delivery Lead veya insan maintainer tarafından
   planlanmalıdır; Product Analyst bu güncellemeyi yapmaz.
+
+**Sonraki adım:** Disposable local workspace içinde, repository ve production
+configuration değiştirilmeden, built-in Read için temporary PreToolUse hook
+runtime spike uygulanacaktır.
 
 ---
 

@@ -6,8 +6,9 @@
 |--------------------|--------------------------------------------------------------------------------------------|
 | **REQ ID**         | REQ-002                                                                                    |
 | **AC Dokümanı**    | AC-REQ-002                                                                                 |
-| **Status**         | Proposed                                                                                   |
+| **Status**         | Accepted                                                                                   |
 | **Date**           | 2026-06-26                                                                                 |
+| **Acceptance Date**| 2026-06-25                                                                                 |
 | **REQ Referansı**  | `docs/product/requirements/REQ-002-local-hook-audit-runtime-spike.md`                     |
 
 ---
@@ -17,8 +18,8 @@
 > davranışını tanımlar. Gerçek MCP bağlantısı, production audit sink,
 > credential veya commit edilebilir hook implementasyonu bu kriterlerin
 > kapsamı dışındadır. Bu AC paketi, REQ-002 insan maintainer tarafından
-> `Proposed` olarak değerlendirme aşamasındadır; implementation'a geçiş
-> ancak insan maintainer acceptance kararı ile başlayabilir.
+> `Accepted` durumuna alınmıştır (2026-06-25); implementation yalnızca
+> disposable local runtime spike kapsamında başlayabilir.
 
 ---
 
@@ -627,14 +628,17 @@ maintainer tarafından onaylanması zorunludur.
 
 **Spike başlamadan önce (pre-spike):**
 
-- REQ-002 ve bu AC dokümanı insan maintainer tarafından gözden
-  geçirilmeli ve "Proposed → Accepted" kararı verilmelidir.
-- Acceptance kararı olmadan spike adımlarına başlanmaz.
+- REQ-002 implementation planning `Accepted` durumdadır (2026-06-25).
+- AC-001 ile AC-011 değişmeden geçerlidir; hiçbir acceptance criteria
+  maddesi azaltılmamış veya gevşetilmemiştir.
+- Spike yalnızca disposable local workspace sınırları içinde
+  başlayabilir; acceptance bu sınırı değiştirmez.
 
 **Spike tamamlandıktan sonra (post-spike):**
 
 - AC-011 kapsamında insan maintainer evidence'ı inceler ve açık
-  karar kaydı oluşturur.
+  karar kaydı oluşturur; bu inceleme spike tamamlandıktan sonra
+  ayrıca yapılacaktır.
 - Karar kaydı, spike'ın neyi kanıtladığını ve neyi
   yetkilendirmediğini net biçimde ifade eder.
 
@@ -652,9 +656,13 @@ Gerçek bağlantı için gerekli zorunlu kapıların tam listesi:
 
 ## Implementation Handoff
 
-**Sonraki adım:** REQ-002 insan maintainer tarafından accepted olarak
-onaylanacak; ardından ownership manifest hazırlanacak ve spike yalnızca
-onaylı, disposable workspace sınırları içinde yürütülecektir.
+**Sonraki adım:** Disposable local workspace içinde, repository ve production
+configuration değiştirilmeden, built-in Read için temporary PreToolUse hook
+runtime spike uygulanacaktır.
+
+REQ-002 insan maintainer tarafından accepted olarak onaylanmıştır
+(2026-06-25); ownership manifest hazırlanacak ve spike yalnızca onaylı,
+disposable workspace sınırları içinde yürütülecektir.
 
 Bu handoff güncellemesinin Delivery Lead veya insan maintainer tarafından
 planlanması gerekir; Product Analyst bu güncellemeyi yapmaz.
