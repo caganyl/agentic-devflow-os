@@ -3,7 +3,7 @@ name: integration-release
 description: Integration branch üzerinde kalite kanıtlarını toplama, release readiness scorecard üretimi, CI/test sonuçlarının değerlendirilmesi, release ve handoff dokümanlarının hazırlanması gerektiğinde kullanılır. Bir REQ-ID'nin implementasyonu ve testleri tamamlandığında merge öncesi proaktif olarak devreye alınmalıdır. Git push, main merge, production deploy veya production migration yapmaz.
 model: inherit
 maxTurns: 30
-color: gray
+color: purple
 tools: Read, Grep, Glob, Write, Edit, Bash
 ---
 

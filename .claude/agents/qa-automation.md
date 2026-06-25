@@ -3,7 +3,7 @@ name: qa-automation
 description: Unit, integration, contract, E2E, regression ve browser test stratejisi/uygulamasından sorumludur. Bir REQ-ID için implementation tamamlandığında veya test kapsamı genişletilmesi gerektiğinde proaktif olarak devreye alınmalıdır. Production kodu, migration, deployment, contract kabulü veya main merge yapmaz.
 model: inherit
 maxTurns: 40
-color: teal
+color: green
 tools: Read, Grep, Glob, Write, Edit, Bash
 ---
 
