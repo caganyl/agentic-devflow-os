@@ -61,6 +61,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -79,9 +80,16 @@ jobs:
             exit 1
           fi
 
-          git fetch --no-tags --no-recurse-submodules --depth=1 origin "$BASE_SHA"
-          git fetch --no-tags --no-recurse-submodules --depth=1 origin \
-            "refs/pull/${PR_NUMBER}/head"
+          AUTH_HEADER="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
+            fetch --no-tags --no-recurse-submodules --depth=1 origin "$BASE_SHA"
+
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
+            fetch --no-tags --no-recurse-submodules --depth=1 origin \
+              "refs/pull/${PR_NUMBER}/head"
+
+          unset AUTH_HEADER
 
           test "$(git rev-parse --verify "${HEAD_SHA}^{commit}")" = "$HEAD_SHA"
 
@@ -109,6 +117,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -130,8 +139,13 @@ jobs:
           actual_base="$(git rev-parse --verify HEAD)"
           test "$actual_base" = "$BASE_SHA"
 
-          git fetch --no-tags --no-recurse-submodules --depth=1 origin \
-            "refs/pull/${PR_NUMBER}/head"
+          AUTH_HEADER="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
+            fetch --no-tags --no-recurse-submodules --depth=1 origin \
+              "refs/pull/${PR_NUMBER}/head"
+
+          unset AUTH_HEADER
 
           actual_head="$(git rev-parse --verify FETCH_HEAD)"
           test "$actual_head" = "$HEAD_SHA"
