@@ -1,0 +1,44 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+secrets/
+config/credentials.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Dependencies and build artifacts
+node_modules/
+dist/
+build/
+coverage/
+.next/
+out/
+.cache/
+tmp/
+temp/
+
+# Test artifacts
+playwright-report/
+test-results/
+blob-report/
+
+# Local Claude Code state
+.claude/settings.local.json
+.claude/worktrees/
+.claude/projects/
+.mcp.local.json
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
