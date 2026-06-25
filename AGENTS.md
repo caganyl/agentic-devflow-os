@@ -15,5 +15,6 @@ Bu dosya Agentic DevFlow OS içindeki standart rolleri listeler.
 - Design Reviewer — UX, accessibility, visual quality ve motion
 - EvalOps Reviewer — golden dataset, regression, latency ve cost evaluation
 - Integration/Release — integration branch, CI, scorecard ve PR hazırlığı
+- Governance Operations Author — REQ lifecycle, human merge checklist, handoff şablonları ve statik ownership prosedürleri
 
 Her role ait gerçek agent tanımı daha sonra `.claude/agents/` altında bulunacaktır.

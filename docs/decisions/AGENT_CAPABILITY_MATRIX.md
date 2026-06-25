@@ -17,6 +17,7 @@ Bu dosya, Agentic DevFlow OS içindeki rollerin hangi tür değişiklikleri yapa
 | Design Reviewer | Rapor-only | Hook: path allowlist (`design/reviews`, `docs/quality/accessibility`); Bash deny | Governance branch path sınırı | `design/reviews/**`, `docs/quality/accessibility/**` | Hayır | UX kararı insanda |
 | EvalOps Reviewer | Rapor/eval-only | Hook: path allowlist (`evals/**`, `docs/ai/**`); Bash global mutation/deploy/migration bloklarıyla sınırlı | Governance branch path sınırı | `evals/**`, `docs/ai/**` | Sınırlı (non-production eval/test; mutating Bash blok) | Release kalite önerisi insanda |
 | Integration / Release | Release/handoff-only | Hook: path allowlist (`docs/release`, `docs/handoffs`); Bash global mutation/deploy/migration bloklarıyla sınırlı | Governance branch path sınırı | `docs/release/**`, `docs/handoffs/**` | Sınırlı (read/test; mutating Bash blok) | Main merge ve deploy insanda |
+| Governance Operations Author | Runbook/checklist/template-only | Hook: dar path allowlist; Bash deny | Governance branch path sınırı | `docs/operations/**`, `docs/templates/**`, `docs/ownership/README.md`, `docs/ownership/REGISTRY_BRANCH_RUNBOOK.md` | Hayır | Prosedür ve statik rehber onayı insanda; authority manifesti değiştiremez |
 
 ## Runtime Enforcement Notları
 
@@ -39,59 +40,41 @@ Bu dosya, Agentic DevFlow OS içindeki rollerin hangi tür değişiklikleri yapa
   `--head-sha` arasındaki tam diff'ini merge-time'da denetler. Bkz.
   `docs/architecture/adr/ADR-004-ownership-ci-diff-enforcement.md`.
 - **CI agent identity doğrulamaz; yalnızca path authority doğrular.**
-  Implementer agent satırlarındaki ("Aynı" yazan) CI merge gate, yetkiyi
-  **yalnızca base commit'teki** `docs/ownership/REQ-XXX.json` manifestinden
-  alır; PR head'indeki manifest yetki kaynağı olarak kullanılmaz ve
-  `docs/ownership/` altındaki herhangi bir diff değişikliği reddedilir. Bu,
-  bir implementation PR'ının kendi manifestini değiştirerek kendine yeni
-  write authority vermesini önler. Agent kimliği doğrulaması yalnızca
-  runtime hook'un (yukarıdaki sütun) sorumluluğundadır.
-- Document/review rollerinin ("Governance branch path sınırı" yazan
-  satırlar) bulunduğu branch'ler `req-XXX-kisa-aciklama` ve
-  `ownership-REQ-XXX-kisa-aciklama` desenlerinin hiçbirine uymadığı için CI
-  bunları **generic governance/control-plane branch** olarak ele alır:
-  yalnızca `.claude/`, `.github/`, `docs/`, `scripts/`, `tests/`,
-  `design/`, `evals/` önekli path'lerde veya kök seviyedeki birkaç sabit
-  dosyada değişiklik kabul edilir; bunun dışındaki application path
-  değişiklikleri (örnek: `apps/web/src/App.tsx`) reddedilir.
-- **Generic governance branch authority manifest dosyalarını
-  (`docs/ownership/REQ-<en az 3 rakam>.json`) değiştiremez.** `docs/`
-  öneki bu branch sınıfında genel olarak izinli olsa da, yalnızca bu exact
-  pattern'e eşleşen dosya adları açıkça reddedilir. Bu, Security Red Team
-  review'ın tespit ettiği bir authority-escalation bulgusuna yanıttır:
-  düzeltme öncesinde herhangi bir `req-XXX-*` olmayan branch sahte/
-  genişletilmiş bir manifest oluşturabilir ve bu manifest daha sonra bir
-  req branch için base authority haline gelebilirdi. Statik ownership
-  dokümanları (`docs/ownership/README.md`, `TEMPLATE.json`, `schema.json`)
-  bu pattern'e uymadığından authority kaynağı değildir ve genel `docs/`
-  allowlist'i altında generic governance branch'lerde değiştirilebilir;
-  bunların onayı diğer governance değişiklikleri gibi insan review
-  boundary'sindedir.
-- **Ownership registry branch manifest lifecycle için ayrı bir
-  control-plane akışıdır.** `ownership-REQ-XXX-kisa-aciklama` deseniyle
-  eşleşen branch'ler yalnızca kendi exact
-  `docs/ownership/REQ-XXX.json` dosyasını değiştirebilir; başka hiçbir
-  path (application kodu, script, workflow, `.claude`, başka bir
-  manifest, README, requirement, contract, ADR, test) bu branch'te
-  değişemez ve manifest silinemez.
-- **Registry branch değişikliği insan review/approval gerektirir.** CI,
-  `status: approved` ve `approval.approved_by`/`approved_at` alanlarını
-  teknik olarak doğrulayabilir, ancak approval'ın gerçekten bir insan
-  tarafından verildiğini kriptografik olarak kanıtlayamaz; bu garanti
-  GitHub PR review/branch protection/CODEOWNERS sürecinden gelir.
-- **Symlink ve gitlink/submodule path'leri CI diff gate tarafından reject
-  edilir.** Diff `git diff --raw` ile mode bilgisiyle hesaplanır;
-  `120000` (symlink) veya `160000` (gitlink/submodule) mode'u görülen
-  herhangi bir path, branch sınıfından bağımsız olarak (req, registry
-  veya governance) fail-closed reddedilir.
-- **`.claude`, `.github` ve `scripts` değişiklikleri için insan review
-  boundary'si sürer; CODEOWNERS/branch protection sonraki GitHub
-  governance adımında bağlanacaktır.** CI diff validator bu dosyaların
-  gerçekten bir insan tarafından değiştirildiğini kriptografik olarak
-  kanıtlamaz; bu kontrol path authority'sinin ötesindedir.
-- CI diff validator ve testleri hazır; workflow bağlama bekliyor.
-  (`.github/workflows/ownership-governance.yml` ayrı bir ADR/PR kapsamında
-  eklenecektir.)
+  Runtime hook agent kimliğini ve anlık `Edit`/`Write` çağrısını denetler.
+  CI ise implementation diff'inin yetkili path alanlarında kalıp kalmadığını
+  doğrular.
+- `req-XXX-kisa-aciklama` implementation branch'lerinde authority yalnızca
+  base commit içindeki approved `docs/ownership/REQ-XXX.json` manifestidir.
+  PR head'indeki authority manifest yetki kaynağı olarak kullanılmaz ve
+  implementation branch içindeki authority manifest diff'i reddedilir.
+- Generic governance/control-plane branch'ler yalnızca `.claude/`,
+  `.github/`, `docs/`, `scripts/`, `tests/`, `design/`, `evals/` önekli
+  path'lerde veya izinli kök dosyalarda değişiklik yapabilir. Application
+  path değişiklikleri reddedilir.
+- **Generic governance branch authority manifest dosyalarını**
+  (`docs/ownership/REQ-<en az 3 rakam>.json`) değiştiremez. Buna karşılık
+  statik ownership dokümanları (`docs/ownership/README.md`,
+  `TEMPLATE.json`, `schema.json`) authority kaynağı değildir; generic
+  governance branch'te insan review boundary'si altında güncellenebilir.
+- `ownership-REQ-XXX-kisa-aciklama` registry branch'leri yalnızca kendi
+  exact `docs/ownership/REQ-XXX.json` manifestini değiştirebilir. Başka
+  hiçbir dosya değişemez ve manifest silinemez.
+- Symlink (`120000`) ve gitlink/submodule (`160000`) diff'leri branch
+  sınıfından bağımsız olarak fail-closed reddedilir.
+- `Ownership Governance` GitHub Actions workflow'u aktiftir. Draft smoke
+  PR #9 üzerinde hem `PR Quality` hem `Ownership Diff Gate` başarılı
+  çalışmıştır. Workflow token'ı repository düzeyinde read-only olarak
+  doğrulanmıştır.
+- Mevcut private repository planında branch protection ve rulesets
+  zorlaması kullanılamamaktadır. Bu nedenle required status check teknik
+  olarak enforce edilmez; geçiş döneminde insan merge boundary zorunludur:
+  `Ownership Diff Gate` başarılı olmalı, `PR Quality` başarılı olmalı,
+  insan diff review tamamlanmalı ve merge insan maintainer tarafından
+  yapılmalıdır.
+- `.claude`, `.github` ve `scripts` değişiklikleri için insan review
+  boundary'si sürer. GitHub Pro veya uygun plan erişimi sağlandığında
+  CODEOWNERS/branch protection ile `Ownership Diff Gate` required check
+  olarak bağlanmalıdır.
 
 ## Evrensel Kurallar
 
