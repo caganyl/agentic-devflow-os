@@ -6,8 +6,9 @@
 |-------------------|-----------------------------------------------------------------------------------|
 | **REQ ID**        | REQ-001                                                                           |
 | **AC Dokümanı**   | AC-REQ-001                                                                        |
-| **Status**        | Proposed                                                                          |
+| **Status**        | Accepted                                                                          |
 | **Date**          | 2026-06-25                                                                        |
+| **Acceptance Date**| 2026-06-25                                                                       |
 | **REQ Referansı** | `docs/product/requirements/REQ-001-mcp-hook-lifecycle-synthetic-validation.md`    |
 
 ---
@@ -15,7 +16,8 @@
 > **Önemli:** Bu AC dokümanı yalnızca sentetik validation test paketinin
 > davranışını tanımlar. Gerçek MCP bağlantısı, hook implementasyonu,
 > credential veya audit logging altyapısı bu kriterlerin kapsamı dışındadır.
-> İnsan onayı olmadan implementation başlamaz.
+> Bu AC paketi implementation planning için **accepted** olarak onaylanmıştır
+> (2026-06-25). Gerçek MCP bağlantısı için ayrı insan onayı gereklidir.
 
 ---
 
@@ -521,6 +523,16 @@ maintainer tarafından onaylanması zorunludur. Her AC için:
 - Test evidence (AC-011) insan maintainer tarafından incelenmeli ve
   "sentetik validation tamamlandı" kararı açıkça kaydedilmelidir.
 
+**Acceptance durumu (2026-06-25):**
+
+- REQ-001 implementation planning için accepted olarak onaylanmıştır.
+- AC-001 ile AC-011 değişmeden geçerlidir; hiçbir AC maddesi bu
+  acceptance ile azaltılmamış veya gevşetilmemiştir.
+- AC-011 test evidence gereksinimi implementation sonrasında ayrıca
+  kanıtlanacaktır; bu acceptance AC-011'i tamamlanmış saymaz.
+- Gerçek MCP bağlantısı için ayrı insan onayı gerektiği açık kalmaktadır;
+  bu acceptance gerçek bağlantı izni vermez.
+
 **REQ-001'in tamamlanması, gerçek MCP bağlantısı veya audit hook
 implementasyonu için otomatik izin vermez. Gerçek bağlantı; audit sink
 seçimi, append-only/tamper-evident doğrulama, out-of-band/non-recursive
@@ -529,6 +541,17 @@ credential storage onayı ve MCP bazlı human maintainer onayı gerektirir.**
 
 Gerçek bağlantı için gerekli zorunlu kapıların tam listesi:
 `docs/quality/security-reports/SEC-ADR-005-MCP-CONNECTION-PRECONDITIONS.md`
+
+---
+
+## Implementation Handoff
+
+**Sonraki adım:** REQ-001 için ownership manifest hazırlanacak; ardından
+QA Automation agent yalnızca onaylı test yolu altında offline sentetik
+validation testlerini implement edecektir.
+
+Bu handoff güncellemesinin Delivery Lead veya insan maintainer tarafından
+planlanması gerekir; Product Analyst bu güncellemeyi yapmaz.
 
 ---
 
