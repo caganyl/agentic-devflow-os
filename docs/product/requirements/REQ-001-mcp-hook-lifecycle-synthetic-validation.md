@@ -5,19 +5,21 @@
 | Alan              | Değer                                                                             |
 |-------------------|-----------------------------------------------------------------------------------|
 | **Requirement ID**| REQ-001                                                                           |
-| **Status**        | Proposed                                                                          |
+| **Status**        | Accepted                                                                          |
 | **Title**         | MCP Hook Lifecycle Synthetic Validation                                           |
 | **Date**          | 2026-06-25                                                                        |
+| **Acceptance Date**| 2026-06-25                                                                       |
 | **Author**        | Product Analyst                                                                   |
 | **Branch**        | product-req-001-mcp-hook-lifecycle-validation                                     |
 | **AC Reference**  | `docs/product/acceptance-criteria/AC-REQ-001-mcp-hook-lifecycle-synthetic-validation.md` |
 
 ---
 
-> **Durum notu:** Bu requirement `Proposed` statüsündedir.
-> Bu requirement gerçek MCP bağlantısı, hook config veya production
-> kullanımını onaylamaz. İnsan acceptance kararı olmadan implementation
-> başlamaz.
+> **Durum notu:** Bu requirement `Accepted` statüsündedir. Acceptance tarihi: 2026-06-25.
+> Bu requirement yalnızca **offline ve sentetik test paketi** implementation'ı
+> için onaylanmıştır. Gerçek MCP bağlantısı, hook config veya production
+> kullanımı bu acceptance kapsamında değildir. ADR-005 ve ADR-006 içindeki
+> gerçek MCP connection No-Go kapıları geçerliliğini korur.
 
 ---
 
@@ -323,6 +325,26 @@ içermelidir:
 
 Bu handoff güncellemesinin Delivery Lead veya insan maintainer tarafından
 planlanması gerekir; Product Analyst bu güncellemeyi yapmaz.
+
+**Sonraki adım:** REQ-001 için ownership manifest hazırlanacak; ardından
+QA Automation agent yalnızca onaylı test yolu altında offline sentetik
+validation testlerini implement edecektir.
+
+---
+
+## Acceptance Evidence
+
+Bu bölüm, REQ-001'in human maintainer tarafından kabul edilmesine ilişkin
+kanıtları kayıt altına alır. Bu kabul yalnızca aşağıda belirtilen dar
+kapsamı yetkilendirir.
+
+- REQ-001 ve AC-REQ-001 proposal paketi ilgili PR ile merge edilmiştir.
+- Human maintainer, yalnızca **offline ve sentetik test paketi** implementation'ı
+  için kabul vermiştir.
+- Test paketi gerçek MCP bağlantısı, gerçek hook config'i, network,
+  credential veya endpoint kullanmayacaktır.
+- ADR-005 ve ADR-006 içindeki gerçek MCP connection No-Go kapıları
+  geçerliliğini korur; bu acceptance onları kapatmaz veya atlamaz.
 
 ---
 
