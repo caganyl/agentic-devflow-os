@@ -122,11 +122,12 @@ veya eşdeğer runtime doğrulaması yalnızca built-in `Read` tool için
 
 ---
 
-## AC-003 — Gerçek Built-In `Read` Çağrısında Hook'un Çalıştığına Dair Local Evidence
+## AC-003 — Gerçek Built-In `Read` Çağrısında Hook'un Tetiklendiğine ve Sanitised Runtime Evidence Record Üretildiğine Dair Kanıt
 
 **Başlık:** Disposable workspace içinde gerçek bir built-in `Read` tool
-çağrısı tetiklendiğinde, hook script çalışır ve yerel audit event kaydı
-üretilir.
+çağrısı tetiklendiğinde, hook script çalışır ve non-canonical, sanitised
+7 alanlı local runtime evidence record üretilir. Bu kayıt MCP Audit Event
+Contract'a uygun canonical audit event değildir.
 
 **Given:**
 
@@ -146,84 +147,99 @@ built-in `Read` tool çağrısı yapılır.
 - Hook script, `Read` çağrısı gerçekleştiğinde çalıştırılmış olmalıdır.
 - Hook script'in stdin üzerinden JSON payload aldığı doğrulanabilir
   olmalıdır (ör. yerel log satırı, artifact'ın üretilmiş olması).
-- Yerel audit event kaydı (dosya veya log girişi) üretilmiş olmalıdır.
-- Üretilen audit event kaydı `event_phase: "PreToolUse"` içermelidir.
-- `mcp_server` ve `mcp_tool` alanları, built-in `Read` tool için
-  tanımlanmış canonical etiketlerle doldurulmuş olmalıdır; ham
-  runtime string doğrudan yazılmış olmamalıdır.
+- Non-canonical, sanitised local runtime evidence record (dosya veya log
+  girişi) üretilmiş olmalıdır.
+- Üretilen evidence record `hook_event: "PreToolUse"` ve
+  `tool_class: "builtin_read"` içermelidir.
+- Evidence record içinde `mcp_server`, `mcp_tool` veya `unclassified`
+  alanları **bulunmamalıdır**; bu kayıt canonical MCP audit event
+  değildir ve bu alanları taşımaz.
 - Artifact üretim zamanı ile `Read` çağrısının gerçekleştiği zaman
   ilişkilendirilebilir olmalıdır.
 
 **Evidence:**
 
-- Üretilen local audit artifact'ın dosya yolu ve içeriği (ham veri
-  içermeksizin); `event_phase: "PreToolUse"` varlığı.
-- Hook'un çalıştığını gösteren log satırı veya artifact zaman
-  damgası ile `Read` çağrısı zamanının örtüşmesi.
-- `mcp_server` ve `mcp_tool` alanlarının `^[a-z0-9][a-z0-9._-]{0,63}$`
-  formatına uygun canonical değerler içerdiğinin gösterimi.
+- Üretilen local evidence artifact'ın içeriği (ham veri içermeksizin);
+  `hook_event: "PreToolUse"` ve `tool_class: "builtin_read"` varlığı.
+- Hook'un çalıştığını gösteren log satırı veya artifact zaman damgası
+  ile `Read` çağrısı zamanının örtüşmesi.
+- Evidence record'ın `mcp_server`, `mcp_tool` veya `unclassified` alanı
+  **içermediğinin** doğrulama notu.
 
 **Failure Condition:**
 
-- Yerel audit artifact üretilmemişse.
-- Artifact boşsa veya `event_phase` içermiyorsa.
+- Local evidence artifact üretilmemişse.
+- Artifact boşsa veya `hook_event`/`tool_class` içermiyorsa.
 - Hook script'in çalışmadığına dair kanıt varsa (artifact oluşmadı,
   log yok).
-- `mcp_server` veya `mcp_tool` alanında ham runtime string doğrudan
-  yazılmışsa.
+- Evidence record'da `mcp_server`, `mcp_tool` veya `unclassified`
+  alanı bulunuyorsa.
 - Artifact'ın `Read` çağrısına değil, başka bir olaya ait olduğu
   belirsizse.
 
 ---
 
-## AC-004 — Üretilen Audit Event'in Tam Olarak 15 Alan Taşıması
+## AC-004 — Üretilen Non-Canonical Evidence Record'ın 7 Alanlı Sanitised Schema ile Uyumlu Olması
 
 **Başlık:** Gerçek `Read` çağrısı sonrası hook tarafından üretilen yerel
-audit event, `MCP_AUDIT_EVENT_CONTRACT.md`'de tanımlı tam olarak 15
-zorunlu alanı içerir; ne eksik alan ne de ek alan bulunur.
+non-canonical evidence record, tam olarak 7 zorunlu alanı içerir; ne eksik
+alan ne de ek alan bulunur. Bu kayıt `MCP_AUDIT_EVENT_CONTRACT.md`'deki
+canonical 15 alanlık şemaya uymaz ve uyduğunu iddia etmez.
 
 **Given:**
 
-- AC-003 kapsamında gerçek `Read` çağrısı tetiklenmiş ve local audit
+- AC-003 kapsamında gerçek `Read` çağrısı tetiklenmiş ve local evidence
   artifact üretilmiştir.
-- `MCP_AUDIT_EVENT_CONTRACT.md`'deki 15 zorunlu alan listesi referans
-  alınmıştır:
-  `schema_version`, `event_id`, `timestamp`, `session_reference`,
-  `operation_reference`, `agent_type`, `event_phase`, `mcp_server`,
-  `mcp_tool`, `action_class`, `environment_scope`, `policy_decision`,
-  `outcome`, `failure_category`, `audit_record_version`.
+- Non-canonical evidence record için zorunlu 7 alan listesi:
+  `evidence_schema_version`, `evidence_id`, `timestamp`, `hook_event`,
+  `tool_class`, `test_path`, `observation`.
 
 **When:**
 
-Yerel audit artifact içeriği incelenir (programatik veya manuel) ve
+Yerel evidence artifact içeriği incelenir (programatik veya manuel) ve
 alan listesi sayılır.
 
 **Then:**
 
-- Audit event payload'ındaki alan sayısı tam olarak **15** olmalıdır.
-- Yukarıdaki 15 zorunlu alandan her biri event'te bulunmalıdır.
-- 15 alan dışında hiçbir ek alan (`note`, `notes`, `message`,
-  `error_message`, `details`, `description`, `context`, `metadata`,
-  `debug`, `raw_input`, `raw_output`, `prompt`, `url`, `header`,
-  `file_path`, `exception`, `reason` veya başka herhangi bir alan)
-  payload'da bulunmamalıdır.
-- `failure_category` alanı, `outcome` `failure` veya `blocked`
-  olmadığı durumlarda `null` olabilir; ancak bu durumda alan
-  **sayısı 14'e düşmemelidir** (alan var ama `null`'dur).
+- Evidence record payload'ındaki alan sayısı tam olarak **7** olmalıdır.
+- Yukarıdaki 7 zorunlu alandan her biri record'da bulunmalıdır.
+- `hook_event` değeri `PreToolUse` olmalıdır (sabit).
+- `tool_class` değeri `builtin_read` olmalıdır (sabit).
+- `test_path` değeri yalnızca `writer_available` veya
+  `writer_unavailable` olmalıdır.
+- `observation` değeri yalnızca `allow_observed` veya `deny_observed`
+  olmalıdır.
+- `evidence_id` alanı yalnızca disposable local workspace içinde
+  üretilen random test referansı olmalıdır; session_id, tool_use_id
+  veya raw agent identity'den türetilmemiş olmalıdır.
+- 7 alan dışında hiçbir ek alan — özellikle `mcp_server`, `mcp_tool`,
+  `unclassified`, `session_reference`, `operation_reference`,
+  `agent_type`, `schema_version`, `event_id`, `action_class`,
+  `environment_scope`, `policy_decision`, `outcome`, `failure_category`,
+  `audit_record_version`, `note`, `notes`, `message`, `error_message`,
+  `details`, `description`, `context`, `metadata`, `debug`,
+  `raw_input`, `raw_output`, `prompt`, `url`, `header`, `file_path`,
+  `exception`, `reason` veya başka herhangi bir alan —
+  payload'da **bulunmamalıdır**.
 
 **Evidence:**
 
-- Artifact içeriğinin alan sayısını gösteren kayıt; "alan sayısı: 15,
-  beklenen: 15" formatında doğrulama notu.
-- 15 zorunlu alanın tamamının listesi ve artifact'taki karşılıkları.
-- Yasak alan adlarının artifact'ta bulunmadığını gösteren negatif
+- Artifact içeriğinin alan sayısını gösteren kayıt; "alan sayısı: 7,
+  beklenen: 7" formatında doğrulama notu.
+- 7 zorunlu alanın tamamının listesi ve artifact'taki karşılıkları.
+- Canonical MCP audit contract alanlarının (`mcp_server`, `mcp_tool`,
+  `unclassified` dahil) artifact'ta bulunmadığını gösteren negatif
   inceleme notu.
 
 **Failure Condition:**
 
-- Artifact'taki alan sayısı 15'ten fazla veya azsa.
-- 15 zorunlu alandan herhangi biri eksikse.
-- Yasak alan listesindeki herhangi bir isimde alan event'te bulunuyorsa.
+- Artifact'taki alan sayısı 7'den fazla veya azsa.
+- 7 zorunlu alandan herhangi biri eksikse.
+- `mcp_server`, `mcp_tool`, `unclassified`, `session_reference`,
+  `operation_reference` veya başka canonical MCP audit alanı
+  record'da bulunuyorsa.
+- `hook_event`, `tool_class`, `test_path` veya `observation` alanında
+  izin verilmemiş bir değer varsa.
 - Alan sayımı gerçekleştirilmemişse veya belirsizse.
 
 ---
@@ -268,17 +284,16 @@ bulunmamalıdır:
 - Dosyanın gerçek path'i artifact'ta yer almamalıdır.
 - Payload'dan gelen ham parametreler artifact'a kopyalanmamış olmalıdır.
 - Serbest metin içerikli hiçbir alan artifact'ta bulunmamalıdır.
-- `mcp_server` ve `mcp_tool` alanlarında yalnızca canonical etiket
-  bulunmalıdır; ham runtime string ya da dosya adı türevleri
-  bulunmamalıdır.
+- Evidence record içinde `mcp_server`, `mcp_tool` veya `unclassified`
+  alanları bulunmamalıdır; bu kayıt MCP Audit Event Contract alanlarını
+  taşımaz.
 
 **Evidence:**
 
 - Her yasak veri kategorisi için artifact içeriğinin bu kategoriyi
   içermediğini gösteren ayrı negatif inceleme notu.
-- `mcp_server` ve `mcp_tool` alanlarının gerçek dosya yolu, URL veya
-  ham string değil; yalnızca lowercase ASCII canonical etiket
-  içerdiğinin gösterimi.
+- Evidence record'da `mcp_server`, `mcp_tool` veya `unclassified`
+  alanının bulunmadığının doğrulama notu.
 
 **Failure Condition:**
 
@@ -288,62 +303,66 @@ bulunmamalıdır:
 - Ham tool input (Path parametresi veya eşdeğeri) artifact'ta
   bulunursa.
 - Serbest metin içerikli herhangi bir alan artifact'ta bulunursa.
+- Evidence record'da `mcp_server`, `mcp_tool` veya `unclassified` alanı
+  bulunuyorsa.
 - Redaction veya maskeleme mekanizması uygulanmış olsa bile, orijinal
   değer kısmi olarak hâlâ görünüyorsa.
 
 ---
 
-## AC-006 — Raw Runtime Reference'ların Persist Edilmemesi
+## AC-006 — Raw Runtime Identity'nin Hiçbir Evidence Record Alanında Persist Edilmemesi
 
-**Başlık:** Yerel audit artifact'taki `session_reference` ve
-`operation_reference` alanları; raw session kimliği, raw `tool_use_id`
-veya başka bir raw runtime tanımlayıcı içermez; yalnızca test-only
-privacy-preserving referanslar kullanılır.
+**Başlık:** Non-canonical local evidence record; raw session kimliği, raw
+`tool_use_id`, raw agent identity veya başka bir raw runtime tanımlayıcı
+içermez. `evidence_id` yalnızca disposable local workspace içinde üretilen
+random test referansıdır.
 
 **Given:**
 
 - Claude Code, çalışma sırasında iç session ve operation kimliklerini
   üretmektedir (bunlar hook'a gelen JSON payload'ında bulunabilir).
-- Yerel audit artifact üretilmiştir (AC-003).
+- Yerel evidence artifact üretilmiştir (AC-003).
 
 **When:**
 
-Yerel audit artifact'taki `session_reference` ve `operation_reference`
-alanları incelenir.
+Yerel evidence artifact'ın tüm alanları incelenir.
 
 **Then:**
 
-- `session_reference` alanı, Claude Code'un iç session kimliğinin ham
-  biçimini içermemelidir; yalnızca test-only, privacy-preserving bir
-  referans değeri (ör. sabit prefix, local sayaç, hash türevi veya
-  eşdeğer) içermelidir.
-- `operation_reference` alanı, raw `tool_use_id`, transcript path,
-  prompt içeriği veya ham runtime tanımlayıcısı içermemelidir; yalnızca
-  test-only, privacy-preserving bir referans değeri içermelidir.
-- İki alan birbirinden farklı granülaritede olmalıdır
-  (`session_reference` oturum seviyesinde, `operation_reference` çağrı
-  seviyesinde); ancak her ikisi de raw runtime verisi taşımamalıdır.
-- Her iki alanın değeri insan maintainer tarafından ham runtime verisi
+- `evidence_id` alanı Claude Code'un iç session kimliğinden,
+  `tool_use_id` değerinden veya başka bir raw runtime tanımlayıcıdan
+  türetilmemiş olmalıdır; yalnızca disposable local workspace içinde
+  üretilen random test referansı değeri içermelidir.
+- Evidence record'ın hiçbir alanında raw session ID, raw tool_use_id,
+  raw agent identity veya transcript path bulunmamalıdır.
+- Evidence record içinde `session_reference`, `operation_reference` veya
+  `agent_type` alanları bulunmamalıdır (bu alanlar canonical MCP Audit
+  Event Contract'a aittir; non-canonical evidence record bu alanları
+  taşımaz).
+- Human maintainer tarafından `evidence_id`'nin raw runtime verisi
   içermediği gözlemlenebilir biçimde doğrulanabilir olmalıdır.
 
 **Evidence:**
 
-- `session_reference` ve `operation_reference` alanlarının artifact
-  içindeki değerleri; bu değerlerin test-only niteliğini gösterir
-  insan maintainer inceleme notu.
-- Alanların raw runtime kimliği olmadığını destekleyen açıklama (ör.
-  "sabit test prefix kullanıldı", "lokal sayaç değeri", "hash türevi").
+- `evidence_id` alanının artifact içindeki değeri; bu değerin raw
+  runtime kimliği olmadığını gösterir insan maintainer inceleme notu.
+- Artifact'ın `session_reference`, `operation_reference` veya `agent_type`
+  alanı içermediğinin doğrulama notu.
+- `evidence_id`'nin disposable local referans niteliğini destekleyen
+  açıklama (ör. "random UUID", "lokal sayaç değeri").
 
 **Failure Condition:**
 
-- `session_reference` veya `operation_reference` alanında Claude Code'un
-  iç session tanımlayıcısının ham biçimi bulunursa.
-- `operation_reference` alanında raw `tool_use_id` veya transcript path
-  tespit edilirse.
-- Alanların raw runtime verisi içerip içermediği doğrulanamıyorsa
-  (belirsizse).
-- İki alanın farklı granülarite taşıdığı görülmüyorsa ve birbirinin
-  kopyası ise.
+- `evidence_id` alanında Claude Code'un iç session tanımlayıcısının ham
+  biçimi bulunursa.
+- `evidence_id` alanında raw `tool_use_id` veya transcript path tespit
+  edilirse.
+- Herhangi bir alanda raw session ID, raw tool_use_id veya raw agent
+  identity bulunursa.
+- Evidence record'da `session_reference`, `operation_reference` veya
+  `agent_type` alanı bulunursa.
+- `evidence_id`'nin raw runtime verisi içerip içermediği
+  doğrulanamıyorsa.
 
 ---
 
@@ -367,27 +386,31 @@ writer'a event yazar; write başarıyla tamamlanır.
 
 - `Read` tool çağrısı başarıyla yürütülmüş olmalıdır; deny ile
   kesilmemelidir.
-- Yerel audit artifact `policy_decision: "allow"` veya eşdeğer bir
-  "proceed" sinyali içermelidir; ya da başarılı yürütme kanıtı
-  (ör. `outcome: "success"`) görünür olmalıdır.
-- Hook'un başarılı write path'ini takip ettiğine dair kanıt
-  mevcuttur (artifact üretildi, deny event'i yok).
+- Non-canonical evidence record `observation: "allow_observed"` ve
+  `test_path: "writer_available"` içermelidir.
+- Bu başarılı path kanıtı yalnızca hook/runtime davranışını kanıtlar;
+  canonical MCP audit event validation değildir. Evidence record
+  `policy_decision`, `outcome`, `mcp_server` veya `mcp_tool` alanları
+  içermez.
 - Spurious denial (yazma başarılıyken deny üretme) gerçekleşmemiştir.
 
 **Evidence:**
 
 - `Read` tool'un başarıyla tamamlandığına dair gözlem (tool çıktısı
   veya log kaydı).
-- Yerel audit artifact'ın `policy_decision: "allow"` veya `outcome:
-  "success"` içerdiğinin gösterimi.
-- Unexpected deny event'i üretilmediğinin doğrulama notu.
+- Non-canonical evidence record'ın `observation: "allow_observed"` ve
+  `test_path: "writer_available"` içerdiğinin gösterimi.
+- Unexpected deny davranışı gözlemlenmediğinin doğrulama notu.
+- Evidence record'ın canonical MCP audit alanları (`policy_decision`,
+  `outcome`, `mcp_server`, `mcp_tool`) içermediğinin doğrulama notu.
 
 **Failure Condition:**
 
 - Audit writer başarılıyken `Read` tool deny alıyorsa.
-- Artifact `policy_decision: "deny"` veya `outcome: "blocked"/"denied"`
-  içeriyorsa (başarılı write durumunda).
+- Evidence record `observation: "deny_observed"` içeriyorsa (başarılı
+  write durumunda).
 - Hook false positive deny üretiyorsa (spurious denial).
+- Evidence record `observation: "allow_observed"` içermiyorsa.
 - Başarılı path kanıtı üretilememişse.
 
 ---
@@ -420,6 +443,12 @@ başarısız olur (durable write acknowledgment alınamaz).
   veya herhangi bir dış sistem erişimi yok).
 - Denial, sessiz `allow` sonucu üretmemiş olmalıdır; hook fail-closed
   davranışını açıkça sergilemiş olmalıdır.
+- Non-canonical evidence record üretildiyse `observation: "deny_observed"`
+  ve `test_path: "writer_unavailable"` içermelidir.
+- **Sahte MCP audit event veya `unclassified` sentinel event
+  üretilmemiş olmalıdır.** Fail-closed durumunda hiçbir `mcp_server`,
+  `mcp_tool`, `unclassified`, `policy_decision`, `outcome` veya canonical
+  MCP audit alanı persist edilmez.
 - Mümkünse, audit unavailable'ı bildiren bir human-visible failure
   signal üretilmiş olmalıdır; bu signal raw tool identity, raw error
   metni, prompt, URL, token, secret, PII veya serbest metin
@@ -431,6 +460,10 @@ başarısız olur (durable write acknowledgment alınamaz).
 
 - `Read` tool'un yürütülmediğine dair kanıt (tool çıktısı yok, deny
   gözlemi veya log kaydı).
+- Non-canonical evidence record üretildiyse `observation: "deny_observed"`
+  ve `test_path: "writer_unavailable"` içerdiğinin gösterimi.
+- Evidence record'da `mcp_server`, `mcp_tool` veya `unclassified` alanı
+  bulunmadığının doğrulama notu.
 - Failure signal'inin üretildiğine ve içeriğinin yasak veri
   içermediğine dair not.
 - Dış dispatch gerçekleşmediğinin doğrulama notu (network call yok,
@@ -445,6 +478,8 @@ başarısız olur (durable write acknowledgment alınamaz).
 - Failure signal raw error metni, raw tool identity, prompt, URL,
   token veya serbest metin içeriyorsa.
 - Failure signal yeni bir MCP çağrısı veya dış dispatch tetiklemişse.
+- Evidence record `unclassified` sentinel, `mcp_server`, `mcp_tool`,
+  `policy_decision` veya `outcome` alanı içeriyorsa.
 - Fail-closed davranışı gözlemlenemiyorsa veya kanıtlanamıyorsa.
 
 ---
@@ -473,8 +508,9 @@ Spike'ın tüm adımları (AC-001'den AC-010'a kadar) yürütülür.
 - Hiçbir credential, token veya API key kullanılmamış olmalıdır.
 - Yerel audit artifact, hook script veya geçici configuration dosyalarında
   gerçek endpoint, token, API key, credential veya PII bulunmamalıdır.
-- `mcp_server` ve `mcp_tool` değerleri, gerçek MCP server adı değil;
-  built-in tool için tanımlanmış canonical etiket içermelidir.
+- Evidence record içinde `mcp_server`, `mcp_tool` veya `unclassified`
+  alanları bulunmamalıdır; bu alanlar canonical MCP Audit Event Contract
+  kapsamındadır ve non-canonical evidence record içinde yer almaz.
 
 **Evidence:**
 
@@ -482,6 +518,8 @@ Spike'ın tüm adımları (AC-001'den AC-010'a kadar) yürütülür.
 - MCP server bağlantısı kurulmadığını gösteren doğrulama notu.
 - Geçici dosyaların ve artifact'ların incelenmesi sonucu gerçek
   credential veya endpoint içermediğinin kaydı.
+- Evidence artifact'ının `mcp_server`, `mcp_tool` veya `unclassified`
+  alanı içermediğinin doğrulama notu.
 
 **Failure Condition:**
 
@@ -574,6 +612,10 @@ spike'ın neyi kanıtladığını ve neyi yetkilendirmediğini açıkça belirti
     kapatılmadığının açık ifadesi.
   - Sonraki adım için karar (ör. "daha fazla araştırma gerekiyor",
     "bir sonraki adıma geçilebilir", "bloker tespit edildi").
+  - REQ-002'nin ürettiği non-canonical evidence record'ın canonical MCP
+    Audit Event Contract doğrulaması **olmadığının** açık ifadesi.
+  - Gerçek MCP No-Go kapılarının (`SEC-ADR-005-MCP-CONNECTION-
+    PRECONDITIONS.md`) bu spike ile kapatılmadığının teyidi.
 - Karar kaydı, gerçek MCP bağlantısının, production audit
   enforcement'ın veya credential kullanımının bu spike ile
   yetkilendirilmediğini açıkça belirtmelidir.
@@ -590,6 +632,8 @@ spike'ın neyi kanıtladığını ve neyi yetkilendirmediğini açıkça belirti
   gösteren özet.
 - Kaydın gerçek MCP bağlantısının yetkilendirilmediğini açıkça
   belirttiğinin doğrulama notu.
+- Kaydın REQ-002 evidence record'ının canonical MCP Audit Event Contract
+  doğrulaması olmadığını açıkça belirttiğinin doğrulama notu.
 
 **Failure Condition:**
 
@@ -600,6 +644,8 @@ spike'ın neyi kanıtladığını ve neyi yetkilendirmediğini açıkça belirti
 - No-Go kapılarının hâlâ açık olduğu kaydedilmemişse.
 - Karar imzasız, anonim veya makine tarafından otomatik oluşturulmuşsa
   (insan maintainer atfı yoksa).
+- Kayıt, REQ-002 evidence record'ının canonical MCP Audit Event Contract
+  doğrulaması olduğunu ima ediyorsa.
 
 ---
 
@@ -609,10 +655,10 @@ spike'ın neyi kanıtladığını ve neyi yetkilendirmediğini açıkça belirti
 |-------------------------------------------------------------------------------------------|----------------|
 | Canonical `.claude/settings.json` ve hook scriptleri değişmeden kalır                     | AC-001, AC-010 |
 | Aktif hook listesi yalnızca `Read`/`PreToolUse` matcher'ını içerir                        | AC-002         |
-| Gerçek `Read` çağrısında hook tetiklendiği local artifact ile kanıtlanır                  | AC-003         |
-| Üretilen audit event tam olarak 15 alan taşır                                              | AC-004         |
+| Gerçek `Read` çağrısında hook tetiklendiği ve sanitised evidence record üretildiği kanıtlanır | AC-003      |
+| Üretilen non-canonical evidence record tam olarak 7 alanlı sanitised schema ile uyumludur | AC-004         |
 | Artifact raw input, dosya içeriği, prompt, URL, token, PII veya serbest metin içermez     | AC-005         |
-| `session_reference` ve `operation_reference` raw runtime identifier taşımaz               | AC-006         |
+| Evidence record içinde raw session ID, tool_use_id veya raw agent identity persist edilmez | AC-006        |
 | Audit writer başarılıyken `Read` tool deny almaz                                           | AC-007         |
 | Audit writer başarısız olduğunda `PreToolUse` deny ve fail-closed davranışı gözlemlenir   | AC-008         |
 | Spike network, MCP server, credential veya dış bağımlılık olmadan çalışır                 | AC-009         |
@@ -651,6 +697,34 @@ human maintainer onayı gerektirir.**
 
 Gerçek bağlantı için gerekli zorunlu kapıların tam listesi:
 `docs/quality/security-reports/SEC-ADR-005-MCP-CONNECTION-PRECONDITIONS.md`
+
+**Acceptance Amendment — 2026-06-25 (Evidence-Model Clarification):**
+
+Human maintainer acceptance kararı aşağıdaki sınırlarla amend edilmiştir;
+Accepted statüsü ve acceptance date (2026-06-25) değişmez:
+
+- Built-in `Read`, MCP tool değildir. REQ-002 built-in `Read` spike'ı
+  canonical `MCP_AUDIT_EVENT_CONTRACT.md` audit event'i üretmez,
+  doğrulamaz veya yerine geçmez.
+- REQ-002 yalnızca non-canonical, sanitised local runtime evidence record
+  üretir. Bu record tam olarak 7 alan taşır: `evidence_schema_version`,
+  `evidence_id`, `timestamp`, `hook_event` (yalnızca `PreToolUse`),
+  `tool_class` (yalnızca `builtin_read`), `test_path` (yalnızca
+  `writer_available` veya `writer_unavailable`), `observation` (yalnızca
+  `allow_observed` veya `deny_observed`).
+- `evidence_id`, disposable local workspace içinde üretilen random test
+  referansıdır; raw runtime identity'den türetilmez.
+- Evidence record içinde `mcp_server`, `mcp_tool`, `unclassified`,
+  `session_reference`, `operation_reference`, `agent_type`,
+  `policy_decision`, `outcome`, `failure_category`, raw payload, tool
+  input, file path, file content, prompt, URL, token, secret, session ID,
+  tool use ID, reason, exception text veya serbest metin alanları
+  bulunmaz.
+- Bu amendment scope'u genişletmez; gerçek MCP bağlantısına, MCP audit
+  contract validation'a, production hook'a veya production audit
+  enforcement'a izin vermez; AC-011 post-spike human maintainer
+  incelemesini kapatmaz; ADR-005, ADR-006, MCP Audit Event Contract ve
+  SEC-ADR-005 No-Go kapılarını değiştirmez.
 
 ---
 
