@@ -1,7 +1,8 @@
 # ADR-004: Ownership CI Diff Enforcement
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-25
+- **Acceptance Date:** 2026-06-25
 - **Owner:** Human maintainer
 - **Related controls:** PROJECT_CONSTITUTION.md, CLAUDE.md,
   AGENT_CAPABILITY_MATRIX.md, ADR-001-role-based-hook-enforcement.md,
@@ -331,8 +332,34 @@ durumda sonuç deny'dir ve hata mesajları stderr'e `error:` önekiyle yazılır
   şeyi değil yalnızca `REQ-<en az 3 rakam>.json` authority manifest
   pattern'ini koruduğunu doğrular.
 
+## Acceptance Evidence
+
+- PR #7 ile ownership diff validator ve GitHub Actions workflow merge
+  edildi.
+- PR #8 ile private repository fetch authentication hotfix'i merge edildi.
+- Draft smoke PR #9 merge edilmeden kapatıldı; hem `PR Quality` hem
+  `Ownership Diff Gate` GitHub Actions üzerinde başarılı geçti.
+- Repository Actions varsayılan `GITHUB_TOKEN` ayarı read-only olarak
+  doğrulandı.
+- **Branch protection limitation:** Private repository mevcut planında
+  branch protection ve rulesets API erişimi 403 ile engellendi. Bu nedenle
+  ADR-004 kabul edilmiş olsa da, required check zorlaması şu an teknik
+  olarak aktif değildir. Bu kısıtlama gizlenmemiştir ve aşağıdaki "Human
+  Merge Boundary" ile telafi edilmektedir.
+- **Human merge boundary:** Required check otomasyonu eksikken, merge
+  öncesi `Ownership Diff Gate` ve `PR Quality` workflow'larının başarılı
+  geçmiş olması insan maintainer tarafından merge öncesi manuel olarak
+  doğrulanır; bu, branch protection eklenene kadar geçici telafi edici
+  kontroldür.
+- GitHub Pro veya uygun bir plan sonrası branch protection/ruleset ile
+  Ownership Diff Gate required check olarak bağlanmalıdır; bu kalan iş
+  açık bir takip kalemi olarak not edilmiştir.
+
 ## Approval
 
 - **Required approver:** Human maintainer
-- **Approval status:** Pending
-- **Approval evidence:** Reviewed pull request and merge to main
+- **Approval status:** Accepted
+- **Approval evidence:** PR #7 and PR #8 reviewed and merged to main
+  (2026-06-25); branch protection/required-check enforcement remains a
+  pending follow-up due to a repository plan limitation (see Acceptance
+  Evidence)

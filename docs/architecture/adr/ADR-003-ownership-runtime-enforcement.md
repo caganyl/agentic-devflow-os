@@ -1,7 +1,8 @@
 # ADR-003: Ownership Runtime Enforcement
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-25
+- **Acceptance Date:** 2026-06-25
 - **Owner:** Human maintainer
 - **Related controls:** PROJECT_CONSTITUTION.md, CLAUDE.md,
   AGENT_CAPABILITY_MATRIX.md, ADR-001-role-based-hook-enforcement.md,
@@ -153,8 +154,17 @@ hatalı durum varsayılan olarak allow'a düşmez.
   `tests/test_validate_ownership_manifest.py`, mevcut requirement/contract/
   handoff/release dosyalarını veya ADR-001/ADR-002'yi değiştirmez.
 
+## Acceptance Evidence
+
+- PR #6 ile implementer agent runtime enforcement merge edildi.
+- Frontend, Backend, Database, QA Automation ve AI/Data Engineer için
+  manifest + branch + owner + target path kontrolü aktif edildi.
+- Unit testler geçti.
+- Gerçek runtime smoke testinde Frontend Engineer kendi atanmış path'ine
+  yazabildi; backend path'ine yazması hook tarafından engellendi.
+
 ## Approval
 
 - **Required approver:** Human maintainer
-- **Approval status:** Pending
-- **Approval evidence:** Reviewed pull request and merge to main
+- **Approval status:** Accepted
+- **Approval evidence:** PR #6 reviewed and merged to main (2026-06-25)
