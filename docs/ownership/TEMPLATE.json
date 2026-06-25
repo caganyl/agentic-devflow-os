@@ -1,0 +1,31 @@
+{
+  "$schema": "./schema.json",
+  "schema_version": 1,
+  "req_id": "REQ-000",
+  "title": "Placeholder iş başlığı",
+  "status": "draft",
+  "approval": {
+    "approved_by": "",
+    "approved_at": ""
+  },
+  "references": {
+    "requirement": "docs/product/requirements/REQ-000.md",
+    "acceptance_criteria": "docs/product/acceptance-criteria/REQ-000.md",
+    "contracts": [],
+    "contract_exception": {
+      "reason": "",
+      "approved_by": "",
+      "approved_at": ""
+    },
+    "adrs": []
+  },
+  "owners": [
+    {
+      "agent": "frontend-engineer",
+      "write_paths": [
+        "apps/web/src/features/placeholder"
+      ],
+      "notes": "Kısa kapsam notu"
+    }
+  ]
+}
