@@ -40,7 +40,7 @@ case "$TOOL_NAME" in
     FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty')"
 
     if is_sensitive_path "$FILE_PATH"; then
-      deny "Sensitive-path protection: Claude cannot read, modify or create secrets, environment files, credentials, Claude settings or hook scripts."
+      deny "Sensitive-path protection: Claude cannot modify or create secrets, environment files, credentials, Claude settings or hook scripts."
       exit 0
     fi
     ;;
