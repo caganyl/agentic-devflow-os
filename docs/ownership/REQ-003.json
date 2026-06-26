@@ -1,0 +1,42 @@
+{
+  "$schema": "./schema.json",
+  "schema_version": 1,
+  "req_id": "REQ-003",
+  "title": "Local Canonical MCP Audit Runtime Foundation",
+  "status": "approved",
+  "approval": {
+    "approved_by": "Çağan Yılmaz",
+    "approved_at": "2026-06-26"
+  },
+  "references": {
+    "requirement": "docs/product/requirements/REQ-003-local-canonical-mcp-audit-runtime-foundation.md",
+    "acceptance_criteria": "docs/product/acceptance-criteria/AC-REQ-003-local-canonical-mcp-audit-runtime-foundation.md",
+    "contracts": [],
+    "contract_exception": {
+      "reason": "REQ-003 yalnızca local experimental foundation üretir; simulated_dispatch kullanır; gerçek MCP bağlantısı, external API, event veya database contract yoktur.",
+      "approved_by": "Çağan Yılmaz",
+      "approved_at": "2026-06-26"
+    },
+    "adrs": [
+      "docs/architecture/adr/ADR-005-mcp-tooling-control-plane.md",
+      "docs/architecture/adr/ADR-006-mcp-audit-logging-and-runtime-enforcement.md",
+      "docs/architecture/adr/ADR-007-canonical-mcp-audit-runtime-architecture.md"
+    ]
+  },
+  "owners": [
+    {
+      "agent": "backend-engineer",
+      "write_paths": [
+        "src/mcp_audit_runtime"
+      ],
+      "notes": "REQ-003 kapsamındaki local Python runtime modülü. Gerçek MCP bağlantısı, network çağrısı, credential, production hook veya persistent config değişikliği kapsam dışıdır."
+    },
+    {
+      "agent": "qa-automation",
+      "write_paths": [
+        "tests/mcp_audit_runtime"
+      ],
+      "notes": "REQ-003 kapsamındaki sekiz kritik test senaryosu. Yalnızca Python standard library; yalnızca tempdir. Production kod, hook, credential veya gerçek MCP bağlantısı kapsam dışıdır."
+    }
+  ]
+}
