@@ -515,6 +515,7 @@ def cmd_launch(args) -> int:
         print(f"  branch:     {branch_name}")
         print(f"  worktree:   {worktree_path}")
         print(f"  plugin:     {plugin_dir}")
+        print(f"  claude cmd: claude --plugin-dir {plugin_dir} <supervisor prompt>")
         print(f"  target:     {target}")
         if claude_binary:
             print(f"  claude:     {claude_binary}")
