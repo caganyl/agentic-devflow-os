@@ -27,12 +27,14 @@ SOURCES = {
     "templates": CLAUDE_DIR / "templates",
     "workflows": CLAUDE_DIR / "workflows",
     "rules": CLAUDE_DIR / "rules",
+    "scripts": REPO_ROOT / "scripts",
 }
 
 PLUGIN_MANIFEST_VERSION = "1.0.0"
 
 EXCLUDED_FILES = {".gitkeep", ".DS_Store"}
 EXCLUDED_AGENTS = {"settings.json"}
+INCLUDED_SCRIPTS = frozenset({"devflow_operations.py"})
 
 
 def collect_agents(src: Path) -> list[dict]:
@@ -85,13 +87,30 @@ def collect_rules(src: Path) -> list[dict]:
     return rules
 
 
+def collect_scripts(src: Path) -> list[dict]:
+    scripts = []
+    for f in sorted(src.glob("*.py")):
+        if f.name not in INCLUDED_SCRIPTS:
+            continue
+        scripts.append({"name": f.stem, "source": str(f.relative_to(REPO_ROOT))})
+    return scripts
+
+
 def copy_source_tree(sources: dict, output_dir: Path) -> None:
     for key, src_path in sources.items():
         if not src_path.exists():
             print(f"  [skip] {key}: source not found at {src_path}", file=sys.stderr)
             continue
         dest = output_dir / key
-        if src_path.is_dir():
+        if key == "scripts":
+            dest.mkdir(parents=True, exist_ok=True)
+            for fname in INCLUDED_SCRIPTS:
+                src_file = src_path / fname
+                if src_file.exists():
+                    shutil.copy2(src_file, dest / fname)
+                else:
+                    print(f"  [skip] scripts/{fname}: not found", file=sys.stderr)
+        elif src_path.is_dir():
             shutil.copytree(
                 src_path,
                 dest,
@@ -110,17 +129,19 @@ def build_manifest(output_dir: Path) -> dict:
         "name": "devflow-plugin",
         "description": (
             "Agentic DevFlow OS plugin — agent roles, skills, "
-            "templates, workflows and rules."
+            "templates, workflows, rules and managed operations."
         ),
         "agents": collect_agents(SOURCES["agents"]),
         "skills": collect_skills(SOURCES["skills"]),
         "templates": collect_templates(SOURCES["templates"]),
         "workflows": collect_workflows(SOURCES["workflows"]),
         "rules": collect_rules(SOURCES["rules"]),
+        "scripts": collect_scripts(SOURCES["scripts"]),
         "notes": [
             "This plugin does NOT include settings.json, hooks, or credentials.",
             "MCP server configuration must be set up separately in the target project.",
             "Security hooks must be manually reviewed and installed in the target project.",
+            "scripts/devflow_operations.py: managed operations runner for target projects.",
         ],
     }
 
@@ -150,6 +171,7 @@ def build(output_dir: Path) -> None:
     print(f"  templates: {len(manifest['templates'])}")
     print(f"  workflows: {len(manifest['workflows'])}")
     print(f"  rules:     {len(manifest['rules'])}")
+    print(f"  scripts:   {len(manifest['scripts'])}")
     try:
         manifest_rel = manifest_path.relative_to(REPO_ROOT)
     except ValueError:

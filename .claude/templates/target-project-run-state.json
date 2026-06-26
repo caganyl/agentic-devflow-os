@@ -1,0 +1,26 @@
+{
+  "schema_version": "1",
+  "_template": "target-project-run-state",
+  "_instructions": "Bu dosya .devflow/runs/RUN-NNN.json şablonudur. devflow_operations.py create-run tarafından otomatik oluşturulur.",
+  "run_id": "RUN-NNN",
+  "created_at": "YYYY-MM-DDTHH:MM:SSZ",
+  "status": "created",
+  "branch_name": "devflow/run-run-nnn",
+  "objective": "",
+  "artifacts": [],
+  "tasks": [],
+  "approval_gates": {
+    "contract_approved": false,
+    "tests_passing": false,
+    "security_review_complete": false,
+    "qa_sign_off": false,
+    "human_approval": false
+  },
+  "_gate_notes": {
+    "contract_approved": "Frontend/backend contract onaylandığında true yapılır.",
+    "tests_passing": "Tüm test suite geçtiğinde true yapılır.",
+    "security_review_complete": "Security Red Team raporu tamamlandığında true yapılır.",
+    "qa_sign_off": "QA acceptance verildiğinde true yapılır.",
+    "human_approval": "İnsan main merge onayı verdiğinde true yapılır. Agent değiştiremez."
+  }
+}

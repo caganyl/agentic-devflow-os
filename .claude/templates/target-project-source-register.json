@@ -1,0 +1,53 @@
+{
+  "schema_version": "1",
+  "_template": "target-project-source-register",
+  "_instructions": [
+    "Bu dosya target project .devflow/source-register.json şablonudur.",
+    "YASAK: token, credential, password, api_key, secret, raw_content, notebook_content.",
+    "NotebookLM için AYRICA yasak: url (ham notebook URL'si).",
+    "Desteklenen source tipleri: local_docs, notebooklm, obsidian, git_repository."
+  ],
+  "sources": [
+    {
+      "_comment": "Git canonical kaynak — requirement, contract, ADR, test",
+      "id": "git-main-repo",
+      "type": "git_repository",
+      "label": "Ana proje Git repository'si",
+      "relevance": "high",
+      "confidence": "canonical",
+      "last_verified": "YYYY-MM-DD",
+      "notes": ""
+    },
+    {
+      "_comment": "Yerel dokümanlar — PRD, handoff, tasarım notları",
+      "id": "local-docs-1",
+      "type": "local_docs",
+      "label": "Proje dokümanları",
+      "path": "docs/",
+      "relevance": "high",
+      "confidence": "approved",
+      "last_verified": "YYYY-MM-DD",
+      "notes": ""
+    },
+    {
+      "_comment": "NotebookLM evidence — YALNIZCA label, freshness ve access_mode. Ham içerik, URL veya token YASAK.",
+      "id": "notebooklm-product-research",
+      "type": "notebooklm",
+      "label": "Ürün araştırma notebook'u",
+      "freshness": "YYYY-MM-DD",
+      "access_mode": "read-only",
+      "relevance": "medium",
+      "confidence": "unverified",
+      "notes": "doğrulanması gerekiyor — Git canonical kaynakla kontrol et"
+    },
+    {
+      "_comment": "Obsidian — YALNIZCA seçilmiş note label/reference. Tüm vault bağlanmaz.",
+      "id": "obsidian-strategy-1",
+      "type": "obsidian",
+      "label": "Ürün stratejisi notları (seçilmiş)",
+      "relevance": "low",
+      "confidence": "personal_note",
+      "notes": "kişisel bağlam — resmi kaynak değil"
+    }
+  ]
+}

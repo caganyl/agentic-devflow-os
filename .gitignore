@@ -22,6 +22,11 @@ coverage/
 
 # DevFlow plugin build output
 dist/devflow-plugin/
+
+# DevFlow target project workspace (cache and logs only)
+.devflow/cache/
+.devflow/logs/
+.devflow/**/*.tmp
 .next/
 out/
 .cache/
