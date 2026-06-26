@@ -30,70 +30,10 @@ SOURCES = {
     "scripts": REPO_ROOT / "scripts",
 }
 
-PLUGIN_MANIFEST_VERSION = "1.0.0"
+PLUGIN_VERSION = "1.0.0"
 
 EXCLUDED_FILES = {".gitkeep", ".DS_Store"}
-EXCLUDED_AGENTS = {"settings.json"}
 INCLUDED_SCRIPTS = frozenset({"devflow_operations.py"})
-
-
-def collect_agents(src: Path) -> list[dict]:
-    agents = []
-    for f in sorted(src.glob("*.md")):
-        if f.name in EXCLUDED_FILES:
-            continue
-        agents.append({"name": f.stem, "source": str(f.relative_to(REPO_ROOT))})
-    return agents
-
-
-def collect_skills(src: Path) -> list[dict]:
-    skills = []
-    for skill_dir in sorted(src.iterdir()):
-        if not skill_dir.is_dir():
-            continue
-        skill_file = skill_dir / "SKILL.md"
-        if skill_file.exists():
-            skills.append({
-                "name": skill_dir.name,
-                "source": str(skill_file.relative_to(REPO_ROOT)),
-            })
-    return skills
-
-
-def collect_templates(src: Path) -> list[dict]:
-    templates = []
-    for f in sorted(src.glob("*")):
-        if f.name in EXCLUDED_FILES or not f.is_file():
-            continue
-        templates.append({"name": f.name, "source": str(f.relative_to(REPO_ROOT))})
-    return templates
-
-
-def collect_workflows(src: Path) -> list[dict]:
-    workflows = []
-    for f in sorted(src.glob("*.md")):
-        if f.name in EXCLUDED_FILES:
-            continue
-        workflows.append({"name": f.stem, "source": str(f.relative_to(REPO_ROOT))})
-    return workflows
-
-
-def collect_rules(src: Path) -> list[dict]:
-    rules = []
-    for f in sorted(src.glob("*.md")):
-        if f.name in EXCLUDED_FILES:
-            continue
-        rules.append({"name": f.stem, "source": str(f.relative_to(REPO_ROOT))})
-    return rules
-
-
-def collect_scripts(src: Path) -> list[dict]:
-    scripts = []
-    for f in sorted(src.glob("*.py")):
-        if f.name not in INCLUDED_SCRIPTS:
-            continue
-        scripts.append({"name": f.stem, "source": str(f.relative_to(REPO_ROOT))})
-    return scripts
 
 
 def copy_source_tree(sources: dict, output_dir: Path) -> None:
@@ -122,27 +62,13 @@ def copy_source_tree(sources: dict, output_dir: Path) -> None:
             shutil.copy2(src_path, dest)
 
 
-def build_manifest(output_dir: Path) -> dict:
+def build_manifest() -> dict:
     return {
-        "schema_version": "1",
-        "plugin_version": PLUGIN_MANIFEST_VERSION,
         "name": "devflow-plugin",
         "description": (
-            "Agentic DevFlow OS plugin — agent roles, skills, "
-            "templates, workflows, rules and managed operations."
+            "Agentic DevFlow OS: autonomous delivery workflows, skills and specialist agents."
         ),
-        "agents": collect_agents(SOURCES["agents"]),
-        "skills": collect_skills(SOURCES["skills"]),
-        "templates": collect_templates(SOURCES["templates"]),
-        "workflows": collect_workflows(SOURCES["workflows"]),
-        "rules": collect_rules(SOURCES["rules"]),
-        "scripts": collect_scripts(SOURCES["scripts"]),
-        "notes": [
-            "This plugin does NOT include settings.json, hooks, or credentials.",
-            "MCP server configuration must be set up separately in the target project.",
-            "Security hooks must be manually reviewed and installed in the target project.",
-            "scripts/devflow_operations.py: managed operations runner for target projects.",
-        ],
+        "version": PLUGIN_VERSION,
     }
 
 
@@ -160,18 +86,12 @@ def build(output_dir: Path) -> None:
 
     copy_source_tree(SOURCES, plugin_dir)
 
-    manifest = build_manifest(plugin_dir)
+    manifest = build_manifest()
     manifest_path = claude_plugin_dir / "plugin.json"
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
         f.write("\n")
 
-    print(f"  agents:    {len(manifest['agents'])}")
-    print(f"  skills:    {len(manifest['skills'])}")
-    print(f"  templates: {len(manifest['templates'])}")
-    print(f"  workflows: {len(manifest['workflows'])}")
-    print(f"  rules:     {len(manifest['rules'])}")
-    print(f"  scripts:   {len(manifest['scripts'])}")
     try:
         manifest_rel = manifest_path.relative_to(REPO_ROOT)
     except ValueError:

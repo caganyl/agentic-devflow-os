@@ -82,50 +82,27 @@ class PluginBuildOutputTest(unittest.TestCase):
             data = json.load(f)
         self.assertIsInstance(data, dict)
 
-    def test_plugin_json_has_required_keys(self):
+    def test_plugin_json_has_required_metadata_fields(self):
         manifest = self.plugin_dir / ".claude-plugin" / "plugin.json"
         if not manifest.exists():
             self.skipTest("plugin.json not found")
         with open(manifest, encoding="utf-8") as f:
             data = json.load(f)
-        for key in ("schema_version", "plugin_version", "name", "agents", "skills", "templates", "workflows", "rules"):
-            self.assertIn(key, data, f"plugin.json missing key: {key}")
+        for key in ("name", "description", "version"):
+            self.assertIn(key, data, f"plugin.json missing required metadata key: {key}")
 
-    def test_plugin_json_lists_agents(self):
+    def test_plugin_json_has_no_invalid_fields(self):
         manifest = self.plugin_dir / ".claude-plugin" / "plugin.json"
         if not manifest.exists():
             self.skipTest("plugin.json not found")
         with open(manifest, encoding="utf-8") as f:
             data = json.load(f)
-        self.assertIsInstance(data["agents"], list)
-        self.assertGreater(len(data["agents"]), 0, "No agents in plugin.json")
-
-    def test_plugin_json_lists_skills(self):
-        manifest = self.plugin_dir / ".claude-plugin" / "plugin.json"
-        if not manifest.exists():
-            self.skipTest("plugin.json not found")
-        with open(manifest, encoding="utf-8") as f:
-            data = json.load(f)
-        self.assertIsInstance(data["skills"], list)
-        self.assertGreater(len(data["skills"]), 0, "No skills in plugin.json")
-
-    def test_plugin_json_lists_workflows(self):
-        manifest = self.plugin_dir / ".claude-plugin" / "plugin.json"
-        if not manifest.exists():
-            self.skipTest("plugin.json not found")
-        with open(manifest, encoding="utf-8") as f:
-            data = json.load(f)
-        self.assertIsInstance(data["workflows"], list)
-        self.assertGreater(len(data["workflows"]), 0, "No workflows in plugin.json")
-
-    def test_plugin_json_lists_rules(self):
-        manifest = self.plugin_dir / ".claude-plugin" / "plugin.json"
-        if not manifest.exists():
-            self.skipTest("plugin.json not found")
-        with open(manifest, encoding="utf-8") as f:
-            data = json.load(f)
-        self.assertIsInstance(data["rules"], list)
-        self.assertGreater(len(data["rules"]), 0, "No rules in plugin.json")
+        forbidden = (
+            "schema_version", "plugin_version",
+            "agents", "skills", "templates", "workflows", "rules", "scripts", "notes",
+        )
+        for key in forbidden:
+            self.assertNotIn(key, data, f"plugin.json must not contain invalid field: {key}")
 
     def test_agents_dir_copied(self):
         agents_dir = self.plugin_dir / "agents"
@@ -156,15 +133,6 @@ class PluginBuildOutputTest(unittest.TestCase):
     def test_gitkeep_not_in_agents(self):
         gitkeep = self.plugin_dir / "agents" / ".gitkeep"
         self.assertFalse(gitkeep.exists(), ".gitkeep should not be in plugin agents/")
-
-    def test_plugin_json_has_notes(self):
-        manifest = self.plugin_dir / ".claude-plugin" / "plugin.json"
-        if not manifest.exists():
-            self.skipTest("plugin.json not found")
-        with open(manifest, encoding="utf-8") as f:
-            data = json.load(f)
-        self.assertIn("notes", data, "plugin.json should have a 'notes' field")
-        self.assertIsInstance(data["notes"], list)
 
     def test_build_is_idempotent(self):
         import subprocess
