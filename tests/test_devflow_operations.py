@@ -580,20 +580,19 @@ class PluginBuildOperationsTest(unittest.TestCase):
             "build_devflow_plugin.py should NOT be in plugin output",
         )
 
-    def test_plugin_manifest_has_scripts_key(self):
+    def test_plugin_manifest_has_no_scripts_field(self):
         manifest = self.plugin_dir / ".claude-plugin" / "plugin.json"
         if not manifest.exists():
             self.skipTest("plugin.json not found")
         data = json.loads(manifest.read_text(encoding="utf-8"))
-        self.assertIn("scripts", data, "plugin.json should have 'scripts' key")
+        self.assertNotIn("scripts", data, "plugin.json must not contain 'scripts' inventory field")
 
-    def test_plugin_manifest_lists_devflow_operations(self):
-        manifest = self.plugin_dir / ".claude-plugin" / "plugin.json"
-        if not manifest.exists():
-            self.skipTest("plugin.json not found")
-        data = json.loads(manifest.read_text(encoding="utf-8"))
-        script_names = [s.get("name", "") for s in data.get("scripts", [])]
-        self.assertIn("devflow_operations", script_names, "plugin.json should list devflow_operations")
+    def test_devflow_operations_in_scripts_dir(self):
+        ops_script = self.plugin_dir / "scripts" / "devflow_operations.py"
+        self.assertTrue(
+            ops_script.exists(),
+            "devflow_operations.py must exist in plugin scripts/ dir (auto-discovered, not in manifest)",
+        )
 
     def test_settings_json_not_in_plugin(self):
         settings = self.plugin_dir / "settings.json"
