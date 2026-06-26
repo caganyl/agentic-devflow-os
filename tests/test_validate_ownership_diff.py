@@ -793,6 +793,43 @@ class OwnershipDiffTestCase(unittest.TestCase):
 
         self._assert_rejected(result)
 
+    # -- hooks/hooks.json narrow governance allowance tests ---------------
+
+    def test_governance_branch_hooks_json_change_succeeds(self):
+        """hooks/hooks.json is the only hooks/ path allowed on generic governance branches."""
+        base_sha = self._write_base_fixture()
+        self._checkout_branch("some-governance-branch")
+        self._write("hooks/hooks.json", '{"hooks": []}\n')
+        head_sha = self._commit("update plugin hooks config on governance branch")
+
+        result = self._run_validator(base_sha, head_sha, "some-governance-branch")
+
+        self._assert_allowed(result)
+
+    def test_governance_branch_other_hooks_file_rejected(self):
+        """Any hooks/ file other than hooks/hooks.json is rejected on governance branches."""
+        base_sha = self._write_base_fixture()
+        self._checkout_branch("some-governance-branch")
+        self._write("hooks/other-hook.sh", "#!/bin/sh\necho hi\n")
+        head_sha = self._commit("add other hooks file on governance branch")
+
+        result = self._run_validator(base_sha, head_sha, "some-governance-branch")
+
+        self._assert_rejected(result)
+        self.assertIn("hooks/other-hook.sh", result.stderr)
+
+    def test_governance_branch_hooks_subdir_file_rejected(self):
+        """A file nested under hooks/ (not hooks/hooks.json itself) is rejected."""
+        base_sha = self._write_base_fixture()
+        self._checkout_branch("some-governance-branch")
+        self._write("hooks/subdir/extra.json", "{}\n")
+        head_sha = self._commit("add nested hooks subdir file on governance branch")
+
+        result = self._run_validator(base_sha, head_sha, "some-governance-branch")
+
+        self._assert_rejected(result)
+        self.assertIn("hooks/subdir/extra.json", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
