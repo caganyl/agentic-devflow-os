@@ -49,6 +49,7 @@ GOVERNANCE_ALLOWED_EXACT_PATHS = frozenset(
         "PROJECT_CONSTITUTION.md",
         "CLAUDE.md",
         "AGENTS.md",
+        "hooks/hooks.json",
     }
 )
 

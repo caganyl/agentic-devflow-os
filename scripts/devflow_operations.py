@@ -536,11 +536,12 @@ def cmd_launch(args) -> int:
         print(f"  env (planned):  {env_plan}")
         if claude_binary:
             print(f"  claude:         {claude_binary}")
-            print(
-                f"  claude cmd:     {claude_binary} --plugin-dir {plugin_dir} \"<supervisor prompt>\""
-            )
         else:
             print("  claude:         [not found — install Claude Code CLI]")
+        binary_label = claude_binary or "claude"
+        print(
+            f"  claude cmd:     {binary_label} --plugin-dir {plugin_dir} \"<supervisor prompt>\""
+        )
         print(
             f"  git cmd:        git worktree add -b {branch_name} {worktree_path} HEAD"
         )
