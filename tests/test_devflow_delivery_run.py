@@ -105,11 +105,11 @@ class DeliveryTypeTaskGraphDeterminismTest(unittest.TestCase):
             run2 = self._graph(dt)
             self.assertEqual(run1, run2, f"{dt} task graph is not deterministic")
 
-    def test_all_eight_delivery_types_exist(self):
+    def test_all_nine_delivery_types_exist(self):
         expected = {
             "new_feature", "ai_rag", "data_dashboard", "bug_resolution",
             "security_response", "release_readiness", "cost_optimization",
-            "new_product_discovery",
+            "new_product_discovery", "backend_utility",
         }
         self.assertEqual(self.mod.SUPPORTED_DELIVERY_TYPES, expected)
 
@@ -1157,7 +1157,7 @@ class NewSubcommandsInScriptTest(unittest.TestCase):
         for dt in [
             "new_feature", "ai_rag", "data_dashboard", "bug_resolution",
             "security_response", "release_readiness", "cost_optimization",
-            "new_product_discovery",
+            "new_product_discovery", "backend_utility",
         ]:
             self.assertIn(dt, content, f"Delivery type '{dt}' not in script")
 

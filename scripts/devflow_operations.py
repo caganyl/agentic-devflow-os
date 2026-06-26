@@ -144,7 +144,56 @@ SUPPORTED_DELIVERY_TYPES = frozenset({
     "release_readiness",
     "cost_optimization",
     "new_product_discovery",
+    "backend_utility",
 })
+
+# ---------------------------------------------------------------------------
+# Objective risk signal detection
+#
+# Deterministic keyword-based classification.  No LLM interpretation.
+# Each category maps to a frozenset of lowercase signal words.
+# Signals drive delivery type selection and task graph omission decisions.
+# ---------------------------------------------------------------------------
+
+OBJECTIVE_RISK_SIGNALS: dict[str, frozenset[str]] = {
+    "api_surface": frozenset({
+        "api", "http", "https", "endpoint", "rest", "graphql",
+        "webhook", "route", "openapi", "swagger",
+    }),
+    "auth": frozenset({
+        "auth", "authentication", "authorization", "login", "oauth",
+        "jwt", "session", "token", "permission", "role", "rbac",
+        "privilege",
+    }),
+    "payment": frozenset({
+        "payment", "billing", "stripe", "subscription", "invoice",
+        "checkout", "purchase", "transaction", "charge",
+    }),
+    "external_service": frozenset({
+        "external", "integrate", "integration", "email", "sms", "slack",
+        "twilio", "sendgrid", "notification", "push", "third",
+    }),
+    "sensitive_data": frozenset({
+        "sensitive", "pii", "personal", "gdpr", "privacy",
+        "credential", "confidential", "private",
+    }),
+    "deployment": frozenset({
+        "deploy", "kubernetes", "docker", "production", "infrastructure",
+        "cloud", "aws", "gcp", "azure", "k8s", "container",
+    }),
+    "schema_migration": frozenset({
+        "migration", "database", "schema", "db", "sql", "postgres",
+        "mysql", "sqlite", "alembic", "table",
+    }),
+    "significant_architecture": frozenset({
+        "architecture", "microservice", "refactor", "redesign",
+        "modular", "distributed",
+    }),
+    "frontend": frozenset({
+        "frontend", "ui", "ux", "react", "vue", "angular", "component",
+        "page", "form", "button", "html", "css", "web", "browser",
+    }),
+}
 
 # ---------------------------------------------------------------------------
 # Delivery type task graph templates
@@ -348,6 +397,27 @@ DELIVERY_TYPE_TASK_TEMPLATES: dict[str, list[dict]] = {
          "qa_expectation": "PRD ve feasibility insan tarafından review edildi ve onaylandı",
          "output_path": ".devflow/context/"},
     ],
+    # Minimal profile for low-risk, local, pure-Python backend utility objectives.
+    # Omits: frontend implementation, API contract design, ADR, standalone security review.
+    # Add-on tasks (security, contract, ADR) are included only when risk signals are detected.
+    "backend_utility": [
+        {"id_suffix": "001", "title": "Delivery Planning", "task_type": "planning",
+         "assigned_role": "delivery-lead", "dep_suffixes": [],
+         "qa_expectation": "Task graph ve context pack hazır",
+         "output_path": ".devflow/context/"},
+        {"id_suffix": "002", "title": "Backend Implementation", "task_type": "implementation",
+         "assigned_role": "backend-engineer", "dep_suffixes": ["001"],
+         "qa_expectation": "Implementation tamamlandı; birim testler geçiyor",
+         "output_path": "src/"},
+        {"id_suffix": "003", "title": "QA Verification", "task_type": "qa",
+         "assigned_role": "qa-automation", "dep_suffixes": ["002"],
+         "qa_expectation": "Tüm testler geçiyor; regression temiz",
+         "output_path": "tests/"},
+        {"id_suffix": "004", "title": "Integration and Release Evidence", "task_type": "release",
+         "assigned_role": "integration-release", "dep_suffixes": ["003"],
+         "qa_expectation": "Scorecard ve merge recommendation hazır; human approval bekleniyor",
+         "output_path": ".devflow/reports/"},
+    ],
 }
 
 # ---------------------------------------------------------------------------
@@ -363,6 +433,56 @@ def atomic_write_json(path: Path, data: dict) -> None:
 
 def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# Objective risk signal detection
+# ---------------------------------------------------------------------------
+
+def detect_objective_risk_signals(objective: str) -> frozenset[str]:
+    """
+    Return set of risk signal categories detected in objective text.
+    Deterministic keyword matching — no LLM interpretation.
+    Same input always returns same output.
+    """
+    words = frozenset(re.findall(r"\b\w+\b", objective.lower()))
+    found: set[str] = set()
+    for signal_name, keywords in OBJECTIVE_RISK_SIGNALS.items():
+        if words & keywords:
+            found.add(signal_name)
+    return frozenset(found)
+
+
+# ---------------------------------------------------------------------------
+# Delegation evidence loader
+# ---------------------------------------------------------------------------
+
+def load_delegation_events(devflow_dir: Path) -> tuple[list[dict], str]:
+    """
+    Load sanitized delegation evidence events from .devflow/delegation-events/.
+
+    Returns (events, status) where status is one of:
+        "unavailable"  — delegation-events/ directory does not exist
+        "not_observed" — directory exists but no SubagentStart events found
+        "observed"     — at least one SubagentStart event was recorded
+    """
+    events_dir = devflow_dir / "delegation-events"
+    if not events_dir.exists():
+        return [], "unavailable"
+
+    events: list[dict] = []
+    for event_file in sorted(events_dir.glob("*.json")):
+        try:
+            data = json.loads(event_file.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                events.append(data)
+        except Exception:
+            pass
+
+    subagent_starts = [e for e in events if e.get("hook_event") == "SubagentStart"]
+    if not subagent_starts:
+        return events, "not_observed"
+    return events, "observed"
 
 
 # ---------------------------------------------------------------------------
@@ -649,8 +769,18 @@ def generate_task_packet_dict(task: dict, run_id: str, objective: str) -> dict:
     }
 
 
-def build_run_report(run_data: dict, run_id: str) -> dict:
-    """Build an evidence report dict from run state. No sys.exit."""
+def build_run_report(
+    run_data: dict,
+    run_id: str,
+    delegation_events: list[dict] | None = None,
+) -> dict:
+    """
+    Build an evidence report dict from run state. No sys.exit.
+
+    delegation_events: list of sanitized delegation event dicts loaded from
+        .devflow/delegation-events/, or None when the directory was absent
+        (status=unavailable).  Pass [] for "directory exists but no events".
+    """
     tasks = run_data.get("tasks", [])
     gates = run_data.get("approval_gates", {})
 
@@ -691,19 +821,79 @@ def build_run_report(run_data: dict, run_id: str) -> dict:
     else:
         merge_recommendation = "not_ready"
 
-    boundary_note = (
-        "Tüm task'lar 'planned' delegation durumunda. "
-        "Gerçek agent dispatch doğrulanmadı."
-        if not any_confirmed
-        else "En az bir task gerçek agent session kanıtıyla doğrulandı."
-    )
+    # ---------------------------------------------------------------------------
+    # Delegation evidence: requested/configured vs observed distinction
+    #
+    # "requested_execution_mode" / "agent_teams_requested" — what was configured
+    # "native_delegation_observed" / "observed_delegation_count" — from hook events
+    # "delegation_evidence_status" — "unavailable" | "not_observed" | "observed"
+    #
+    # Rules:
+    # - delegation_events=None  → status="unavailable" (hook not running)
+    # - delegation_events=[]    → status="not_observed" (hook ran; no subagent started)
+    # - SubagentStart in events → status="observed"
+    # Never claim delegation success without a native hook event.
+    # ---------------------------------------------------------------------------
+    execution_mode = run_data.get("execution_mode", "subagents")
+    agent_teams_requested = run_data.get("requested_agent_teams", False)
+
+    if delegation_events is None:
+        delegation_status = "unavailable"
+        native_observed = False
+        observed_count = 0
+    else:
+        subagent_starts = [e for e in delegation_events if e.get("hook_event") == "SubagentStart"]
+        observed_count = len(subagent_starts)
+        native_observed = observed_count > 0
+        delegation_status = "observed" if native_observed else "not_observed"
+
+    boundary_note: str
+    if native_observed:
+        boundary_note = (
+            f"{observed_count} SubagentStart event(s) kayıtlı. "
+            "Gerçek native delegation kanıtlandı."
+        )
+    elif delegation_status == "not_observed":
+        boundary_note = (
+            "Delegation events dizini mevcut ancak SubagentStart kaydı yok. "
+            "Gerçek agent dispatch gözlemlenmedi."
+        )
+    else:
+        boundary_note = (
+            "Tüm task'lar 'planned' delegation durumunda. "
+            "Gerçek agent dispatch doğrulanmadı."
+            if not any_confirmed
+            else "En az bir task gerçek agent session kanıtıyla doğrulandı."
+        )
+
+    # ---------------------------------------------------------------------------
+    # Evidence provenance — each source category is classified independently.
+    #
+    # "user_provided"    — supplied by the user outside this run
+    # "generated_in_run" — produced by an agent within this same run
+    # "test_command"     — verified by a test runner command (tests_passing gate)
+    # "native_hook_event"— recorded by the native hook mechanism
+    # "human_review"     — confirmed by a human (human_approval gate)
+    # "unavailable"      — not present or not verifiable
+    #
+    # AC generated in the same run is never presented as user-approved or
+    # independent sign-off.  Security checklists from the same run are never
+    # presented as a separate security-agent session without native evidence.
+    # ---------------------------------------------------------------------------
+    evidence_provenance = {
+        "acceptance_criteria": "generated_in_run",
+        "qa_result": "test_command" if qa_done else "unavailable",
+        "security_review": "generated_in_run" if security_done else "unavailable",
+        "human_approval": "human_review" if human_done else "unavailable",
+        "native_delegation": "native_hook_event" if native_observed else "unavailable",
+    }
 
     return {
         "schema_version": "1",
         "run_id": run_id,
         "objective": run_data.get("objective", ""),
-        "execution_mode": run_data.get("execution_mode", "subagents"),
-        "requested_agent_teams": run_data.get("requested_agent_teams", False),
+        "execution_mode": execution_mode,
+        "requested_agent_teams": agent_teams_requested,
         "task_graph_summary": {
             "total": total,
             "completed_or_verified": completed_count,
@@ -729,9 +919,15 @@ def build_run_report(run_data: dict, run_id: str) -> dict:
             "production deploy insan tarafından yapılmalıdır",
         ],
         "delegation_evidence": {
+            "requested_execution_mode": execution_mode,
+            "agent_teams_requested": agent_teams_requested,
+            "native_delegation_observed": native_observed,
+            "observed_delegation_count": observed_count,
+            "delegation_evidence_status": delegation_status,
             "any_delegation_confirmed": any_confirmed,
             "boundary_note": boundary_note,
         },
+        "evidence_provenance": evidence_provenance,
         "merge_recommendation": merge_recommendation,
         "report_generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
@@ -1376,7 +1572,11 @@ def cmd_generate_run_report(args) -> int:
     run_file = devflow / "runs" / f"{run_id}.json"
     run_data = read_json(run_file)
 
-    report = build_run_report(run_data, run_id)
+    delegation_events, _delegation_status = load_delegation_events(devflow)
+    # Pass None when the directory is absent so build_run_report can distinguish
+    # "hook not configured" (unavailable) from "hook ran but no subagent started" (not_observed).
+    events_arg = None if _delegation_status == "unavailable" else delegation_events
+    report = build_run_report(run_data, run_id, delegation_events=events_arg)
 
     reports_dir = devflow / "reports"
     reports_dir.mkdir(exist_ok=True)
@@ -1385,6 +1585,7 @@ def cmd_generate_run_report(args) -> int:
 
     summary = report["task_graph_summary"]
     delegation = report["delegation_evidence"]
+    provenance = report["evidence_provenance"]
     print(f"Run raporu: {run_id}")
     print(f"  objective: {report['objective'][:80]}")
     print(f"  execution_mode: {report['execution_mode']}")
@@ -1392,11 +1593,15 @@ def cmd_generate_run_report(args) -> int:
           f"{summary['completed_or_verified']} tamamlandı, "
           f"{summary['verified']} doğrulandı")
     print(f"  qa_result: {report['qa_result']}")
-    print(f"  delegation_confirmed: {delegation['any_delegation_confirmed']}")
+    print(f"  delegation_evidence_status: {delegation['delegation_evidence_status']}")
+    print(f"  native_delegation_observed: {delegation['native_delegation_observed']}")
+    print(f"  agent_teams_requested: {delegation['agent_teams_requested']}")
     print(f"  merge_recommendation: {report['merge_recommendation']}")
     print()
     print(f"  NOT (delegation): {delegation['boundary_note']}")
     print(f"  NOT (human gate): {report['human_approval_required'][0]}")
+    print(f"  provenance.acceptance_criteria: {provenance['acceptance_criteria']}")
+    print(f"  provenance.human_approval: {provenance['human_approval']}")
     print(f"  rapor kaydedildi: {report_path}")
     return 0
 

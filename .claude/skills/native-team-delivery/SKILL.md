@@ -230,6 +230,40 @@ Run state son güncellemesi:
 }
 ```
 
+## 9. Delegation Evidence Honesty
+
+Native delegasyonu raporlarken şu kavramlar kesinlikle ayrı tutulur:
+
+| Kavram | Açıklama |
+|--------|----------|
+| `requested_execution_mode` | `--agent-teams` ile yapılandırılan çalışma modu (konfigürasyon) |
+| `agent_teams_requested` | `--agent-teams` bayrağının verilip verilmediği (konfigürasyon) |
+| `native_delegation_observed` | Gerçek SubagentStart/SubagentStop hook event'inin kaydedilip kaydedilmediği (gözlem) |
+| `delegation_evidence_status` | `unavailable` / `not_observed` / `observed` (hook evidence durumu) |
+
+### Kurallar
+
+1. **Native hook event olmadan "delegated", "executed by role", "agent teams active" iddiası yapılmaz.**
+2. `--agent-teams` yalnızca konfigürasyon kanıtıdır; gerçek dispatch gözlemi değildir.
+3. Delegation event yoksa `delegation_evidence_status: "not_observed"` veya `"unavailable"` kullanılır.
+4. Bir task'ın work-product'ı QA tarafından doğrulanmış olabilir; ancak atanan rolün gerçek native session'da çalıştığı iddiası yalnızca native hook event varsa yapılır.
+5. Aynı run içinde üretilen acceptance criteria, bağımsız kullanıcı onayı gibi gösterilmez.
+6. Aynı run içinde yazılan security checklist, ayrı security-agent session kanıtı olmadan "security-red-team executed" olarak gösterilmez.
+
+### Minimum Artefact Politikası
+
+Küçük, düşük riskli, local objective'ler için gereksiz rol, görev ve belge üretilmez.
+
+**Risk sinyal yoksa (pure-Python utility, local tool, no API/auth/external):**
+- `backend_utility` delivery tipi kullanılır: planning + implementation + qa + release
+- Frontend, API contract design, ADR, standalone security report üretilmez
+
+**Risk sinyali varsa (API surface, auth, payment, external service, deployment, schema migration):**
+- Uygun delivery tipi (`new_feature`, `security_response`, vb.) seçilir
+- Gerekli ek görevler deterministik sinyal eşleşmesiyle eklenir; LLM yorumuna bırakılmaz
+
+Risk sinyali tespiti için `detect_objective_risk_signals()` fonksiyonu kullanılır.
+
 ## Kısıtlar
 
 - Context pack'te ham NotebookLM/Obsidian içeriği, token, URL veya credential bulunmaz.
@@ -239,3 +273,5 @@ Run state son güncellemesi:
 - Main merge, force push, deploy, migration, credential değişikliği insan onayı olmadan yapılmaz.
 - Bu protokol native Claude Code agent team/subagent mekanizmasını yönlendirir;
   ayrı bir API/SDK dispatcher değildir.
+- Gerçek native dispatch olmayan yerde sahte delegation summary üretilmez.
+- Inline delivery, başarısızlık değildir; ancak "delegation success" olarak raporlanamaz.
