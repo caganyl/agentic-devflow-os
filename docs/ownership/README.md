@@ -233,6 +233,74 @@ adımda bu script `.github/workflows/ownership-governance.yml` olarak
 bağlanacaktır (bkz.
 `docs/architecture/adr/ADR-004-ownership-ci-diff-enforcement.md`).
 
+## Feature Bootstrap PR
+
+`req-NNN-feature-name` branch'inde `docs/ownership/REQ-NNN.json` base
+commit'te yoksa ve PR head'inde eklenmişse, CI diff gate bu PR'ı
+**bootstrap feature PR** olarak ele alır. Bu mod, requirement onayını ve
+implementation'ı aynı PR'a sığdırmanın desteklenen yoludur; REQ-003'te
+zorunlu olan "önce manifest PR, sonra implementation PR" çift adımına
+gerek kalmaz.
+
+### Bootstrap PR'da birlikte taşınabilecek dosyalar
+
+| Alan | Yol örnekleri |
+| --- | --- |
+| Requirement | `docs/product/requirements/REQ-NNN.md` |
+| Acceptance criteria | `docs/product/acceptance-criteria/REQ-NNN.md` |
+| Contract | `docs/contracts/openapi/REQ-NNN.yaml` |
+| Handoff | `docs/handoffs/REQ-NNN.md` |
+| Source code | `src/features/req-NNN-name/...` |
+| Tests | `tests/features/req-NNN-name/...` |
+| Design | `design/req-NNN-name/...` |
+| Evals | `evals/req-NNN-name/...` |
+
+Manifest dışındaki her değişen dosya, head manifest içindeki tam olarak
+bir owner `write_paths` kuralı tarafından kapsanmalıdır.
+Yalnızca `references.requirement` ve `references.acceptance_criteria`
+alanlarındaki dosyalar coverage denetiminden muaftır; ancak PR head'inde
+mevcut olmalı ve diff içinde değiştirilmiş olmalıdır.
+`references.contracts`, `references.adrs` ve diğer tüm dosyalar
+**coverage denetiminden muaf değildir** — ilgili owner `write_paths`
+altında olmak zorundadır.
+
+### Bootstrap güvenlik sınırları
+
+Bootstrap manifestleri aşağıdaki alanlara write authority **veremez**:
+
+- `.claude/`, `.github/`, `scripts/`, `docs/ownership/`
+- `docs/architecture/adr/` ve `docs/architecture/` altındaki tüm path'ler
+  (ADR değişiklikleri ayrı governance akışına aittir)
+- `CLAUDE.md`, `AGENTS.md`, `PROJECT_CONSTITUTION.md`, `README.md`,
+  `.gitignore`
+- `.env` ve secret/credential benzeri path'ler
+- `src`, `tests`, `docs`, `apps`, `lib`, `evals` gibi tek başına geniş
+  root path'ler ve `docs/contracts` gibi alan root path'leri
+  (bunların altındaki `src/features/req-NNN-name`,
+  `docs/contracts/openapi/req-NNN-name` veya
+  `evals/datasets/golden/req-NNN-name` gibi dar namespace path'leri
+  kabul edilir)
+
+`references.requirement` ve `references.acceptance_criteria` yalnızca
+`docs/product/requirements/` veya `docs/product/acceptance-criteria/`
+altında olabilir.
+
+Bootstrap manifest `approved` durumuyla, `approval.approved_by` ve
+`approval.approved_at` alanlarıyla birlikte gelmek zorundadır. `req_id`
+branch numarasıyla tam eşleşmelidir.
+
+Diff'te `docs/ownership/REQ-NNN.json` dışında başka bir
+`docs/ownership/` dosyası bulunursa PR reddedilir.
+
+### Ownership kapsamını sonradan genişletmek
+
+Bootstrap PR merge edildikten sonra ownership kapsamını genişletmek
+(yeni bir agent veya path eklemek) ayrı bir
+`ownership-REQ-NNN-aciklama` branch'i gerektirir. Bunun nedeni, base
+commit'te manifest artık var olduğundan `req-NNN-*` branch'inin
+manifest değiştirme izninin olmamasıdır (aşağıdaki "Ownership Registry
+Branch" ve "CI Diff Enforcement" bölümlerine bakın).
+
 ## Ownership Registry Branch
 
 Bir ownership manifesti oluşturmak veya `draft` ↔ `approved` lifecycle'ı

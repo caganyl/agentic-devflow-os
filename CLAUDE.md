@@ -21,6 +21,7 @@ Kod, plan veya mimari kararı oluşturmadan önce şunları oku:
 
 - Acceptance criteria olmadan implementation başlatma.
 - Contract olmadan frontend/backend paralel geliştirme başlatma.
+- Yeni bir REQ için ayrı manifest PR'ı açmadan önce `req-NNN-*` bootstrap PR'ını dene: requirement, AC, manifest ve source aynı diff'te taşınabilir (bkz. docs/ownership/README.md "Feature Bootstrap PR").
 - main branch'e doğrudan yazma.
 - Bir Claude session main branch üzerinde başladıysa branch oluşturma, branch değiştirme veya worktree yaratma. Kullanıcıdan normal terminalde `claude --worktree <task-name>` ile izole bir Claude oturumu başlatmasını iste.
 - Her branch ve worktree'de yalnızca bir writer agent çalışır.
