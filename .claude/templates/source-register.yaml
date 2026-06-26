@@ -1,0 +1,71 @@
+# Source Register
+# REQ-ID: REQ-XXX
+# Oluşturulma: YYYY-MM-DD
+# Son güncelleme: YYYY-MM-DD
+
+sources:
+  # Git Canonical Sources
+  - id: req-xxx
+    path: docs/product/requirements/REQ-XXX.md
+    type: requirement
+    relevance: high
+    confidence: canonical
+    last_verified: "YYYY-MM-DD"
+    notes: ""
+
+  - id: contract-api-v1
+    path: docs/contracts/api-v1.yaml
+    type: contract
+    relevance: high
+    confidence: approved
+    last_verified: "YYYY-MM-DD"
+    notes: ""
+
+  - id: adr-001
+    path: docs/architecture/adr/ADR001-example.md
+    type: adr
+    relevance: medium
+    confidence: canonical
+    last_verified: "YYYY-MM-DD"
+    notes: ""
+
+  - id: handoff-req-xxx
+    path: docs/handoffs/REQ-XXX.md
+    type: handoff
+    relevance: medium
+    confidence: draft
+    last_verified: "YYYY-MM-DD"
+    notes: ""
+
+  # NotebookLM Evidence (read-only, non-canonical)
+  - id: notebooklm-evidence-1
+    path: null
+    type: notebooklm_evidence
+    relevance: low
+    confidence: unverified
+    last_verified: "YYYY-MM-DD"
+    notes: "doğrulanması gerekiyor — Git canonical kaynakla kontrol et"
+    summary: "..."
+
+  # Obsidian Strategic Context (non-canonical)
+  - id: obsidian-strategic-1
+    path: null
+    type: obsidian_note
+    relevance: low
+    confidence: personal_note
+    last_verified: "YYYY-MM-DD"
+    notes: "kişisel bağlam — resmi kaynak değil"
+    summary: "..."
+
+# Confidence Levels:
+#   canonical     - Git'te onaylanmış, production truth
+#   approved      - Review edilmiş, onaylanmış
+#   draft         - Taslak, değişebilir
+#   unverified    - Dış kaynak, doğrulanmamış
+#   personal_note - Kişisel not, proje gerçeği değil
+#   stale         - Güncel olmayabilir
+
+# Relevance:
+#   high   - Bu görev için kritik
+#   medium - Faydalı bağlam
+#   low    - Tamamlayıcı bilgi

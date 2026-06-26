@@ -19,6 +19,9 @@ node_modules/
 dist/
 build/
 coverage/
+
+# DevFlow plugin build output
+dist/devflow-plugin/
 .next/
 out/
 .cache/
