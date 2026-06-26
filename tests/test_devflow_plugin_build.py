@@ -126,9 +126,31 @@ class PluginBuildOutputTest(unittest.TestCase):
         settings = self.plugin_dir / "settings.json"
         self.assertFalse(settings.exists(), "settings.json must NOT be in plugin output")
 
-    def test_hooks_not_copied(self):
-        hooks = self.plugin_dir / "hooks"
-        self.assertFalse(hooks.exists(), "hooks/ must NOT be in plugin output")
+    def test_plugin_hooks_json_copied(self):
+        hooks_json = self.plugin_dir / "hooks" / "hooks.json"
+        self.assertTrue(
+            hooks_json.exists(),
+            "hooks/hooks.json must be in plugin output (target safety hook)",
+        )
+
+    def test_plugin_target_guard_copied(self):
+        guard = self.plugin_dir / "scripts" / "devflow_target_guard.py"
+        self.assertTrue(
+            guard.exists(),
+            "scripts/devflow_target_guard.py must be in plugin output",
+        )
+
+    def test_framework_hooks_not_copied(self):
+        for fname in [
+            "enforce-role-boundaries.sh",
+            "protect-main.sh",
+            "protect-sensitive-paths.sh",
+            "session-start.sh",
+        ]:
+            self.assertFalse(
+                (self.plugin_dir / "hooks" / fname).exists(),
+                f"Framework hook script {fname} must NOT be in plugin output",
+            )
 
     def test_gitkeep_not_in_agents(self):
         gitkeep = self.plugin_dir / "agents" / ".gitkeep"

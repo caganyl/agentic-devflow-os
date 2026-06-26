@@ -28,12 +28,14 @@ SOURCES = {
     "workflows": CLAUDE_DIR / "workflows",
     "rules": CLAUDE_DIR / "rules",
     "scripts": REPO_ROOT / "scripts",
+    "hooks": REPO_ROOT / "hooks",
 }
 
 PLUGIN_VERSION = "1.0.0"
 
 EXCLUDED_FILES = {".gitkeep", ".DS_Store"}
-INCLUDED_SCRIPTS = frozenset({"devflow_operations.py"})
+INCLUDED_SCRIPTS = frozenset({"devflow_operations.py", "devflow_target_guard.py"})
+INCLUDED_HOOKS = frozenset({"hooks.json"})
 
 
 def copy_source_tree(sources: dict, output_dir: Path) -> None:
@@ -50,6 +52,14 @@ def copy_source_tree(sources: dict, output_dir: Path) -> None:
                     shutil.copy2(src_file, dest / fname)
                 else:
                     print(f"  [skip] scripts/{fname}: not found", file=sys.stderr)
+        elif key == "hooks":
+            dest.mkdir(parents=True, exist_ok=True)
+            for fname in INCLUDED_HOOKS:
+                src_file = src_path / fname
+                if src_file.exists():
+                    shutil.copy2(src_file, dest / fname)
+                else:
+                    print(f"  [skip] hooks/{fname}: not found", file=sys.stderr)
         elif src_path.is_dir():
             shutil.copytree(
                 src_path,

@@ -15,7 +15,7 @@ Subcommands:
 Usage:
     python3 scripts/devflow_operations.py init-target --target PATH [--force]
     python3 scripts/devflow_operations.py create-run --target PATH [--objective TEXT]
-    python3 scripts/devflow_operations.py launch --target PATH [--objective TEXT] [--dry-run]
+    python3 scripts/devflow_operations.py launch --target PATH [--objective TEXT] [--dry-run] [--agent-teams]
     python3 scripts/devflow_operations.py status --target PATH
     python3 scripts/devflow_operations.py prepare-delivery --target PATH [--confirm-delivery]
 
@@ -441,6 +441,9 @@ def cmd_create_run(args) -> int:
     branch_name = make_branch_name(run_id)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    agent_teams_requested = getattr(args, "agent_teams", False)
+    execution_mode = "agent_teams" if agent_teams_requested else "subagents"
+
     run_state = {
         "schema_version": DEVFLOW_SCHEMA_VERSION,
         "run_id": run_id,
@@ -448,6 +451,10 @@ def cmd_create_run(args) -> int:
         "status": "created",
         "branch_name": branch_name,
         "objective": getattr(args, "objective", None) or "",
+        "execution_mode": execution_mode,
+        "requested_agent_teams": agent_teams_requested,
+        "task_graph_status": "not_started",
+        "context_pack_status": "not_started",
         "artifacts": [],
         "tasks": [],
         "approval_gates": {
@@ -478,6 +485,8 @@ def cmd_launch(args) -> int:
     target = Path(args.target).resolve()
     validate_target_path(target)
     dry_run = getattr(args, "dry_run", False)
+    agent_teams = getattr(args, "agent_teams", False)
+    execution_mode = "agent_teams" if agent_teams else "subagents"
 
     # Require clean working tree before creating a worktree
     if not is_working_tree_clean(target):
@@ -510,22 +519,31 @@ def cmd_launch(args) -> int:
 
     # --dry-run: show plan only, create nothing
     if dry_run:
+        agent_teams_label = "enabled" if agent_teams else "disabled"
+        env_plan = (
+            f"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1"
+            if agent_teams
+            else "[standard env, no agent-teams flag]"
+        )
         print("=== DevFlow Launch Plan (dry-run) ===")
-        print(f"  run ID:     {run_id}")
-        print(f"  branch:     {branch_name}")
-        print(f"  worktree:   {worktree_path}")
-        print(f"  plugin:     {plugin_dir}")
-        print(f"  claude cmd: claude --plugin-dir {plugin_dir} <supervisor prompt>")
-        print(f"  target:     {target}")
+        print(f"  run ID:         {run_id}")
+        print(f"  branch:         {branch_name}")
+        print(f"  worktree:       {worktree_path}")
+        print(f"  plugin:         {plugin_dir}")
+        print(f"  target:         {target}")
+        print(f"  execution mode: {execution_mode}")
+        print(f"  agent teams:    {agent_teams_label}")
+        print(f"  env (planned):  {env_plan}")
         if claude_binary:
-            print(f"  claude:     {claude_binary}")
-            print(
-                f"  claude cmd: {claude_binary} --plugin-dir {plugin_dir} \"<supervisor prompt>\""
-            )
+            print(f"  claude:         {claude_binary}")
         else:
-            print("  claude:     [not found — install Claude Code CLI]")
+            print("  claude:         [not found — install Claude Code CLI]")
+        binary_label = claude_binary or "claude"
         print(
-            f"  git cmd:    git worktree add -b {branch_name} {worktree_path} HEAD"
+            f"  claude cmd:     {binary_label} --plugin-dir {plugin_dir} \"<supervisor prompt>\""
+        )
+        print(
+            f"  git cmd:        git worktree add -b {branch_name} {worktree_path} HEAD"
         )
         print()
         print("  [dry-run] Hiçbir dosya, branch veya worktree oluşturulmadı.")
@@ -606,6 +624,7 @@ def cmd_launch(args) -> int:
     create_ns = argparse.Namespace(
         target=str(worktree_path),
         objective=objective,
+        agent_teams=agent_teams,
     )
     create_result = cmd_create_run(create_ns)
     if create_result != 0:
@@ -641,18 +660,28 @@ def cmd_launch(args) -> int:
     )
 
     print("Claude Code supervisor başlatılıyor (interaktif)...")
-    print(f"  worktree:   {worktree_path}")
-    print(f"  plugin-dir: {plugin_dir}")
-    print(f"  binary:     {claude_binary}")
+    print(f"  worktree:       {worktree_path}")
+    print(f"  plugin-dir:     {plugin_dir}")
+    print(f"  binary:         {claude_binary}")
+    print(f"  execution mode: {execution_mode}")
+
+    # Build child environment — copy parent env, never mutate os.environ
+    child_env = os.environ.copy()
+
+    # Set agent teams flag only in child env; remove it for default launch
+    if agent_teams:
+        child_env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
+    else:
+        child_env.pop("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", None)
 
     # Change CWD to run worktree before replacing process
     os.chdir(str(worktree_path))
-    os.execv(claude_binary, [
+    os.execve(claude_binary, [
         claude_binary,
         "--plugin-dir", str(plugin_dir),
         supervisor_prompt,
-    ])
-    # execv replaces this process; this line is unreachable
+    ], child_env)
+    # execve replaces this process; this line is unreachable
     print("Hata: Claude başlatılamadı.", file=sys.stderr)
     sys.exit(6)
 
@@ -783,6 +812,16 @@ def main() -> None:
     p_launch.add_argument("--target", required=True, help="Target project path")
     p_launch.add_argument("--objective", default=None, help="Run hedefi")
     p_launch.add_argument("--dry-run", action="store_true", help="Plan göster, hiçbir şey oluşturma")
+    p_launch.add_argument(
+        "--agent-teams",
+        action="store_true",
+        default=False,
+        help=(
+            "Bu run için CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 aktif et. "
+            "Yalnızca spawned Claude process'ini etkiler; "
+            "shell environment veya settings dosyaları değişmez."
+        ),
+    )
     p_launch.set_defaults(func=cmd_launch)
 
     p_status = subparsers.add_parser("status", help="Run durumunu göster")
