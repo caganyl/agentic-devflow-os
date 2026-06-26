@@ -1,0 +1,36 @@
+{
+  "schema_version": "1",
+  "_template": "target-project-policy",
+  "_instructions": "Bu dosya target project .devflow/policy.json şablonudur. devflow_operations.py init-target tarafından otomatik oluşturulur.",
+  "forbidden_git_operations": [
+    "merge",
+    "push --force",
+    "push -f",
+    "branch -d",
+    "branch -D",
+    "reset --hard",
+    "reset --soft",
+    "reset --mixed",
+    "checkout -- .",
+    "restore .",
+    "clean -f"
+  ],
+  "require_confirm_delivery": true,
+  "protected_branches": ["main", "master"],
+  "run_branch_prefix": "devflow/run-",
+  "dry_run_by_default": true,
+  "delivery_gates": {
+    "contract_approved": false,
+    "tests_passing": false,
+    "security_review_complete": false,
+    "qa_sign_off": false,
+    "human_approval": false
+  },
+  "notes": [
+    "main merge insan onayı gerektirir.",
+    "force push, branch silme ve reset yasaktır.",
+    "prepare-delivery yalnızca --confirm-delivery ile gerçek operasyon yapar.",
+    "main branch üzerinde prepare-delivery çalışmaz.",
+    "Production deploy ve database migration agent yetkisinde değildir."
+  ]
+}
