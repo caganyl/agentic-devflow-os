@@ -6,11 +6,14 @@ Managed operations for target project initialization and delivery.
 Standard library only. No third-party dependencies.
 
 Subcommands:
-    init-target       Initialize .devflow/ workspace in a target project (non-protected branch only)
-    create-run        Create a new delivery run (non-protected branch only)
-    launch            Launch Claude Code supervisor in a managed run worktree
-    status            Show current run state
-    prepare-delivery  Validate delivery readiness (approval evidence only; no real Git mutations)
+    init-target           Initialize .devflow/ workspace in a target project (non-protected branch only)
+    create-run            Create a new delivery run (non-protected branch only)
+    launch                Launch Claude Code supervisor in a managed run worktree
+    status                Show current run state
+    prepare-delivery      Validate delivery readiness (approval evidence only; no real Git mutations)
+    generate-task-graph   Generate deterministic task graph for a delivery type
+    update-task-status    Update a task's status with state transition validation
+    generate-run-report   Generate run evidence report with merge recommendation
 
 Usage:
     python3 scripts/devflow_operations.py init-target --target PATH [--force]
@@ -18,6 +21,9 @@ Usage:
     python3 scripts/devflow_operations.py launch --target PATH [--objective TEXT] [--dry-run] [--agent-teams]
     python3 scripts/devflow_operations.py status --target PATH
     python3 scripts/devflow_operations.py prepare-delivery --target PATH [--confirm-delivery]
+    python3 scripts/devflow_operations.py generate-task-graph --target PATH --delivery-type TYPE [--objective TEXT] [--force]
+    python3 scripts/devflow_operations.py update-task-status --target PATH --task-id ID --status STATUS
+    python3 scripts/devflow_operations.py generate-run-report --target PATH
 
 Exit codes:
     0   Success
@@ -30,9 +36,12 @@ Exit codes:
     7   Operation refused on protected branch (main/master)
     8   Forbidden git operation detected in planned command string
     9   Approval gates not passed
-    10  Source register entry contains forbidden field
+    10  Source register entry or task packet contains forbidden field
     11  Working tree is not clean (launch requires clean state)
     12  Run branch or worktree path already exists (collision)
+    13  Unknown or unsupported delivery type
+    14  Task not found in active run
+    15  Invalid task state transition
 
 IMPORTANT — validate_forbidden_git_operation:
     This function validates planned operation *strings* passed to it by callers.
@@ -87,6 +96,259 @@ FORBIDDEN_SOURCE_FIELDS = frozenset({
 
 FORBIDDEN_NOTEBOOKLM_FIELDS = FORBIDDEN_SOURCE_FIELDS | frozenset({"url"})
 
+# ---------------------------------------------------------------------------
+# Task state machine
+# ---------------------------------------------------------------------------
+
+TASK_STATES = frozenset({
+    "planned",
+    "ready",
+    "in_progress",
+    "blocked",
+    "completed",
+    "verified",
+    "failed",
+    "awaiting_human_approval",
+})
+
+VALID_TASK_TRANSITIONS: dict[str, set[str]] = {
+    "planned": {"ready", "failed"},
+    "ready": {"in_progress", "blocked", "failed"},
+    "in_progress": {"completed", "blocked", "failed", "awaiting_human_approval"},
+    "blocked": {"ready", "failed"},
+    "completed": {"verified", "awaiting_human_approval", "failed"},
+    "verified": set(),
+    "failed": {"planned"},
+    "awaiting_human_approval": {"verified", "failed"},
+}
+
+FORBIDDEN_PACKET_FIELDS = frozenset({
+    "token",
+    "credential",
+    "credentials",
+    "password",
+    "api_key",
+    "apikey",
+    "secret",
+    "notebook_content",
+    "raw_content",
+    "url",
+})
+
+SUPPORTED_DELIVERY_TYPES = frozenset({
+    "new_feature",
+    "ai_rag",
+    "data_dashboard",
+    "bug_resolution",
+    "security_response",
+    "release_readiness",
+    "cost_optimization",
+    "new_product_discovery",
+})
+
+# ---------------------------------------------------------------------------
+# Delivery type task graph templates
+#
+# Each template entry: (id_suffix, title, task_type, assigned_role,
+#                       dep_suffixes, qa_expectation, output_path)
+# ---------------------------------------------------------------------------
+
+_T = tuple  # shorthand for template tuple
+
+DELIVERY_TYPE_TASK_TEMPLATES: dict[str, list[dict]] = {
+    "new_feature": [
+        {"id_suffix": "001", "title": "Delivery Planning", "task_type": "planning",
+         "assigned_role": "delivery-lead", "dep_suffixes": [],
+         "qa_expectation": "Task graph ve context pack hazır",
+         "output_path": ".devflow/context/"},
+        {"id_suffix": "002", "title": "Acceptance Criteria Review", "task_type": "planning",
+         "assigned_role": "product-analyst", "dep_suffixes": ["001"],
+         "qa_expectation": "Acceptance criteria netleştirildi ve onaylandı",
+         "output_path": ".devflow/context/acceptance-criteria.md"},
+        {"id_suffix": "003", "title": "Architecture Decision", "task_type": "planning",
+         "assigned_role": "solution-architect", "dep_suffixes": ["001"],
+         "qa_expectation": "ADR taslağı üretildi",
+         "output_path": "docs/architecture/adr/"},
+        {"id_suffix": "004", "title": "API Contract Design", "task_type": "contract",
+         "assigned_role": "contract-broker", "dep_suffixes": ["002", "003"],
+         "qa_expectation": "Contract onaylandı; frontend ve backend paralel başlayabilir",
+         "output_path": "docs/contracts/"},
+        {"id_suffix": "005", "title": "Backend Implementation", "task_type": "implementation",
+         "assigned_role": "backend-engineer", "dep_suffixes": ["004"],
+         "qa_expectation": "API endpoint'ler çalışıyor; birim testler geçiyor",
+         "output_path": "src/"},
+        {"id_suffix": "006", "title": "Frontend Implementation", "task_type": "implementation",
+         "assigned_role": "frontend-engineer", "dep_suffixes": ["004"],
+         "qa_expectation": "UI bileşenleri çalışıyor; erişilebilirlik kontrol edildi",
+         "output_path": "src/"},
+        {"id_suffix": "007", "title": "QA Test Suite", "task_type": "qa",
+         "assigned_role": "qa-automation", "dep_suffixes": ["005", "006"],
+         "qa_expectation": "Tüm acceptance criteria testleri geçiyor",
+         "output_path": "tests/"},
+        {"id_suffix": "008", "title": "Security Review", "task_type": "security_review",
+         "assigned_role": "security-red-team", "dep_suffixes": ["005", "006"],
+         "qa_expectation": "Güvenlik raporu üretildi; blocker bulgu yok",
+         "output_path": "docs/quality/security-reports/"},
+        {"id_suffix": "009", "title": "Integration and Release Scorecard", "task_type": "release",
+         "assigned_role": "integration-release", "dep_suffixes": ["007", "008"],
+         "qa_expectation": "Scorecard 'merge ready' veya 'awaiting human approval'",
+         "output_path": ".devflow/reports/"},
+    ],
+    "ai_rag": [
+        {"id_suffix": "001", "title": "Delivery Planning", "task_type": "planning",
+         "assigned_role": "delivery-lead", "dep_suffixes": [],
+         "qa_expectation": "Task graph, eval gate noktaları ve context pack hazır",
+         "output_path": ".devflow/context/"},
+        {"id_suffix": "002", "title": "AI and Data Engineering", "task_type": "implementation",
+         "assigned_role": "ai-data-engineer", "dep_suffixes": ["001"],
+         "qa_expectation": "LLM entegrasyonu, RAG pipeline ve eval config hazır",
+         "output_path": "src/"},
+        {"id_suffix": "003", "title": "Backend API", "task_type": "implementation",
+         "assigned_role": "backend-engineer", "dep_suffixes": ["001"],
+         "qa_expectation": "AI feature backend API çalışıyor",
+         "output_path": "src/"},
+        {"id_suffix": "004", "title": "EvalOps Review", "task_type": "eval",
+         "assigned_role": "evalops-reviewer", "dep_suffixes": ["002", "003"],
+         "qa_expectation": "Golden dataset eval geçti; quality scorecard üretildi",
+         "output_path": "evals/scorecards/"},
+        {"id_suffix": "005", "title": "Security Review", "task_type": "security_review",
+         "assigned_role": "security-red-team", "dep_suffixes": ["002", "003"],
+         "qa_expectation": "Prompt injection ve data leakage riskleri değerlendirildi",
+         "output_path": "docs/quality/security-reports/"},
+        {"id_suffix": "006", "title": "Integration and Release Scorecard", "task_type": "release",
+         "assigned_role": "integration-release", "dep_suffixes": ["004", "005"],
+         "qa_expectation": "Scorecard 'merge ready' veya 'awaiting human approval'",
+         "output_path": ".devflow/reports/"},
+    ],
+    "data_dashboard": [
+        {"id_suffix": "001", "title": "Delivery Planning", "task_type": "planning",
+         "assigned_role": "delivery-lead", "dep_suffixes": [],
+         "qa_expectation": "Task graph, metrik/KPI tanımları ve context pack hazır",
+         "output_path": ".devflow/context/"},
+        {"id_suffix": "002", "title": "Data Pipeline", "task_type": "implementation",
+         "assigned_role": "ai-data-engineer", "dep_suffixes": ["001"],
+         "qa_expectation": "Veri pipeline çalışıyor; metrikler doğru hesaplanıyor",
+         "output_path": "src/"},
+        {"id_suffix": "003", "title": "Backend API", "task_type": "implementation",
+         "assigned_role": "backend-engineer", "dep_suffixes": ["001"],
+         "qa_expectation": "Veri API endpoint'leri çalışıyor",
+         "output_path": "src/"},
+        {"id_suffix": "004", "title": "Design Review", "task_type": "design",
+         "assigned_role": "design-reviewer", "dep_suffixes": ["001"],
+         "qa_expectation": "Dashboard layout, erişilebilirlik ve bilgi hiyerarşisi onaylandı",
+         "output_path": "docs/quality/"},
+        {"id_suffix": "005", "title": "QA Automation", "task_type": "qa",
+         "assigned_role": "qa-automation", "dep_suffixes": ["002", "003", "004"],
+         "qa_expectation": "Veri doğruluk testleri ve UI regression testleri geçiyor",
+         "output_path": "tests/"},
+        {"id_suffix": "006", "title": "Integration and Release Scorecard", "task_type": "release",
+         "assigned_role": "integration-release", "dep_suffixes": ["005"],
+         "qa_expectation": "Scorecard 'merge ready' veya 'awaiting human approval'",
+         "output_path": ".devflow/reports/"},
+    ],
+    "bug_resolution": [
+        {"id_suffix": "001", "title": "Delivery Planning and Triage", "task_type": "planning",
+         "assigned_role": "delivery-lead", "dep_suffixes": [],
+         "qa_expectation": "Bug severity ve kapsam belirlendi",
+         "output_path": ".devflow/context/"},
+        {"id_suffix": "002", "title": "QA Bug Reproduction", "task_type": "qa",
+         "assigned_role": "qa-automation", "dep_suffixes": ["001"],
+         "qa_expectation": "Bug repro testi yazıldı ve başarısız oluyor (kanıt)",
+         "output_path": "tests/"},
+        {"id_suffix": "003", "title": "Bug Fix Implementation", "task_type": "implementation",
+         "assigned_role": "backend-engineer", "dep_suffixes": ["002"],
+         "qa_expectation": "Fix yazıldı; repro testi geçiyor",
+         "output_path": "src/"},
+        {"id_suffix": "004", "title": "QA Verification", "task_type": "qa",
+         "assigned_role": "qa-automation", "dep_suffixes": ["003"],
+         "qa_expectation": "Repro testi geçiyor; regression suite temiz",
+         "output_path": "tests/"},
+        {"id_suffix": "005", "title": "Integration and Release Scorecard", "task_type": "release",
+         "assigned_role": "integration-release", "dep_suffixes": ["004"],
+         "qa_expectation": "Scorecard 'merge ready' veya 'awaiting human approval'",
+         "output_path": ".devflow/reports/"},
+    ],
+    "security_response": [
+        {"id_suffix": "001", "title": "Security Planning and Triage", "task_type": "planning",
+         "assigned_role": "delivery-lead", "dep_suffixes": [],
+         "qa_expectation": "Güvenlik severity ve kapsam belirlendi",
+         "output_path": ".devflow/context/"},
+        {"id_suffix": "002", "title": "Threat Analysis", "task_type": "security_review",
+         "assigned_role": "security-red-team", "dep_suffixes": ["001"],
+         "qa_expectation": "Tehdit modeli ve remediation planı hazır",
+         "output_path": "docs/quality/security-reports/"},
+        {"id_suffix": "003", "title": "Security Patch Implementation", "task_type": "implementation",
+         "assigned_role": "backend-engineer", "dep_suffixes": ["002"],
+         "qa_expectation": "Güvenlik patch uygulandı",
+         "output_path": "src/"},
+        {"id_suffix": "004", "title": "Security Fix Verification", "task_type": "qa",
+         "assigned_role": "qa-automation", "dep_suffixes": ["003"],
+         "qa_expectation": "Güvenlik testleri geçiyor; yeni regression yok",
+         "output_path": "tests/"},
+        {"id_suffix": "005", "title": "Integration and Release Scorecard", "task_type": "release",
+         "assigned_role": "integration-release", "dep_suffixes": ["004"],
+         "qa_expectation": "Scorecard 'merge ready' veya 'awaiting human approval'",
+         "output_path": ".devflow/reports/"},
+    ],
+    "release_readiness": [
+        {"id_suffix": "001", "title": "Release Planning", "task_type": "planning",
+         "assigned_role": "delivery-lead", "dep_suffixes": [],
+         "qa_expectation": "Kapsam, CI durumu ve bilinen sorunlar belgelendi",
+         "output_path": ".devflow/context/"},
+        {"id_suffix": "002", "title": "QA Final Review", "task_type": "qa",
+         "assigned_role": "qa-automation", "dep_suffixes": ["001"],
+         "qa_expectation": "Test coverage son kontrolü ve regression temiz",
+         "output_path": "tests/"},
+        {"id_suffix": "003", "title": "Security Final Scan", "task_type": "security_review",
+         "assigned_role": "security-red-team", "dep_suffixes": ["001"],
+         "qa_expectation": "Son güvenlik taraması tamamlandı; blocker yok",
+         "output_path": "docs/quality/security-reports/"},
+        {"id_suffix": "004", "title": "Release Scorecard", "task_type": "release",
+         "assigned_role": "integration-release", "dep_suffixes": ["002", "003"],
+         "qa_expectation": "Scorecard 'merge ready' veya 'awaiting human approval'",
+         "output_path": ".devflow/reports/"},
+    ],
+    "cost_optimization": [
+        {"id_suffix": "001", "title": "Delivery Planning and Baseline", "task_type": "planning",
+         "assigned_role": "delivery-lead", "dep_suffixes": [],
+         "qa_expectation": "Mevcut baseline (cost/latency/quality) ölçüldü",
+         "output_path": ".devflow/context/"},
+        {"id_suffix": "002", "title": "Architecture Analysis", "task_type": "planning",
+         "assigned_role": "solution-architect", "dep_suffixes": ["001"],
+         "qa_expectation": "İyileştirme seçenekleri değerlendirildi; ADR üretildi",
+         "output_path": "docs/architecture/adr/"},
+        {"id_suffix": "003", "title": "Cost Optimization Implementation", "task_type": "implementation",
+         "assigned_role": "ai-data-engineer", "dep_suffixes": ["002"],
+         "qa_expectation": "Optimizasyon uygulandı; maliyet azaldı",
+         "output_path": "src/"},
+        {"id_suffix": "004", "title": "Benchmark and Release Scorecard", "task_type": "release",
+         "assigned_role": "integration-release", "dep_suffixes": ["003"],
+         "qa_expectation": "Yeni benchmark tamamlandı; quality regression yok",
+         "output_path": ".devflow/reports/"},
+    ],
+    "new_product_discovery": [
+        {"id_suffix": "001", "title": "Discovery Planning", "task_type": "planning",
+         "assigned_role": "delivery-lead", "dep_suffixes": [],
+         "qa_expectation": "Problem statement ve kapsam netleştirildi",
+         "output_path": ".devflow/context/"},
+        {"id_suffix": "002", "title": "Product Analysis and PRD", "task_type": "planning",
+         "assigned_role": "product-analyst", "dep_suffixes": ["001"],
+         "qa_expectation": "PRD taslağı ve acceptance criteria üretildi",
+         "output_path": "docs/product/requirements/"},
+        {"id_suffix": "003", "title": "Design Review", "task_type": "design",
+         "assigned_role": "design-reviewer", "dep_suffixes": ["002"],
+         "qa_expectation": "Kullanıcı akışı ve UX değerlendirmesi tamamlandı",
+         "output_path": "docs/quality/"},
+        {"id_suffix": "004", "title": "Technical Feasibility", "task_type": "planning",
+         "assigned_role": "solution-architect", "dep_suffixes": ["002"],
+         "qa_expectation": "Teknik feasibility değerlendirmesi ve ADR taslağı hazır",
+         "output_path": "docs/architecture/adr/"},
+        {"id_suffix": "005", "title": "Human Approval Gate", "task_type": "approval",
+         "assigned_role": "delivery-lead", "dep_suffixes": ["002", "003", "004"],
+         "qa_expectation": "PRD ve feasibility insan tarafından review edildi ve onaylandı",
+         "output_path": ".devflow/context/"},
+    ],
+}
 
 # ---------------------------------------------------------------------------
 # Atomic I/O helpers
@@ -285,6 +547,194 @@ def validate_source_register_entry(entry: dict) -> None:
                 file=sys.stderr,
             )
             sys.exit(10)
+
+
+# ---------------------------------------------------------------------------
+# Task state machine utilities
+# ---------------------------------------------------------------------------
+
+def validate_task_transition(
+    task_id: str,
+    from_status: str,
+    to_status: str,
+    run_gates: dict,
+) -> tuple[bool, str]:
+    """Return (ok, error_message). Does not call sys.exit — caller decides."""
+    if from_status not in TASK_STATES:
+        return False, f"Geçersiz mevcut durum: '{from_status}'"
+    if to_status not in TASK_STATES:
+        return False, f"Geçersiz hedef durum: '{to_status}'"
+    allowed = VALID_TASK_TRANSITIONS.get(from_status, set())
+    if to_status not in allowed:
+        return False, (
+            f"Geçersiz durum geçişi: '{from_status}' → '{to_status}'. "
+            f"İzin verilenler: {sorted(allowed) if allowed else '[]'}"
+        )
+    if from_status == "completed" and to_status == "verified":
+        if not run_gates.get("qa_sign_off", False):
+            return False, (
+                "QA doğrulaması tamamlanmadan 'verified' durumuna geçilemez. "
+                "approval_gates.qa_sign_off = true olmalıdır."
+            )
+    if from_status == "awaiting_human_approval" and to_status == "verified":
+        if not run_gates.get("human_approval", False):
+            return False, (
+                "İnsan onayı olmadan 'verified' durumuna geçilemez. "
+                "approval_gates.human_approval = true olmalıdır."
+            )
+    return True, ""
+
+
+def generate_task_graph_nodes(run_id: str, delivery_type: str, objective: str) -> list:
+    """Return a deterministic list of task node dicts for the given delivery type."""
+    templates = DELIVERY_TYPE_TASK_TEMPLATES.get(delivery_type, [])
+    tasks = []
+    for tmpl in templates:
+        task_id = f"{run_id}-TASK-{tmpl['id_suffix']}"
+        dep_ids = [f"{run_id}-TASK-{s}" for s in tmpl["dep_suffixes"]]
+        tasks.append({
+            "id": task_id,
+            "title": tmpl["title"],
+            "task_type": tmpl["task_type"],
+            "assigned_role": tmpl["assigned_role"],
+            "dependency_ids": dep_ids,
+            "acceptance_criteria_ref": f"objective: {objective[:200]}",
+            "qa_expectation": tmpl["qa_expectation"],
+            "status": "planned",
+            "output_path": tmpl["output_path"],
+            "expected_evidence_path": tmpl["output_path"],
+            "delegation_status": "planned",
+        })
+    return tasks
+
+
+def validate_task_packet_dict(packet: dict) -> None:
+    """Exit 10 if the packet contains a forbidden top-level field."""
+    for field in FORBIDDEN_PACKET_FIELDS:
+        if field in packet:
+            print(
+                f"Hata: Task packet'te yasak alan '{field}' bulundu.",
+                file=sys.stderr,
+            )
+            sys.exit(10)
+
+
+def generate_task_packet_dict(task: dict, run_id: str, objective: str) -> dict:
+    """Return a task packet dict with no forbidden fields."""
+    return {
+        "schema_version": "1",
+        "run_id": run_id,
+        "task_id": task["id"],
+        "objective_summary": (objective or "")[:500],
+        "assigned_role": task.get("assigned_role", ""),
+        "title": task.get("title", ""),
+        "task_type": task.get("task_type", ""),
+        "context_refs": [".devflow/context/context-pack.md"],
+        "dependency_ids": task.get("dependency_ids", []),
+        "expected_output_paths": [task.get("output_path", "")],
+        "expected_evidence_path": task.get("expected_evidence_path", ""),
+        "qa_expectation": task.get("qa_expectation", ""),
+        "prohibitions": [
+            "main branch'e doğrudan yazma",
+            "Secret, token, credential veya kişisel veri commit etme",
+            "Production altyapısını veya database'i değiştirme",
+            "main merge veya production deploy yapma",
+            "Bu task'ın ownership alanı dışında dosya değiştirme",
+        ],
+        "human_approval_points": [
+            "main merge insan onayı gerektirir",
+            "production deploy insan onayı gerektirir",
+        ],
+        "delegation_status": task.get("delegation_status", "planned"),
+    }
+
+
+def build_run_report(run_data: dict, run_id: str) -> dict:
+    """Build an evidence report dict from run state. No sys.exit."""
+    tasks = run_data.get("tasks", [])
+    gates = run_data.get("approval_gates", {})
+
+    total = len(tasks)
+    completed_count = sum(1 for t in tasks if t["status"] in ("completed", "verified"))
+    verified_count = sum(1 for t in tasks if t["status"] == "verified")
+    failed_count = sum(1 for t in tasks if t["status"] == "failed")
+
+    pending_deps: list[dict] = []
+    for task in tasks:
+        if task["status"] in ("planned", "blocked"):
+            for dep_id in task.get("dependency_ids", []):
+                dep = next((t for t in tasks if t["id"] == dep_id), None)
+                if dep and dep["status"] not in ("completed", "verified"):
+                    pending_deps.append({
+                        "task_id": task["id"],
+                        "waiting_for": dep_id,
+                        "dep_status": dep["status"],
+                    })
+
+    any_confirmed = any(
+        t.get("delegation_status") == "confirmed"
+        for t in tasks
+    )
+
+    qa_done = gates.get("qa_sign_off", False)
+    security_done = gates.get("security_review_complete", False)
+    human_done = gates.get("human_approval", False)
+    tests_passing = gates.get("tests_passing", False)
+    all_tasks_done = bool(tasks) and all(
+        t["status"] in ("completed", "verified") for t in tasks
+    )
+
+    if all_tasks_done and qa_done and security_done and human_done and tests_passing:
+        merge_recommendation = "ready"
+    elif qa_done and security_done and tests_passing and not human_done:
+        merge_recommendation = "awaiting_human_approval"
+    else:
+        merge_recommendation = "not_ready"
+
+    boundary_note = (
+        "Tüm task'lar 'planned' delegation durumunda. "
+        "Gerçek agent dispatch doğrulanmadı."
+        if not any_confirmed
+        else "En az bir task gerçek agent session kanıtıyla doğrulandı."
+    )
+
+    return {
+        "schema_version": "1",
+        "run_id": run_id,
+        "objective": run_data.get("objective", ""),
+        "execution_mode": run_data.get("execution_mode", "subagents"),
+        "requested_agent_teams": run_data.get("requested_agent_teams", False),
+        "task_graph_summary": {
+            "total": total,
+            "completed_or_verified": completed_count,
+            "verified": verified_count,
+            "failed": failed_count,
+            "pending": total - completed_count - failed_count,
+        },
+        "task_statuses": [
+            {
+                "id": t["id"],
+                "title": t.get("title", ""),
+                "status": t["status"],
+                "assigned_role": t.get("assigned_role", ""),
+                "delegation_status": t.get("delegation_status", "planned"),
+            }
+            for t in tasks
+        ],
+        "pending_dependencies": pending_deps,
+        "approval_gates": gates,
+        "qa_result": "passed" if qa_done else "not_completed",
+        "human_approval_required": [
+            "main merge insan tarafından yapılmalıdır",
+            "production deploy insan tarafından yapılmalıdır",
+        ],
+        "delegation_evidence": {
+            "any_delegation_confirmed": any_confirmed,
+            "boundary_note": boundary_note,
+        },
+        "merge_recommendation": merge_recommendation,
+        "report_generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -786,6 +1236,171 @@ def cmd_prepare_delivery(args) -> int:
     return 0
 
 
+def cmd_generate_task_graph(args) -> int:
+    target = Path(args.target).resolve()
+    validate_target_path(target)
+    validate_not_on_protected_branch(target, "generate-task-graph")
+
+    delivery_type = args.delivery_type
+    if delivery_type not in SUPPORTED_DELIVERY_TYPES:
+        print(
+            f"Hata: Desteklenmeyen delivery tipi: '{delivery_type}'.",
+            file=sys.stderr,
+        )
+        print(
+            f"  Desteklenenler: {', '.join(sorted(SUPPORTED_DELIVERY_TYPES))}",
+            file=sys.stderr,
+        )
+        sys.exit(13)
+
+    devflow = get_devflow_dir(target)
+    if not is_initialized(target):
+        print("Hata: .devflow/ başlatılmamış.", file=sys.stderr)
+        sys.exit(4)
+
+    project_data = read_json(devflow / "project.json")
+    run_id = project_data.get("current_run_id")
+    if not run_id:
+        print("Hata: Aktif run yok. 'create-run' ile run başlatın.", file=sys.stderr)
+        sys.exit(4)
+
+    run_file = devflow / "runs" / f"{run_id}.json"
+    run_data = read_json(run_file)
+
+    force = getattr(args, "force", False)
+    if run_data.get("tasks") and not force:
+        print(
+            "Bilgi: Task graph zaten mevcut. Üzerine yazmak için --force kullanın.",
+        )
+        return 0
+
+    objective = getattr(args, "objective", None) or run_data.get("objective", "")
+    tasks = generate_task_graph_nodes(run_id, delivery_type, objective)
+
+    packets_dir = devflow / "task-packets"
+    packets_dir.mkdir(exist_ok=True)
+    for task in tasks:
+        packet = generate_task_packet_dict(task, run_id, objective)
+        validate_task_packet_dict(packet)
+        suffix = task["id"].split("-TASK-")[1]
+        atomic_write_json(packets_dir / f"{run_id}-TASK-{suffix}.json", packet)
+
+    run_data["tasks"] = tasks
+    run_data["task_graph_status"] = "generated"
+    run_data["delivery_type"] = delivery_type
+    atomic_write_json(run_file, run_data)
+
+    print(f"Task graph oluşturuldu: {run_id} / {delivery_type}")
+    print(f"  task sayısı: {len(tasks)}")
+    for task in tasks:
+        print(f"  [{task['status']:8}] {task['id']} — {task['title']} ({task['assigned_role']})")
+    print(f"  task-packets: {packets_dir}")
+    return 0
+
+
+def cmd_update_task_status(args) -> int:
+    target = Path(args.target).resolve()
+    validate_target_path(target)
+    validate_not_on_protected_branch(target, "update-task-status")
+
+    task_id = args.task_id
+    new_status = args.status
+
+    if new_status not in TASK_STATES:
+        print(
+            f"Hata: Geçersiz durum: '{new_status}'.",
+            file=sys.stderr,
+        )
+        print(
+            f"  Geçerli durumlar: {', '.join(sorted(TASK_STATES))}",
+            file=sys.stderr,
+        )
+        sys.exit(15)
+
+    devflow = get_devflow_dir(target)
+    if not is_initialized(target):
+        print("Hata: .devflow/ başlatılmamış.", file=sys.stderr)
+        sys.exit(4)
+
+    project_data = read_json(devflow / "project.json")
+    run_id = project_data.get("current_run_id")
+    if not run_id:
+        print("Hata: Aktif run yok.", file=sys.stderr)
+        sys.exit(4)
+
+    run_file = devflow / "runs" / f"{run_id}.json"
+    run_data = read_json(run_file)
+
+    tasks = run_data.get("tasks", [])
+    task = next((t for t in tasks if t["id"] == task_id), None)
+    if task is None:
+        print(
+            f"Hata: Task bulunamadı: '{task_id}'.",
+            file=sys.stderr,
+        )
+        sys.exit(14)
+
+    from_status = task["status"]
+    gates = run_data.get("approval_gates", {})
+    ok, error_msg = validate_task_transition(task_id, from_status, new_status, gates)
+    if not ok:
+        print(f"Hata: {error_msg}", file=sys.stderr)
+        sys.exit(15)
+
+    task["status"] = new_status
+    atomic_write_json(run_file, run_data)
+
+    print(f"Task durumu güncellendi: {task_id}")
+    print(f"  {from_status} → {new_status}")
+    return 0
+
+
+def cmd_generate_run_report(args) -> int:
+    target = Path(args.target).resolve()
+
+    if not target.exists():
+        print(f"Hata: Target path bulunamadı: {target}", file=sys.stderr)
+        sys.exit(1)
+
+    devflow = get_devflow_dir(target)
+    if not is_initialized(target):
+        print("Hata: .devflow/ başlatılmamış.", file=sys.stderr)
+        sys.exit(4)
+
+    project_data = read_json(devflow / "project.json")
+    run_id = project_data.get("current_run_id")
+    if not run_id:
+        print("Hata: Aktif run yok.", file=sys.stderr)
+        sys.exit(4)
+
+    run_file = devflow / "runs" / f"{run_id}.json"
+    run_data = read_json(run_file)
+
+    report = build_run_report(run_data, run_id)
+
+    reports_dir = devflow / "reports"
+    reports_dir.mkdir(exist_ok=True)
+    report_path = reports_dir / f"{run_id}-report.json"
+    atomic_write_json(report_path, report)
+
+    summary = report["task_graph_summary"]
+    delegation = report["delegation_evidence"]
+    print(f"Run raporu: {run_id}")
+    print(f"  objective: {report['objective'][:80]}")
+    print(f"  execution_mode: {report['execution_mode']}")
+    print(f"  tasks: {summary['total']} toplam, "
+          f"{summary['completed_or_verified']} tamamlandı, "
+          f"{summary['verified']} doğrulandı")
+    print(f"  qa_result: {report['qa_result']}")
+    print(f"  delegation_confirmed: {delegation['any_delegation_confirmed']}")
+    print(f"  merge_recommendation: {report['merge_recommendation']}")
+    print()
+    print(f"  NOT (delegation): {delegation['boundary_note']}")
+    print(f"  NOT (human gate): {report['human_approval_required'][0]}")
+    print(f"  rapor kaydedildi: {report_path}")
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -838,6 +1453,44 @@ def main() -> None:
         help="Approval gate'leri doğrula (bu sürümde gerçek Git operasyonu çalıştırmaz)",
     )
     p_delivery.set_defaults(func=cmd_prepare_delivery)
+
+    p_graph = subparsers.add_parser(
+        "generate-task-graph",
+        help="Delivery tipi için deterministik task graph üret",
+    )
+    p_graph.add_argument("--target", required=True, help="Target project path")
+    p_graph.add_argument(
+        "--delivery-type",
+        required=True,
+        choices=sorted(SUPPORTED_DELIVERY_TYPES),
+        help="Delivery tipi",
+    )
+    p_graph.add_argument("--objective", default=None, help="Delivery hedefi (override)")
+    p_graph.add_argument(
+        "--force", action="store_true", help="Mevcut task graph'ı üzerine yaz"
+    )
+    p_graph.set_defaults(func=cmd_generate_task_graph)
+
+    p_update = subparsers.add_parser(
+        "update-task-status",
+        help="Task durumunu geçiş doğrulamasıyla güncelle",
+    )
+    p_update.add_argument("--target", required=True, help="Target project path")
+    p_update.add_argument("--task-id", required=True, help="Task ID")
+    p_update.add_argument(
+        "--status",
+        required=True,
+        choices=sorted(TASK_STATES),
+        help="Hedef durum",
+    )
+    p_update.set_defaults(func=cmd_update_task_status)
+
+    p_report = subparsers.add_parser(
+        "generate-run-report",
+        help="Run kanıt raporu ve merge recommendation üret",
+    )
+    p_report.add_argument("--target", required=True, help="Target project path")
+    p_report.set_defaults(func=cmd_generate_run_report)
 
     args = parser.parse_args()
     sys.exit(args.func(args))
