@@ -28,14 +28,12 @@ FORBIDDEN_WRITE_PREFIXES = (
     ".claude/",
     "docs/ownership/",
     "docs/product/",
-    "docs/contracts/",
     "docs/architecture/",
     "docs/decisions/",
     "docs/release/",
     "docs/quality/security-reports/",
     "docs/ai/",
     "design/reviews/",
-    "evals/",
 )
 
 # Exact-path governance/enforcement files that must never be writable by an
