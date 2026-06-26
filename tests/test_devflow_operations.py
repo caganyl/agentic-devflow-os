@@ -21,6 +21,13 @@ Covers:
 17. launch rejected when branch or worktree already exists (collision)
 18. plugin copy devflow_operations.py gives clear framework runner error on launch
 19. prepare-delivery makes no real git mutations; --confirm-delivery is gate validation only
+[New tests for native-team-runtime]:
+20. Default launch writes 'subagents' execution_mode to run state
+21. launch --agent-teams --dry-run shows agent_teams plan without creating files
+22. Real launch --agent-teams sets CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 in spawned process env
+23. Shell environment not permanently changed by launch --agent-teams
+24. Plugin build output includes hooks/hooks.json and scripts/devflow_target_guard.py
+25. Plugin build output excludes framework hooks/settings/MCP/credential files
 """
 
 import importlib.util
@@ -141,9 +148,26 @@ class OpsScriptBasicTest(unittest.TestCase):
         self.assertNotIn("'--print'", content)
 
     def test_ops_script_execv_has_plugin_dir(self):
-        """The execv call must include --plugin-dir."""
+        """The execve call must include --plugin-dir."""
         content = OPS_SCRIPT.read_text(encoding="utf-8")
         self.assertIn("--plugin-dir", content)
+
+    def test_ops_script_no_devflow_plugin_dir_env(self):
+        """Launcher source must not set DEVFLOW_PLUGIN_DIR in os.environ."""
+        content = OPS_SCRIPT.read_text(encoding="utf-8")
+        self.assertNotIn("DEVFLOW_PLUGIN_DIR", content)
+
+    def test_ops_script_uses_child_env(self):
+        """Launcher must build a child_env copy rather than mutating os.environ."""
+        content = OPS_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("child_env", content)
+        self.assertIn("os.environ.copy()", content)
+
+    def test_ops_script_uses_execve(self):
+        """Launcher must use os.execve (explicit env) not os.execv."""
+        content = OPS_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("os.execve(", content)
+        self.assertNotIn("os.execv(", content)
 
     def test_ops_script_documents_exit_codes(self):
         content = OPS_SCRIPT.read_text(encoding="utf-8")
@@ -598,9 +622,31 @@ class PluginBuildOperationsTest(unittest.TestCase):
         settings = self.plugin_dir / "settings.json"
         self.assertFalse(settings.exists(), "settings.json must NOT be in plugin output")
 
-    def test_hooks_not_in_plugin(self):
-        hooks = self.plugin_dir / "hooks"
-        self.assertFalse(hooks.exists(), "hooks/ must NOT be in plugin output")
+    def test_plugin_hooks_json_in_plugin(self):
+        hooks_json = self.plugin_dir / "hooks" / "hooks.json"
+        self.assertTrue(
+            hooks_json.exists(),
+            "hooks/hooks.json must be in plugin output (target guard hook)",
+        )
+
+    def test_plugin_target_guard_in_plugin(self):
+        guard = self.plugin_dir / "scripts" / "devflow_target_guard.py"
+        self.assertTrue(
+            guard.exists(),
+            "scripts/devflow_target_guard.py must be in plugin output",
+        )
+
+    def test_framework_hooks_not_in_plugin(self):
+        for fname in [
+            "enforce-role-boundaries.sh",
+            "protect-main.sh",
+            "protect-sensitive-paths.sh",
+            "session-start.sh",
+        ]:
+            self.assertFalse(
+                (self.plugin_dir / "hooks" / fname).exists(),
+                f"Framework hook {fname} must NOT be in plugin output",
+            )
 
     def test_mcp_config_not_in_plugin(self):
         for fname in [".mcp.json", "mcp.json", "mcp_config.json"]:
@@ -619,6 +665,17 @@ class PluginBuildOperationsTest(unittest.TestCase):
         self.assertEqual(result2.returncode, 0, "Second build run should succeed")
         ops_script = self.plugin_dir / "scripts" / "devflow_operations.py"
         self.assertTrue(ops_script.exists(), "operations script missing after second build")
+
+    def test_plugin_hooks_json_uses_claude_plugin_root(self):
+        """Plugin hooks.json must use ${CLAUDE_PLUGIN_ROOT}, not ${DEVFLOW_PLUGIN_DIR}."""
+        hooks_json = self.plugin_dir / "hooks" / "hooks.json"
+        if not hooks_json.exists():
+            self.skipTest("hooks.json not in plugin output")
+        content = hooks_json.read_text(encoding="utf-8")
+        self.assertIn("${CLAUDE_PLUGIN_ROOT}", content,
+                      "hooks.json must reference ${CLAUDE_PLUGIN_ROOT}")
+        self.assertNotIn("${DEVFLOW_PLUGIN_DIR}", content,
+                         "hooks.json must not use ${DEVFLOW_PLUGIN_DIR}")
 
 
 # ---------------------------------------------------------------------------
@@ -771,6 +828,28 @@ class SourceRegisterValidationTest(unittest.TestCase):
 # Gitignore coverage
 # ---------------------------------------------------------------------------
 
+class HooksJsonContentTest(unittest.TestCase):
+
+    def test_hooks_json_uses_claude_plugin_root(self):
+        """hooks/hooks.json must reference ${CLAUDE_PLUGIN_ROOT}, not ${DEVFLOW_PLUGIN_DIR}."""
+        hooks_json = REPO_ROOT / "hooks" / "hooks.json"
+        self.assertTrue(hooks_json.exists(), f"hooks/hooks.json not found: {hooks_json}")
+        content = hooks_json.read_text(encoding="utf-8")
+        self.assertIn("${CLAUDE_PLUGIN_ROOT}", content,
+                      "hooks.json must reference ${CLAUDE_PLUGIN_ROOT}")
+        self.assertNotIn("${DEVFLOW_PLUGIN_DIR}", content,
+                         "hooks.json must not use ${DEVFLOW_PLUGIN_DIR}")
+
+    def test_hooks_json_covers_bash_write_edit(self):
+        """hooks/hooks.json must have matchers for Bash, Write and Edit."""
+        hooks_json = REPO_ROOT / "hooks" / "hooks.json"
+        if not hooks_json.exists():
+            self.skipTest("hooks.json not found")
+        content = hooks_json.read_text(encoding="utf-8")
+        for matcher in ("Bash", "Write", "Edit"):
+            self.assertIn(matcher, content, f"hooks.json missing matcher: {matcher}")
+
+
 class GitignoreCoverageTest(unittest.TestCase):
 
     def test_devflow_cache_gitignored(self):
@@ -841,29 +920,58 @@ class NewSkillFilesTest(unittest.TestCase):
         path = self._skill_path("managed-delivery-operations")
         self.assertTrue(path.exists(), f"Missing skill: {path}")
 
+    def test_native_team_delivery_exists(self):
+        path = self._skill_path("native-team-delivery")
+        self.assertTrue(path.exists(), f"Missing skill: {path}")
+
     def _has_yaml_frontmatter(self, path: Path) -> bool:
         content = path.read_text(encoding="utf-8")
         return content.startswith("---") and content.find("---", 3) > 3
 
     def test_all_new_skills_have_frontmatter(self):
-        for name in ["bootstrap-target-project", "autonomous-delivery-run", "managed-delivery-operations"]:
+        for name in [
+            "bootstrap-target-project",
+            "autonomous-delivery-run",
+            "managed-delivery-operations",
+            "native-team-delivery",
+        ]:
             path = self._skill_path(name)
             if path.exists():
                 self.assertTrue(self._has_yaml_frontmatter(path), f"{name} missing YAML frontmatter")
 
     def test_all_new_skills_have_amaç(self):
-        for name in ["bootstrap-target-project", "autonomous-delivery-run", "managed-delivery-operations"]:
+        for name in [
+            "bootstrap-target-project",
+            "autonomous-delivery-run",
+            "managed-delivery-operations",
+            "native-team-delivery",
+        ]:
             path = self._skill_path(name)
             if path.exists():
                 content = path.read_text(encoding="utf-8")
                 self.assertIn("## Amaç", content, f"{name} missing '## Amaç' section")
 
     def test_all_new_skills_have_prosedür(self):
-        for name in ["bootstrap-target-project", "autonomous-delivery-run", "managed-delivery-operations"]:
+        for name in [
+            "bootstrap-target-project",
+            "autonomous-delivery-run",
+            "managed-delivery-operations",
+            "native-team-delivery",
+        ]:
             path = self._skill_path(name)
             if path.exists():
                 content = path.read_text(encoding="utf-8")
                 self.assertIn("## Prosedür", content, f"{name} missing '## Prosedür' section")
+
+    def test_native_team_delivery_has_api_disclaimer(self):
+        path = self._skill_path("native-team-delivery")
+        if path.exists():
+            content = path.read_text(encoding="utf-8")
+            self.assertIn(
+                "API",
+                content,
+                "native-team-delivery must clarify it is not an API/SDK dispatcher",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1045,18 +1153,57 @@ class LaunchDryRunTest(unittest.TestCase):
         self.assertIn("RUN-002", result.stdout)
         self.assertIn("devflow/run-run-002", result.stdout)
 
+    # --- agent-teams dry-run tests (Test 2) ---
+
+    def test_agent_teams_dry_run_returns_zero(self):
+        result = run_ops(["launch", "--target", str(self.target), "--agent-teams", "--dry-run"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_agent_teams_dry_run_shows_agent_teams_mode(self):
+        result = run_ops(["launch", "--target", str(self.target), "--agent-teams", "--dry-run"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("agent_teams", result.stdout)
+
+    def test_agent_teams_dry_run_shows_env_var(self):
+        result = run_ops(["launch", "--target", str(self.target), "--agent-teams", "--dry-run"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", result.stdout)
+
+    def test_agent_teams_dry_run_creates_nothing(self):
+        run_ops(["launch", "--target", str(self.target), "--agent-teams", "--dry-run"])
+        self.assertFalse(
+            (self.target / ".devflow").exists(),
+            "dry-run --agent-teams must not create .devflow/",
+        )
+        result = subprocess.run(
+            ["git", "branch", "--list", "devflow/run-*"],
+            cwd=str(self.target),
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.stdout.strip(), "", "dry-run --agent-teams must not create any branches")
+
+    def test_default_dry_run_shows_subagents_mode(self):
+        result = self._dry_run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("subagents", result.stdout)
+
+    def test_default_dry_run_shows_disabled_agent_teams(self):
+        result = self._dry_run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("disabled", result.stdout)
+
 
 # ---------------------------------------------------------------------------
 # Test 16–17: launch real worktree creation
 # ---------------------------------------------------------------------------
 
 def _make_fake_claude(tmpdir: Path, report_file: Path) -> Path:
-    """Create a fake claude binary that records its CWD and args."""
+    """Create a fake claude binary that records its CWD, args, and environment."""
     fake_claude = tmpdir / "fake_claude"
     fake_claude.write_text(
         "#!/usr/bin/env python3\n"
         "import os, sys, json\n"
-        "data = {\"cwd\": os.getcwd(), \"args\": sys.argv[1:]}\n"
+        "data = {\"cwd\": os.getcwd(), \"args\": sys.argv[1:], \"env\": dict(os.environ)}\n"
         "report_path = os.environ.get(\"DEVFLOW_TEST_REPORT\")\n"
         "if report_path:\n"
         "    with open(report_path, \"w\") as f:\n"
@@ -1185,6 +1332,76 @@ class LaunchRealWorktreeTest(unittest.TestCase):
         result = self._launch()
         self.assertEqual(result.returncode, 11)
         self.assertIn("Hata", result.stderr)
+
+    # --- Test 1: Default launch writes 'subagents' execution_mode ---
+
+    def test_default_launch_writes_subagents_mode_to_run_state(self):
+        self._launch()
+        wt = self._worktree_path()
+        project_data = json.loads((wt / ".devflow" / "project.json").read_text())
+        run_id = project_data["current_run_id"]
+        run_data = json.loads((wt / ".devflow" / "runs" / f"{run_id}.json").read_text())
+        self.assertEqual(
+            run_data.get("execution_mode"), "subagents",
+            "Default launch must write execution_mode='subagents' to run state",
+        )
+        self.assertFalse(
+            run_data.get("requested_agent_teams", True),
+            "Default launch must write requested_agent_teams=false",
+        )
+        self.assertEqual(run_data.get("task_graph_status"), "not_started")
+        self.assertEqual(run_data.get("context_pack_status"), "not_started")
+
+    # --- Test 3: launch --agent-teams sets env in spawned process ---
+
+    def test_agent_teams_launch_writes_agent_teams_mode_to_run_state(self):
+        self._launch(extra_args=["--agent-teams"])
+        wt = self._worktree_path()
+        project_data = json.loads((wt / ".devflow" / "project.json").read_text())
+        run_id = project_data["current_run_id"]
+        run_data = json.loads((wt / ".devflow" / "runs" / f"{run_id}.json").read_text())
+        self.assertEqual(run_data.get("execution_mode"), "agent_teams")
+        self.assertTrue(run_data.get("requested_agent_teams", False))
+
+    def test_agent_teams_sets_env_in_spawned_process(self):
+        self._launch(extra_args=["--agent-teams"])
+        if not self.report_file.exists():
+            self.skipTest("Fake claude did not write report")
+        data = json.loads(self.report_file.read_text())
+        env = data.get("env", {})
+        self.assertEqual(
+            env.get("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"), "1",
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 must be in spawned process environment",
+        )
+
+    def test_default_launch_no_agent_teams_env_in_spawned_process(self):
+        self._launch()
+        if not self.report_file.exists():
+            self.skipTest("Fake claude did not write report")
+        data = json.loads(self.report_file.read_text())
+        env = data.get("env", {})
+        self.assertNotIn(
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS",
+            env,
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS must NOT be set for default launch",
+        )
+
+    # --- Test 4: Shell environment not permanently changed ---
+
+    def test_agent_teams_does_not_pollute_parent_env(self):
+        """launch --agent-teams must not modify the current (test) process environment."""
+        key = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
+        saved = os.environ.pop(key, None)
+        try:
+            self._launch(extra_args=["--agent-teams"])
+            self.assertNotIn(
+                key,
+                os.environ,
+                "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS must not leak into parent process env",
+            )
+        finally:
+            if saved is not None:
+                os.environ[key] = saved
 
 
 # ---------------------------------------------------------------------------

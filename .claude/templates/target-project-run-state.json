@@ -7,6 +7,10 @@
   "status": "created",
   "branch_name": "devflow/run-run-nnn",
   "objective": "",
+  "execution_mode": "subagents",
+  "requested_agent_teams": false,
+  "task_graph_status": "not_started",
+  "context_pack_status": "not_started",
   "artifacts": [],
   "tasks": [],
   "approval_gates": {
@@ -22,5 +26,9 @@
     "security_review_complete": "Security Red Team raporu tamamlandığında true yapılır.",
     "qa_sign_off": "QA acceptance verildiğinde true yapılır.",
     "human_approval": "İnsan main merge onayı verdiğinde true yapılır. Agent değiştiremez."
+  },
+  "_execution_mode_notes": {
+    "subagents": "Varsayılan. Delivery Lead custom subagent'ları sıralı veya bağımsız olarak kullanır.",
+    "agent_teams": "Deneysel. launch --agent-teams ile aktif edilir. Yalnızca bağımsız paralel işler için. Token maliyetlidir."
   }
 }
