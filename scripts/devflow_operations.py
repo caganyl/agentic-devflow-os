@@ -15,6 +15,7 @@ Subcommands:
     update-task-status        Update a task's status with state transition validation
     record-qa-evidence        Record QA test results authoritatively and update approval gates
     record-security-evidence  Record security review evidence authoritatively
+    record-contract-evidence  Record contract evidence authoritatively for new_feature runs
     generate-run-report       Generate run evidence report with merge recommendation
 
 Usage:
@@ -27,6 +28,7 @@ Usage:
     python3 scripts/devflow_operations.py update-task-status --target PATH --task-id ID --status STATUS
     python3 scripts/devflow_operations.py record-qa-evidence --target PATH --total N --passed N --failed N --exit-code N [--evidence-path PATH]
     python3 scripts/devflow_operations.py record-security-evidence --target PATH --run-id RUN-NNN --verdict pass|blocked --max-severity none|low|medium|high|critical --evidence-path RELATIVE_PATH
+    python3 scripts/devflow_operations.py record-contract-evidence --target PATH --run-id RUN-NNN --evidence-path RELATIVE_PATH
     python3 scripts/devflow_operations.py generate-run-report --target PATH
 
 Exit codes:
@@ -48,6 +50,7 @@ Exit codes:
     15  Invalid task state transition
     16  generate-task-graph --force rejected: run is active (tasks progressed, events, or artifacts exist)
     17  Security evidence recording rejected (review not required, invalid verdict/severity, or invalid path)
+    18  Contract evidence recording rejected (not required for this delivery type, or invalid path)
 
 IMPORTANT — validate_forbidden_git_operation:
     This function validates planned operation *strings* passed to it by callers.
@@ -313,6 +316,33 @@ VALID_VERDICT_SEVERITY_COMBOS: dict[str, frozenset] = {
 }
 
 # ---------------------------------------------------------------------------
+# Contract gate applicability model
+#
+# contract_required is written at generate-task-graph time for new_feature runs.
+# Three-state machine mirroring security gate:
+#   contract_required=False → status="not_applicable", gate satisfied
+#   contract_required=True + record-contract-evidence ran → status="completed", gate satisfied
+#   contract_required=True + no evidence → status="pending", gate NOT satisfied
+#
+# Implementation tasks in contract-gated runs cannot enter in_progress/completed/verified
+# until contract_gate_satisfied=True.
+# ---------------------------------------------------------------------------
+
+# Delivery types that require a contract gate.  Only new_feature for now.
+DELIVERY_TYPES_WITH_CONTRACT_GATE = frozenset({"new_feature"})
+
+CONTRACT_EVIDENCE_PATH_PREFIX = "docs/quality/contracts/"
+
+CONTRACT_REVIEW_STATUS_ENUM = frozenset({
+    "not_applicable",
+    "pending",
+    "completed",
+})
+
+# Task states that are blocked for implementation tasks when contract gate is unsatisfied.
+CONTRACT_GATE_BLOCKED_STATUSES = frozenset({"in_progress", "completed", "verified"})
+
+# ---------------------------------------------------------------------------
 # Delivery type task graph templates
 #
 # Each template entry: (id_suffix, title, task_type, assigned_role,
@@ -335,10 +365,10 @@ DELIVERY_TYPE_TASK_TEMPLATES: dict[str, list[dict]] = {
          "assigned_role": "solution-architect", "dep_suffixes": ["001"],
          "qa_expectation": "ADR taslağı üretildi",
          "output_path": "docs/architecture/adr/"},
-        {"id_suffix": "004", "title": "API Contract Design", "task_type": "contract",
+        {"id_suffix": "004", "title": "Contract Definition", "task_type": "contract_definition",
          "assigned_role": "contract-broker", "dep_suffixes": ["002", "003"],
-         "qa_expectation": "Contract onaylandı; frontend ve backend paralel başlayabilir",
-         "output_path": "docs/contracts/"},
+         "qa_expectation": "Contract kanıtı kaydedildi; frontend ve backend paralel başlayabilir",
+         "output_path": "docs/quality/contracts/"},
         {"id_suffix": "005", "title": "Backend Implementation", "task_type": "implementation",
          "assigned_role": "backend-engineer", "dep_suffixes": ["004"],
          "qa_expectation": "API endpoint'ler çalışıyor; birim testler geçiyor",
@@ -1075,6 +1105,63 @@ def validate_security_evidence_path(target: Path, evidence_path: str) -> tuple[b
     return True, ""
 
 
+def validate_contract_evidence_path(target: Path, evidence_path: str) -> tuple[bool, str]:
+    """
+    Validate a contract evidence path for record-contract-evidence.
+
+    Rules (all enforced before existence check):
+    - Must not be empty
+    - Must not be absolute
+    - Must not contain '..' traversal
+    - Must not contain wildcards (* or ?)
+    - Must not start with .devflow/ or .claude/
+    - Must start with docs/quality/contracts/
+    - File must exist at target/evidence_path
+
+    Returns (ok, error_message).
+    """
+    if not evidence_path:
+        return False, "evidence-path gereklidir"
+
+    if Path(evidence_path).is_absolute():
+        return False, f"evidence-path mutlak yol olamaz: {evidence_path!r}"
+
+    normalized = evidence_path.replace("\\", "/")
+
+    parts = normalized.split("/")
+    if ".." in parts or any(p.startswith("..") for p in parts):
+        return False, f"evidence-path '..' traversal içeremez: {evidence_path!r}"
+
+    if "*" in normalized or "?" in normalized:
+        return False, f"evidence-path wildcard içeremez: {evidence_path!r}"
+
+    if normalized.startswith(".devflow/") or normalized.startswith(".claude/"):
+        return False, (
+            f"evidence-path yalnızca '{CONTRACT_EVIDENCE_PATH_PREFIX}' altında kabul edilir. "
+            f"Verilen: {evidence_path!r}"
+        )
+
+    if not normalized.startswith(CONTRACT_EVIDENCE_PATH_PREFIX):
+        return False, (
+            f"evidence-path yalnızca '{CONTRACT_EVIDENCE_PATH_PREFIX}' altında kabul edilir. "
+            f"Verilen: {evidence_path!r}"
+        )
+
+    full_path = (target / evidence_path).resolve()
+    try:
+        full_path.relative_to(target.resolve())
+    except ValueError:
+        return False, f"evidence-path target dizini dışına çıkıyor: {evidence_path!r}"
+
+    if not full_path.exists():
+        return False, f"evidence-path dosyası bulunamadı: {evidence_path!r}"
+
+    if not full_path.is_file():
+        return False, f"evidence-path bir dosya olmalıdır: {evidence_path!r}"
+
+    return True, ""
+
+
 def validate_task_packet_dict(packet: dict) -> None:
     """Exit 10 if the packet contains a forbidden top-level field."""
     for field in FORBIDDEN_PACKET_FIELDS:
@@ -1225,9 +1312,38 @@ def build_run_report(
             security_review_status = "pending"
             security_gate_satisfied = False
 
+    # ---------------------------------------------------------------------------
+    # Contract gate applicability
+    #
+    # contract_required is written at generate-task-graph time.
+    # Default False for backward compatibility with runs that predate this field.
+    #
+    # Three-state machine (checked in this order):
+    #   1. required=False → status="not_applicable", gate satisfied
+    #   2. required=True + record-contract-evidence wrote completed status
+    #      → status="completed", gate satisfied
+    #   3. required=True + no evidence → status="pending", gate NOT satisfied
+    # ---------------------------------------------------------------------------
+    contract_required = run_data.get("contract_required", False)
+    if not contract_required:
+        contract_status = "not_applicable"
+        contract_gate_satisfied = True
+    else:
+        _stored_contract_status = run_data.get("contract_status")
+        _stored_contract_gate = run_data.get("contract_gate_satisfied")
+        if _stored_contract_status == "completed" and _stored_contract_gate is not None:
+            contract_status = "completed"
+            contract_gate_satisfied = bool(_stored_contract_gate)
+        else:
+            contract_status = "pending"
+            contract_gate_satisfied = False
+
+    _contract_evidence_meta = run_data.get("contract_evidence")
+
     # Technical readiness: all auto gates + tasks done (human approval is separate)
     auto_gates_pass = (
         all_tasks_done and qa_done and security_gate_satisfied and tests_passing
+        and contract_gate_satisfied
     )
     technical_readiness = "ready" if auto_gates_pass else "not_ready"
 
@@ -1342,6 +1458,11 @@ def build_run_report(
             else "generated_in_run" if security_review_status == "completed"
             else "unavailable"
         ),
+        "contract_review": (
+            "not_applicable" if not contract_required
+            else "generated_in_run" if contract_status == "completed"
+            else "unavailable"
+        ),
         "human_approval": "human_review" if human_done else "unavailable",
         "native_delegation": "native_hook_event" if native_observed else "unavailable",
     }
@@ -1399,6 +1520,12 @@ def build_run_report(
             "security_evidence": _sec_evidence_meta,
             "launch_risk_floor_required": run_data.get("launch_risk_floor_required", None),
             "launch_risk_floor_reason": run_data.get("launch_risk_floor_reason", None),
+        },
+        "contract_applicability": {
+            "contract_required": contract_required,
+            "contract_status": contract_status,
+            "contract_gate_satisfied": contract_gate_satisfied,
+            "contract_evidence": _contract_evidence_meta,
         },
         "merge_recommendation": merge_recommendation,
         "report_generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -2023,6 +2150,14 @@ def cmd_generate_task_graph(args) -> int:
     run_data["security_review_required"] = effective_required
     run_data["security_applicability_reason"] = effective_reason
 
+    # Write contract gate state to canonical run state.
+    # contract_required is deterministic from delivery_type; only new_feature requires it.
+    # Implementation tasks cannot enter in_progress/completed/verified until gate is satisfied.
+    _contract_required = delivery_type in DELIVERY_TYPES_WITH_CONTRACT_GATE
+    run_data["contract_required"] = _contract_required
+    run_data["contract_status"] = "pending" if _contract_required else "not_applicable"
+    run_data["contract_gate_satisfied"] = not _contract_required
+
     atomic_write_json(run_file, run_data)
 
     print(f"Task graph oluşturuldu: {run_id} / {delivery_type}")
@@ -2081,6 +2216,21 @@ def cmd_update_task_status(args) -> int:
     if not ok:
         print(f"Hata: {error_msg}", file=sys.stderr)
         sys.exit(15)
+
+    # Contract gate enforcement: implementation tasks cannot advance to
+    # in_progress/completed/verified until contract evidence is recorded.
+    # Only applies when contract_required=True (set by generate-task-graph for new_feature).
+    if new_status in CONTRACT_GATE_BLOCKED_STATUSES:
+        if task.get("task_type") == "implementation":
+            if run_data.get("contract_required", False):
+                if not run_data.get("contract_gate_satisfied", False):
+                    print(
+                        f"Hata: Contract evidence kaydedilmeden implementation görevi "
+                        f"'{new_status}' durumuna geçirilemiyor. "
+                        "'record-contract-evidence' CLI kullanın.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(15)
 
     task["status"] = new_status
     atomic_write_json(run_file, run_data)
@@ -2275,6 +2425,121 @@ def cmd_record_security_evidence(args) -> int:
     return 0
 
 
+def cmd_record_contract_evidence(args) -> int:
+    """
+    Record contract evidence for a new_feature delivery run.
+
+    Validates the evidence path (must be under docs/quality/contracts/),
+    checks that contract_required=True for this run, confirms the run-id
+    matches the active run, then writes contract_status=completed and
+    contract_gate_satisfied=True to canonical run state.
+
+    Exit code 18 for all rejections.
+    """
+    target = Path(args.target).resolve()
+    validate_target_path(target)
+    validate_not_on_protected_branch(target, "record-contract-evidence")
+
+    run_id_override = getattr(args, "run_id", None)
+    evidence_path = args.evidence_path
+
+    devflow = get_devflow_dir(target)
+    if not is_initialized(target):
+        print("Hata: .devflow/ başlatılmamış.", file=sys.stderr)
+        sys.exit(4)
+
+    project_data = read_json(devflow / "project.json")
+    run_id = project_data.get("current_run_id")
+    if not run_id:
+        print("Hata: Aktif run yok.", file=sys.stderr)
+        sys.exit(4)
+
+    # --run-id, if provided, must match the current active run.
+    if run_id_override and run_id_override != run_id:
+        print(
+            f"Hata: --run-id '{run_id_override}' aktif run '{run_id}' ile eşleşmiyor. "
+            "Yalnızca aktif/current run için contract evidence kaydedilebilir.",
+            file=sys.stderr,
+        )
+        sys.exit(18)
+
+    run_file = devflow / "runs" / f"{run_id}.json"
+    if not run_file.exists():
+        print(f"Hata: Run state dosyası bulunamadı: {run_file}", file=sys.stderr)
+        sys.exit(4)
+
+    run_data = read_json(run_file)
+
+    # Reject if contract gate is not required for this run.
+    if not run_data.get("contract_required", False):
+        print(
+            "Hata: Bu run için contract gate gerekli değil (contract_required=false). "
+            "Contract evidence yalnızca new_feature delivery runs için kaydedilebilir.",
+            file=sys.stderr,
+        )
+        sys.exit(18)
+
+    # Validate evidence path: must be under docs/quality/contracts/, exist, be relative, no traversal.
+    path_ok, path_err = validate_contract_evidence_path(target, evidence_path)
+    if not path_ok:
+        print(f"Hata: {path_err}", file=sys.stderr)
+        sys.exit(18)
+
+    # Locate the unique contract_definition task.
+    # Reject before any state mutation if the task is absent or ambiguous.
+    _all_tasks = run_data.get("tasks", [])
+    _contract_def_tasks = [t for t in _all_tasks if t.get("task_type") == "contract_definition"]
+
+    if len(_contract_def_tasks) == 0:
+        print(
+            "Hata: Aktif run içinde contract_definition task bulunamadı. "
+            "Contract evidence kaydedilemez.",
+            file=sys.stderr,
+        )
+        sys.exit(18)
+
+    if len(_contract_def_tasks) > 1:
+        print(
+            f"Hata: Aktif run içinde {len(_contract_def_tasks)} adet contract_definition task "
+            "bulundu. Belirsizlik nedeniyle işlem reddedildi; state güncellenmedi.",
+            file=sys.stderr,
+        )
+        sys.exit(18)
+
+    _contract_task = _contract_def_tasks[0]
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Authoritative task status update — idempotent if already verified.
+    # Bypasses general validate_task_transition deliberately; this is an
+    # authoritative evidence command, not a free-form status transition.
+    if _contract_task["status"] != "verified":
+        _contract_task["status"] = "verified"
+
+    # Atomic state write: contract metadata, gate, evidence, and task status together.
+    run_data["contract_status"] = "completed"
+    run_data["contract_gate_satisfied"] = True
+    run_data["contract_evidence"] = {
+        "evidence_path": evidence_path,
+        "recorded_at": now,
+        "provenance": "generated_in_run",
+    }
+    # Update backward-compatible approval gate.
+    run_data.setdefault("approval_gates", {})
+    run_data["approval_gates"]["contract_approved"] = True
+
+    atomic_write_json(run_file, run_data)
+
+    print(f"Contract evidence kaydedildi: {run_id} [TAMAMLANDI]")
+    print(f"  evidence_path: {evidence_path}")
+    print(f"  contract_status: completed")
+    print(f"  contract_gate_satisfied: True")
+    print(f"  provenance: generated_in_run")
+    print("  NOTE: Bu artefakt bu run içinde üretilmiştir.")
+    print("  Belirli bir native session'a causal binding iddiası taşımaz.")
+    return 0
+
+
 def cmd_generate_run_report(args) -> int:
     target = Path(args.target).resolve()
 
@@ -2357,6 +2622,40 @@ def cmd_generate_run_report(args) -> int:
             f"- security_applicability_reason: {sec_reason}",
         ]
 
+    contract_app = report.get("contract_applicability", {})
+    cont_required = contract_app.get("contract_required", False)
+    cont_status = contract_app.get("contract_status", "not_applicable")
+    cont_satisfied = contract_app.get("contract_gate_satisfied", True)
+    cont_evidence = contract_app.get("contract_evidence") or {}
+    cont_evidence_path = cont_evidence.get("evidence_path", "")
+    cont_evidence_provenance = cont_evidence.get("provenance", "")
+
+    if not cont_required:
+        contract_gate_lines = [
+            f"- contract_required: {cont_required}",
+            f"- contract_status: {cont_status}",
+            f"- contract_gate_satisfied: {cont_satisfied}",
+            "- NOTE: Contract gate not applicable for this delivery type.",
+            "  Contract gate satisfied: yes",
+            "  This is NOT a claim that a Contract Broker session occurred.",
+        ]
+    elif cont_evidence:
+        contract_gate_lines = [
+            f"- contract_required: {cont_required}",
+            f"- contract_status: {cont_status}",
+            f"- contract_gate_satisfied: {cont_satisfied}",
+            f"- evidence_path: {cont_evidence_path}",
+            f"- evidence_provenance: {cont_evidence_provenance or 'generated_in_run'}",
+            "- NOTE: Contract evidence is a local artifact generated within this run.",
+            "  This is NOT a claim of causal binding to a specific Contract Broker session.",
+        ]
+    else:
+        contract_gate_lines = [
+            f"- contract_required: {cont_required}",
+            f"- contract_status: {cont_status}",
+            f"- contract_gate_satisfied: {cont_satisfied}",
+        ]
+
     scorecard_lines = [
         f"# DevFlow Scorecard: {run_id}",
         "",
@@ -2368,6 +2667,9 @@ def cmd_generate_run_report(args) -> int:
         "",
         "## Security Gate",
     ] + security_gate_lines + [
+        "",
+        "## Contract Gate",
+    ] + contract_gate_lines + [
         "",
         "## Delegation Evidence",
         f"- agent_teams_requested: {delegation.get('agent_teams_requested')}",
@@ -2396,6 +2698,8 @@ def cmd_generate_run_report(args) -> int:
     run_data["merge_recommendation"] = report["merge_recommendation"]
     run_data["security_review_status"] = sec_app.get("security_review_status")
     run_data["security_gate_satisfied"] = sec_app.get("security_gate_satisfied")
+    run_data["contract_status"] = contract_app.get("contract_status")
+    run_data["contract_gate_satisfied"] = contract_app.get("contract_gate_satisfied")
     run_data["native_delegation_observed"] = delegation["native_delegation_observed"]
     run_data["observed_delegation_count"] = delegation["observed_delegation_count"]
     run_data["delegation_evidence_status"] = delegation["delegation_evidence_status"]
@@ -2580,6 +2884,28 @@ def main() -> None:
         ),
     )
     p_sec_ev.set_defaults(func=cmd_record_security_evidence)
+
+    p_cont_ev = subparsers.add_parser(
+        "record-contract-evidence",
+        help="Contract kanıtını authoritative olarak kaydet (yalnızca new_feature runs)",
+    )
+    p_cont_ev.add_argument("--target", required=True, help="Target project path")
+    p_cont_ev.add_argument(
+        "--run-id",
+        default=None,
+        dest="run_id",
+        help="Run ID (aktif run ile eşleşmeli; varsayılan: aktif run)",
+    )
+    p_cont_ev.add_argument(
+        "--evidence-path",
+        required=True,
+        dest="evidence_path",
+        help=(
+            "docs/quality/contracts/ altında bir dosyaya repository-relative göreli yol. "
+            "Mutlak yol, '..', wildcard, .devflow/ ve .claude/ yasak."
+        ),
+    )
+    p_cont_ev.set_defaults(func=cmd_record_contract_evidence)
 
     p_report = subparsers.add_parser(
         "generate-run-report",
