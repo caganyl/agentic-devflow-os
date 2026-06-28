@@ -652,7 +652,7 @@ class QAGateEnforcementTest(unittest.TestCase):
             "human_approval": True,
         }
         report = self.mod.build_run_report(self._make_run_data(tasks, gates), "RUN-001")
-        self.assertEqual(report["merge_recommendation"], "ready")
+        self.assertEqual(report["merge_recommendation"], "ready_for_human_merge")
         self.assertEqual(report["qa_result"], "passed")
 
     def test_run_report_not_ready_when_tasks_pending(self):
@@ -776,36 +776,36 @@ class ExecutionModeTest(unittest.TestCase):
             "run_id": "RUN-001",
             "objective": "test",
             "execution_mode": "subagents",
-            "requested_agent_teams": False,
+            "agent_teams_requested": False,
             "tasks": [],
             "approval_gates": {},
         }
         report = self.mod.build_run_report(run_data, "RUN-001")
         self.assertEqual(report["execution_mode"], "subagents")
-        self.assertFalse(report["requested_agent_teams"])
+        self.assertFalse(report["agent_teams_requested"])
 
     def test_agent_teams_mode_in_report(self):
         run_data = {
             "run_id": "RUN-001",
             "objective": "test",
             "execution_mode": "agent_teams",
-            "requested_agent_teams": True,
+            "agent_teams_requested": True,
             "tasks": [],
             "approval_gates": {},
         }
         report = self.mod.build_run_report(run_data, "RUN-001")
         self.assertEqual(report["execution_mode"], "agent_teams")
-        self.assertTrue(report["requested_agent_teams"])
+        self.assertTrue(report["agent_teams_requested"])
 
     def test_report_includes_both_mode_fields(self):
         run_data = {
             "run_id": "RUN-001", "objective": "",
-            "execution_mode": "subagents", "requested_agent_teams": False,
+            "execution_mode": "subagents", "agent_teams_requested": False,
             "tasks": [], "approval_gates": {},
         }
         report = self.mod.build_run_report(run_data, "RUN-001")
         self.assertIn("execution_mode", report)
-        self.assertIn("requested_agent_teams", report)
+        self.assertIn("agent_teams_requested", report)
 
 
 # ---------------------------------------------------------------------------
@@ -1160,6 +1160,659 @@ class NewSubcommandsInScriptTest(unittest.TestCase):
             "new_product_discovery", "backend_utility",
         ]:
             self.assertIn(dt, content, f"Delivery type '{dt}' not in script")
+
+
+# ---------------------------------------------------------------------------
+# Task graph immutability, QA evidence recording, and finalization regression
+# ---------------------------------------------------------------------------
+
+class TaskGraphImmutabilityTest(unittest.TestCase):
+    """
+    Regression tests for task graph immutability and authoritative finalization.
+    Covers the 10 required areas from the immutability spec:
+    1. --force rejected on active run; file unchanged
+    2. completed/verified cannot return to planned
+    3. report generation does not modify graph
+    4. valid transitions accepted; invalid rejected
+    5. successful QA recording → auto gates set
+    6. no QA or failed exit code → not_ready
+    7. backend_utility complete + QA + human=false → awaiting_human_approval
+    8. backend_utility complete + QA + human=true → ready_for_human_merge
+    9. updated_at >= created_at
+    10. all existing tests still pass (ensured by running full suite)
+    """
+
+    def setUp(self):
+        self.mod = _load_ops_module()
+        self.tmpdir = Path(tempfile.mkdtemp())
+        self.target = self.tmpdir / "myproject"
+        self.target.mkdir()
+        make_git_repo(self.target, feature_branch="devflow/test")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _init_and_graph(self, delivery_type: str = "bug_resolution") -> tuple:
+        run_ops(["init-target", "--target", str(self.target)])
+        run_ops(["create-run", "--target", str(self.target), "--objective", "test run"])
+        run_ops(["generate-task-graph", "--target", str(self.target),
+                 "--delivery-type", delivery_type])
+        project_data = json.loads(
+            (self.target / ".devflow" / "project.json").read_text()
+        )
+        run_id = project_data["current_run_id"]
+        run_file = self.target / ".devflow" / "runs" / f"{run_id}.json"
+        return run_id, run_file
+
+    # --- Test 1: --force rejected on active run ---
+
+    def test_force_rejected_when_task_advanced_beyond_planned(self):
+        """--force must fail when any task has progressed past 'planned'."""
+        run_id, run_file = self._init_and_graph("bug_resolution")
+        first_task_id = json.loads(run_file.read_text())["tasks"][0]["id"]
+
+        run_ops(["update-task-status", "--target", str(self.target),
+                 "--task-id", first_task_id, "--status", "ready"])
+
+        bytes_before = run_file.read_bytes()
+
+        result = run_ops(["generate-task-graph", "--target", str(self.target),
+                          "--delivery-type", "new_feature", "--force"])
+        self.assertNotEqual(result.returncode, 0,
+                            "--force must be rejected on active run")
+        self.assertEqual(run_file.read_bytes(), bytes_before,
+                         "Failed --force must not modify the run state file")
+
+    def test_force_rejected_returns_exit_code_16(self):
+        """--force on active run exits with code 16."""
+        run_id, run_file = self._init_and_graph("bug_resolution")
+        first_task_id = json.loads(run_file.read_text())["tasks"][0]["id"]
+
+        run_ops(["update-task-status", "--target", str(self.target),
+                 "--task-id", first_task_id, "--status", "ready"])
+
+        result = run_ops(["generate-task-graph", "--target", str(self.target),
+                          "--delivery-type", "new_feature", "--force"])
+        self.assertEqual(result.returncode, 16)
+
+    def test_force_rejected_when_delegation_events_exist(self):
+        """--force must fail when delegation events exist."""
+        run_id, run_file = self._init_and_graph("bug_resolution")
+
+        events_dir = self.target / ".devflow" / "delegation-events"
+        events_dir.mkdir()
+        event = {
+            "schema_version": "1", "evidence_id": "evt-001",
+            "timestamp": "2026-06-27T12:00:00Z", "run_id": run_id,
+            "hook_event": "SubagentStart", "lifecycle_state": "started",
+            "agent_type": "backend-engineer", "evidence_source": "native_hook_event",
+        }
+        (events_dir / "evt-001.json").write_text(json.dumps(event), encoding="utf-8")
+
+        bytes_before = run_file.read_bytes()
+        result = run_ops(["generate-task-graph", "--target", str(self.target),
+                          "--delivery-type", "new_feature", "--force"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(run_file.read_bytes(), bytes_before)
+
+    def test_force_allowed_when_all_tasks_planned_no_events(self):
+        """--force is allowed when all tasks are still 'planned' and no events exist."""
+        run_id, run_file = self._init_and_graph("bug_resolution")
+
+        result = run_ops(["generate-task-graph", "--target", str(self.target),
+                          "--delivery-type", "new_feature", "--force"])
+        self.assertEqual(result.returncode, 0,
+                         "--force must succeed on a fresh (all-planned) run with no events")
+        run_data = json.loads(run_file.read_text())
+        self.assertEqual(run_data["delivery_type"], "new_feature")
+
+    # --- Test 2: completed/verified task cannot return to planned ---
+
+    def test_verified_task_cannot_transition_to_planned(self):
+        """verified → planned is a forbidden state transition."""
+        ok, _ = self.mod.validate_task_transition("T-001", "verified", "planned", {})
+        self.assertFalse(ok, "verified → planned must be invalid")
+
+    def test_completed_task_cannot_transition_to_planned(self):
+        """completed → planned is a forbidden state transition."""
+        ok, _ = self.mod.validate_task_transition("T-001", "completed", "planned", {})
+        self.assertFalse(ok, "completed → planned must be invalid")
+
+    def test_cli_rejects_verified_to_planned(self):
+        """CLI update-task-status rejects verified → planned."""
+        run_id, run_file = self._init_and_graph("bug_resolution")
+        first_task_id = json.loads(run_file.read_text())["tasks"][0]["id"]
+
+        for status in ["ready", "in_progress", "completed"]:
+            run_ops(["update-task-status", "--target", str(self.target),
+                     "--task-id", first_task_id, "--status", status])
+        run_data = json.loads(run_file.read_text())
+        run_data["approval_gates"]["qa_sign_off"] = True
+        run_file.write_text(json.dumps(run_data, indent=2) + "\n", encoding="utf-8")
+        run_ops(["update-task-status", "--target", str(self.target),
+                 "--task-id", first_task_id, "--status", "verified"])
+
+        result = run_ops(["update-task-status", "--target", str(self.target),
+                          "--task-id", first_task_id, "--status", "planned"])
+        self.assertEqual(result.returncode, 15,
+                         "verified → planned must exit 15")
+
+    # --- Test 3: report generation does not modify graph ---
+
+    def test_report_generation_preserves_task_list(self):
+        """generate-run-report must not modify the tasks list in run state."""
+        run_id, run_file = self._init_and_graph("bug_resolution")
+        tasks_before = json.loads(run_file.read_text())["tasks"]
+
+        run_ops(["generate-run-report", "--target", str(self.target)])
+
+        tasks_after = json.loads(run_file.read_text())["tasks"]
+        self.assertEqual(tasks_before, tasks_after,
+                         "generate-run-report must not modify task list")
+
+    def test_report_generation_preserves_delivery_type(self):
+        """generate-run-report must not change delivery_type in run state."""
+        run_id, run_file = self._init_and_graph("bug_resolution")
+        dt_before = json.loads(run_file.read_text()).get("delivery_type")
+
+        run_ops(["generate-run-report", "--target", str(self.target)])
+
+        dt_after = json.loads(run_file.read_text()).get("delivery_type")
+        self.assertEqual(dt_before, dt_after)
+
+    # --- Test 4: valid/invalid transitions (CLI) ---
+
+    def test_valid_transition_accepted_via_cli(self):
+        """Valid task state transition is accepted by CLI."""
+        run_id, run_file = self._init_and_graph("bug_resolution")
+        first_task_id = json.loads(run_file.read_text())["tasks"][0]["id"]
+        result = run_ops(["update-task-status", "--target", str(self.target),
+                          "--task-id", first_task_id, "--status", "ready"])
+        self.assertEqual(result.returncode, 0)
+
+    def test_invalid_transition_rejected_via_cli(self):
+        """Invalid task state transition (planned → completed) exits 15."""
+        run_id, run_file = self._init_and_graph("bug_resolution")
+        first_task_id = json.loads(run_file.read_text())["tasks"][0]["id"]
+        result = run_ops(["update-task-status", "--target", str(self.target),
+                          "--task-id", first_task_id, "--status", "completed"])
+        self.assertEqual(result.returncode, 15)
+
+    # --- Tests 5 & 6: record-qa-evidence ---
+
+    def test_record_qa_evidence_success_sets_gates_true(self):
+        """Successful QA recording sets tests_passing and qa_sign_off to True."""
+        run_id, run_file = self._init_and_graph("backend_utility")
+
+        result = run_ops([
+            "record-qa-evidence", "--target", str(self.target),
+            "--total", "10", "--passed", "10", "--failed", "0",
+            "--exit-code", "0", "--evidence-path", "tests/results.xml",
+        ])
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        gates = json.loads(run_file.read_text()).get("approval_gates", {})
+        self.assertTrue(gates.get("tests_passing"), "tests_passing must be True")
+        self.assertTrue(gates.get("qa_sign_off"), "qa_sign_off must be True")
+
+    def test_record_qa_evidence_failure_clears_gates(self):
+        """Failed QA evidence (exit code != 0) sets gates to False."""
+        run_id, run_file = self._init_and_graph("backend_utility")
+
+        result = run_ops([
+            "record-qa-evidence", "--target", str(self.target),
+            "--total", "10", "--passed", "8", "--failed", "2", "--exit-code", "1",
+        ])
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        gates = json.loads(run_file.read_text()).get("approval_gates", {})
+        self.assertFalse(gates.get("tests_passing"), "tests_passing must be False")
+        self.assertFalse(gates.get("qa_sign_off"), "qa_sign_off must be False")
+
+    def test_finalization_not_ready_without_qa_evidence(self):
+        """Without QA recording, finalization produces not_ready."""
+        run_id, run_file = self._init_and_graph("backend_utility")
+        run_ops(["generate-run-report", "--target", str(self.target)])
+
+        report = json.loads(
+            (self.target / ".devflow" / "reports" / f"{run_id}-report.json").read_text()
+        )
+        self.assertEqual(report["technical_readiness"], "not_ready")
+        self.assertEqual(report["merge_recommendation"], "not_ready")
+
+    def test_finalization_not_ready_when_qa_failed(self):
+        """With failed QA evidence (exit code != 0), finalization produces not_ready."""
+        run_id, run_file = self._init_and_graph("backend_utility")
+
+        run_ops([
+            "record-qa-evidence", "--target", str(self.target),
+            "--total", "10", "--passed", "5", "--failed", "5", "--exit-code", "1",
+        ])
+        run_ops(["generate-run-report", "--target", str(self.target)])
+
+        report = json.loads(
+            (self.target / ".devflow" / "reports" / f"{run_id}-report.json").read_text()
+        )
+        self.assertEqual(report["technical_readiness"], "not_ready")
+        self.assertEqual(report["merge_recommendation"], "not_ready")
+
+    # --- Tests 7 & 8: backend_utility + QA done → readiness state machine ---
+
+    def _completed_backend_utility_run_data(self, human: bool) -> dict:
+        tasks = self.mod.generate_task_graph_nodes("RUN-001", "backend_utility", "test")
+        for task in tasks:
+            task["status"] = "verified"
+        return {
+            "run_id": "RUN-001",
+            "objective": "test",
+            "execution_mode": "subagents",
+            "agent_teams_requested": False,
+            "tasks": tasks,
+            "approval_gates": {
+                "contract_approved": True,
+                "tests_passing": True,
+                "security_review_complete": True,
+                "qa_sign_off": True,
+                "human_approval": human,
+            },
+        }
+
+    def test_backend_utility_complete_human_false_awaiting_human_approval(self):
+        """backend_utility all tasks verified + QA passed + human=false → awaiting_human_approval."""
+        report = self.mod.build_run_report(
+            self._completed_backend_utility_run_data(human=False), "RUN-001"
+        )
+        self.assertEqual(report["technical_readiness"], "ready")
+        self.assertEqual(report["status"], "awaiting_human_approval")
+        self.assertEqual(report["merge_recommendation"], "awaiting_human_approval")
+
+    def test_backend_utility_complete_human_true_ready_for_human_merge(self):
+        """backend_utility all tasks verified + QA passed + human=true → ready_for_human_merge."""
+        report = self.mod.build_run_report(
+            self._completed_backend_utility_run_data(human=True), "RUN-001"
+        )
+        self.assertEqual(report["technical_readiness"], "ready")
+        self.assertEqual(report["status"], "ready_for_human_merge")
+        self.assertEqual(report["merge_recommendation"], "ready_for_human_merge")
+
+    # --- Test 9: updated_at >= created_at ---
+
+    def test_updated_at_not_before_created_at_after_finalization(self):
+        """updated_at must be >= created_at after generate-run-report."""
+        run_id, run_file = self._init_and_graph("backend_utility")
+        run_ops(["generate-run-report", "--target", str(self.target)])
+
+        run_data = json.loads(run_file.read_text())
+        created_at = run_data.get("created_at", "")
+        updated_at = run_data.get("updated_at", "")
+        self.assertTrue(created_at, "created_at must be present")
+        self.assertTrue(updated_at, "updated_at must be set by generate-run-report")
+        self.assertGreaterEqual(
+            updated_at, created_at,
+            f"updated_at ({updated_at!r}) must be >= created_at ({created_at!r})",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Security applicability policy tests
+# ---------------------------------------------------------------------------
+
+class SecurityApplicabilityPolicyTest(unittest.TestCase):
+    """
+    Verifies the three-concept security gate model:
+        security_review_required / security_review_status / security_gate_satisfied
+
+    Coverage:
+    1. Low-risk backend_utility → not_applicable, gate satisfied, awaiting_human_approval
+    2. Each risk signal category → required=True, pending, gate not satisfied, not_ready
+    3. Risky run with evidence → completed, gate satisfied, awaiting_human_approval
+    4. Low-risk report: not_applicable asserted; no Security Red Team claim
+    5. Applicability constants, function, and closed enum correct
+    6. Backward-compat: run_data without security_review_required defaults to required=True
+    """
+
+    def setUp(self):
+        self.mod = _load_ops_module()
+
+    def _verified_tasks(self, delivery_type: str = "backend_utility",
+                        objective: str = "Parse CSV files") -> list:
+        tasks = self.mod.generate_task_graph_nodes("RUN-001", delivery_type, objective)
+        for t in tasks:
+            t["status"] = "verified"
+        return tasks
+
+    def _make_run(self, objective: str, human: bool,
+                  security_evidence: bool = False,
+                  security_review_required: bool | None = None,
+                  delivery_type: str = "backend_utility") -> dict:
+        """Build a complete run_data dict with explicit security applicability."""
+        if security_review_required is None:
+            sec = self.mod.determine_security_applicability(delivery_type, objective)
+        else:
+            reason = ("low_risk_local_utility" if not security_review_required
+                      else "explicit_security_signal")
+            sec = {
+                "security_review_required": security_review_required,
+                "security_applicability_reason": reason,
+            }
+        return {
+            "run_id": "RUN-001",
+            "objective": objective,
+            "execution_mode": "subagents",
+            "agent_teams_requested": False,
+            "tasks": self._verified_tasks(delivery_type, objective),
+            "approval_gates": {
+                "tests_passing": True,
+                "qa_sign_off": True,
+                "security_review_complete": security_evidence,
+                "human_approval": human,
+            },
+            **sec,
+        }
+
+    # --- 1. Low-risk backend_utility ---
+
+    def test_low_risk_security_review_not_required(self):
+        result = self.mod.determine_security_applicability(
+            "backend_utility", "Parse CSV files and compute summary statistics"
+        )
+        self.assertFalse(result["security_review_required"])
+
+    def test_low_risk_applicability_reason(self):
+        result = self.mod.determine_security_applicability(
+            "backend_utility", "Parse CSV files and compute summary statistics"
+        )
+        self.assertEqual(result["security_applicability_reason"], "low_risk_local_utility")
+
+    def test_low_risk_run_security_review_status_not_applicable(self):
+        report = self.mod.build_run_report(
+            self._make_run("Parse CSV files", human=False), "RUN-001"
+        )
+        sec = report["security_applicability"]
+        self.assertFalse(sec["security_review_required"])
+        self.assertEqual(sec["security_review_status"], "not_applicable")
+        self.assertTrue(sec["security_gate_satisfied"])
+
+    def test_low_risk_run_awaiting_human_approval_when_human_false(self):
+        """Low-risk backend_utility: QA done + human=False → awaiting_human_approval."""
+        report = self.mod.build_run_report(
+            self._make_run("Parse CSV files", human=False), "RUN-001"
+        )
+        self.assertEqual(report["technical_readiness"], "ready")
+        self.assertEqual(report["status"], "awaiting_human_approval")
+        self.assertEqual(report["merge_recommendation"], "awaiting_human_approval")
+
+    def test_low_risk_run_ready_for_human_merge_when_human_true(self):
+        report = self.mod.build_run_report(
+            self._make_run("Parse CSV files", human=True), "RUN-001"
+        )
+        self.assertEqual(report["merge_recommendation"], "ready_for_human_merge")
+
+    # --- 2. Risky signals → required=True, pending, gate not satisfied, not_ready ---
+
+    def test_api_surface_signal_required_true(self):
+        r = self.mod.determine_security_applicability(
+            "backend_utility", "Build REST API endpoint for data retrieval"
+        )
+        self.assertTrue(r["security_review_required"])
+        self.assertEqual(r["security_applicability_reason"], "api_or_http_surface")
+
+    def test_auth_signal_required_true(self):
+        r = self.mod.determine_security_applicability(
+            "backend_utility", "Add JWT authentication to service"
+        )
+        self.assertTrue(r["security_review_required"])
+        self.assertEqual(r["security_applicability_reason"], "auth_or_authorization")
+
+    def test_external_service_signal_required_true(self):
+        r = self.mod.determine_security_applicability(
+            "backend_utility", "Integrate Slack notifications and email alerts"
+        )
+        self.assertTrue(r["security_review_required"])
+        self.assertEqual(r["security_applicability_reason"], "external_integration")
+
+    def test_payment_signal_required_true(self):
+        r = self.mod.determine_security_applicability(
+            "backend_utility", "Add Stripe payment billing integration"
+        )
+        self.assertTrue(r["security_review_required"])
+
+    def test_database_migration_signal_required_true(self):
+        r = self.mod.determine_security_applicability(
+            "backend_utility", "Add database migration to add column to users table"
+        )
+        self.assertTrue(r["security_review_required"])
+        self.assertEqual(r["security_applicability_reason"], "database_or_migration")
+
+    def test_deployment_signal_required_true(self):
+        r = self.mod.determine_security_applicability(
+            "backend_utility", "Deploy service to Kubernetes production infrastructure"
+        )
+        self.assertTrue(r["security_review_required"])
+        self.assertEqual(r["security_applicability_reason"], "deployment_or_infrastructure")
+
+    def test_risky_run_without_security_evidence_is_not_ready(self):
+        """Risky objective + no security evidence → not_ready."""
+        run_data = self._make_run(
+            "Build REST API endpoint for data retrieval",
+            human=False, security_evidence=False,
+        )
+        report = self.mod.build_run_report(run_data, "RUN-001")
+        sec = report["security_applicability"]
+        self.assertTrue(sec["security_review_required"])
+        self.assertEqual(sec["security_review_status"], "pending")
+        self.assertFalse(sec["security_gate_satisfied"])
+        self.assertEqual(report["technical_readiness"], "not_ready")
+        self.assertEqual(report["merge_recommendation"], "not_ready")
+
+    def test_risky_run_auth_signal_status_pending_without_evidence(self):
+        run_data = self._make_run(
+            "Add JWT authentication to service",
+            human=False, security_evidence=False,
+        )
+        report = self.mod.build_run_report(run_data, "RUN-001")
+        self.assertEqual(report["security_applicability"]["security_review_status"], "pending")
+        self.assertFalse(report["security_applicability"]["security_gate_satisfied"])
+
+    # --- 3. Security evidence recorded on risky run → completed, gate satisfied ---
+
+    def test_risky_run_with_security_evidence_gate_satisfied(self):
+        run_data = self._make_run(
+            "Build REST API endpoint for user data",
+            human=False, security_evidence=True,
+        )
+        report = self.mod.build_run_report(run_data, "RUN-001")
+        sec = report["security_applicability"]
+        self.assertTrue(sec["security_review_required"])
+        self.assertEqual(sec["security_review_status"], "completed")
+        self.assertTrue(sec["security_gate_satisfied"])
+
+    def test_risky_run_with_security_evidence_awaiting_human(self):
+        """Risky run: evidence present + all auto gates pass + human=False → awaiting_human_approval."""
+        run_data = self._make_run(
+            "Build REST API endpoint for user data",
+            human=False, security_evidence=True,
+        )
+        report = self.mod.build_run_report(run_data, "RUN-001")
+        self.assertEqual(report["technical_readiness"], "ready")
+        self.assertEqual(report["merge_recommendation"], "awaiting_human_approval")
+
+    # --- 4. Low-risk report: not_applicable; no Security Red Team claim ---
+
+    def test_low_risk_provenance_security_review_not_applicable(self):
+        run_data = self._make_run("Parse CSV files", human=False)
+        report = self.mod.build_run_report(run_data, "RUN-001")
+        self.assertEqual(report["evidence_provenance"]["security_review"], "not_applicable")
+
+    def test_low_risk_report_no_security_review_complete_claim(self):
+        """Low-risk run: approval_gates.security_review_complete stays False; not overridden."""
+        run_data = self._make_run("Parse CSV files", human=False, security_evidence=False)
+        report = self.mod.build_run_report(run_data, "RUN-001")
+        # Security gate is satisfied via not_applicable path, NOT via security_review_complete
+        self.assertFalse(report["approval_gates"].get("security_review_complete", True))
+        self.assertEqual(report["security_applicability"]["security_review_status"], "not_applicable")
+
+    def test_low_risk_not_applicable_not_completed(self):
+        """not_applicable must never equal 'completed'."""
+        run_data = self._make_run("Parse CSV files", human=False)
+        report = self.mod.build_run_report(run_data, "RUN-001")
+        sec_status = report["security_applicability"]["security_review_status"]
+        self.assertEqual(sec_status, "not_applicable")
+        self.assertNotEqual(sec_status, "completed")
+
+    # --- 5. Constants, function, and closed enum ---
+
+    def test_determine_security_applicability_exists(self):
+        self.assertTrue(callable(self.mod.determine_security_applicability))
+
+    def test_security_applicability_reasons_constant(self):
+        self.assertIsInstance(self.mod.SECURITY_APPLICABILITY_REASONS, frozenset)
+        self.assertIn("low_risk_local_utility", self.mod.SECURITY_APPLICABILITY_REASONS)
+        self.assertIn("api_or_http_surface", self.mod.SECURITY_APPLICABILITY_REASONS)
+        self.assertIn("explicit_security_signal", self.mod.SECURITY_APPLICABILITY_REASONS)
+
+    def test_security_triggering_risk_signals_constant(self):
+        self.assertIsInstance(self.mod.SECURITY_TRIGGERING_RISK_SIGNALS, frozenset)
+        self.assertIn("api_surface", self.mod.SECURITY_TRIGGERING_RISK_SIGNALS)
+        self.assertIn("auth", self.mod.SECURITY_TRIGGERING_RISK_SIGNALS)
+
+    def test_mandatory_delivery_types_always_require_security(self):
+        """new_feature, ai_rag, security_response, release_readiness always required."""
+        for dt in ["new_feature", "ai_rag", "security_response", "release_readiness"]:
+            r = self.mod.determine_security_applicability(dt, "low risk with no signals here")
+            self.assertTrue(
+                r["security_review_required"],
+                f"{dt} should always require security review",
+            )
+            self.assertEqual(r["security_applicability_reason"], "explicit_security_signal")
+
+    def test_reason_is_always_in_closed_enum(self):
+        for objective in [
+            "Parse CSV files", "Build REST API", "Add JWT authentication",
+            "Deploy to Kubernetes", "Add database migration",
+        ]:
+            for dt in ["backend_utility", "new_feature", "bug_resolution"]:
+                r = self.mod.determine_security_applicability(dt, objective)
+                self.assertIn(
+                    r["security_applicability_reason"],
+                    self.mod.SECURITY_APPLICABILITY_REASONS,
+                    f"{dt}/{objective!r}: reason not in closed enum",
+                )
+
+    def test_security_gate_satisfied_true_when_not_required(self):
+        run_data = {
+            "run_id": "RUN-001", "objective": "utility",
+            "execution_mode": "subagents", "agent_teams_requested": False,
+            "tasks": [],
+            "approval_gates": {"security_review_complete": False},
+            "security_review_required": False,
+            "security_applicability_reason": "low_risk_local_utility",
+        }
+        report = self.mod.build_run_report(run_data, "RUN-001")
+        self.assertTrue(report["security_applicability"]["security_gate_satisfied"])
+
+    def test_security_gate_satisfied_false_when_required_no_evidence(self):
+        run_data = {
+            "run_id": "RUN-001", "objective": "api endpoint",
+            "execution_mode": "subagents", "agent_teams_requested": False,
+            "tasks": [],
+            "approval_gates": {"security_review_complete": False},
+            "security_review_required": True,
+            "security_applicability_reason": "api_or_http_surface",
+        }
+        report = self.mod.build_run_report(run_data, "RUN-001")
+        self.assertFalse(report["security_applicability"]["security_gate_satisfied"])
+
+    def test_security_applicability_field_in_report(self):
+        run_data = {
+            "run_id": "RUN-001", "objective": "",
+            "execution_mode": "subagents", "agent_teams_requested": False,
+            "tasks": [], "approval_gates": {},
+        }
+        report = self.mod.build_run_report(run_data, "RUN-001")
+        self.assertIn("security_applicability", report)
+        sec = report["security_applicability"]
+        for key in ["security_review_required", "security_review_status",
+                    "security_gate_satisfied", "security_applicability_reason"]:
+            self.assertIn(key, sec, f"security_applicability missing key: {key!r}")
+
+    # --- 6. Backward compatibility: missing field defaults to required=True ---
+
+    def test_backward_compat_no_security_review_required_defaults_true(self):
+        """Run state without security_review_required → default True (safe)."""
+        run_data = {
+            "run_id": "RUN-001", "objective": "test",
+            "execution_mode": "subagents", "agent_teams_requested": False,
+            "tasks": [], "approval_gates": {"security_review_complete": False},
+            # no security_review_required key
+        }
+        report = self.mod.build_run_report(run_data, "RUN-001")
+        self.assertTrue(report["security_applicability"]["security_review_required"])
+        self.assertEqual(report["security_applicability"]["security_review_status"], "pending")
+        self.assertFalse(report["security_applicability"]["security_gate_satisfied"])
+
+    def test_backward_compat_security_review_complete_true_satisfies_gate(self):
+        """Legacy run data: security_review_complete=True with no security_review_required → gate satisfied."""
+        run_data = {
+            "run_id": "RUN-001", "objective": "test",
+            "execution_mode": "subagents", "agent_teams_requested": False,
+            "tasks": [], "approval_gates": {"security_review_complete": True},
+        }
+        report = self.mod.build_run_report(run_data, "RUN-001")
+        self.assertTrue(report["security_applicability"]["security_gate_satisfied"])
+        self.assertEqual(report["security_applicability"]["security_review_status"], "completed")
+
+    # --- 7. Detector precision and negation regression tests ---
+
+    def test_stdlib_only_no_external_deps_not_required(self):
+        r = self.mod.determine_security_applicability(
+            "backend_utility", "pure Python, stdlib-only, no external dependencies"
+        )
+        self.assertFalse(r["security_review_required"])
+        self.assertEqual(r["security_applicability_reason"], "low_risk_local_utility")
+
+    def test_negated_api_network_file_io_not_required(self):
+        r = self.mod.determine_security_applicability(
+            "backend_utility", "no external API, no network I/O, no file I/O"
+        )
+        self.assertFalse(r["security_review_required"])
+
+    def test_call_external_api_required_true_external_integration(self):
+        r = self.mod.determine_security_applicability(
+            "backend_utility", "call an external API, no new dependencies"
+        )
+        self.assertTrue(r["security_review_required"])
+        self.assertEqual(r["security_applicability_reason"], "external_integration")
+
+    def test_pip_install_overrides_no_external_deps(self):
+        r = self.mod.determine_security_applicability(
+            "backend_utility", "no external dependencies, but pip install package-x"
+        )
+        self.assertTrue(r["security_review_required"])
+        self.assertEqual(r["security_applicability_reason"], "dependency_change")
+
+    def test_oauth_positive_overrides_no_api_negation(self):
+        r = self.mod.determine_security_applicability(
+            "backend_utility", "no API, but add OAuth authentication"
+        )
+        self.assertTrue(r["security_review_required"])
+        self.assertEqual(r["security_applicability_reason"], "auth_or_authorization")
+
+    def test_low_risk_backend_utility_full_canonical_state(self):
+        """Low-risk backend_utility + QA evidence + human=False → full expected canonical state."""
+        run_data = self._make_run(
+            "pure Python, stdlib-only, no external dependencies",
+            human=False,
+            security_evidence=False,
+            delivery_type="backend_utility",
+        )
+        report = self.mod.build_run_report(run_data, "RUN-001")
+        sec = report["security_applicability"]
+        self.assertEqual(sec["security_review_status"], "not_applicable")
+        self.assertTrue(sec["security_gate_satisfied"])
+        self.assertEqual(report["technical_readiness"], "ready")
+        self.assertEqual(report["status"], "awaiting_human_approval")
+        self.assertEqual(report["merge_recommendation"], "awaiting_human_approval")
 
 
 if __name__ == "__main__":

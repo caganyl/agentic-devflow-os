@@ -71,6 +71,10 @@ _PATH_BLOCK_PATTERNS = [
     re.compile(r"(^|[/\\])\.claude[/\\]settings\.local\.json$"),
     # Claude hooks directory (any file inside .claude/hooks/)
     re.compile(r"(^|[/\\])\.claude[/\\]hooks[/\\]"),
+    # Canonical run state — must only be written via devflow_operations.py CLI
+    re.compile(r"(^|[/\\])\.devflow[/\\]runs[/\\]"),
+    # Canonical scorecard/report — must only be written via devflow_operations.py CLI
+    re.compile(r"(^|[/\\])\.devflow[/\\]reports[/\\]"),
 ]
 
 # Fixed deny messages — must NOT echo user-supplied data
