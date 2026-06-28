@@ -245,6 +245,35 @@ otomatik olarak günceller. Doğrudan Write/Edit ile bu alanları yazmak yasakt�
 - Exit code 0 ve failed = 0 ise: `tests_passing: true`, `qa_sign_off: true`
 - Exit code ≠ 0 veya failed > 0 ise: `tests_passing: false`, `qa_sign_off: false`
 
+**Adım 1b — Security kanıtını authoritative olarak kaydet (riskli run'da zorunlu):**
+
+`security_review_required=true` olan run'larda (auth, API, external service, payment vb.
+risk sinyali tespit edilen run'lar) bu adım Delivery Lead tarafından çalıştırılır.
+Security Red Team raporu `docs/quality/security-reports/` altına yazıldıktan sonra:
+
+```bash
+python3 scripts/devflow_operations.py record-security-evidence \
+  --target . \
+  --verdict <pass|blocked> \
+  --max-severity <none|low|medium|high|critical> \
+  --evidence-path docs/quality/security-reports/<rapor-dosyası>.md
+```
+
+Kural ve kısıtlamalar:
+- Yalnızca `security_review_required=true` olan run'da çalışır; aksi takdirde exit 17 döner.
+- `evidence-path` yalnızca `docs/quality/security-reports/` altında, göreli, dosya mevcut olmalı;
+  `..`, `*`, mutlak yol, `.devflow/` veya `.claude/` içeren yollar reddedilir.
+- `verdict=pass` yalnızca `max-severity=none` veya `low` ile geçerlidir.
+- `verdict=blocked` yalnızca `max-severity=medium`, `high` veya `critical` ile geçerlidir.
+- Komut dosya içeriğini kopyalamaz; yalnızca dar canonical metadata yazar:
+  `security_review_status`, `security_gate_satisfied`, `security_evidence` (yol, verdict,
+  severity, recorded_at, provenance).
+- `security_gate_satisfied=false` olan bir run `technical_readiness=not_ready` olarak
+  kalır ve `generate-run-report` bunu scorecard'a yansıtır.
+
+Native lifecycle event gözlemi (SubagentStart/SubagentStop) bu evidence artefaktına
+causal olarak bağlı değildir; bu bağlantı iddia edilmez.
+
 **Adım 2 — Canonical raporu üret:**
 ```bash
 python3 scripts/devflow_operations.py generate-run-report --target .

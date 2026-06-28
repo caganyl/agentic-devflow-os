@@ -6,15 +6,16 @@ Managed operations for target project initialization and delivery.
 Standard library only. No third-party dependencies.
 
 Subcommands:
-    init-target           Initialize .devflow/ workspace in a target project (non-protected branch only)
-    create-run            Create a new delivery run (non-protected branch only)
-    launch                Launch Claude Code supervisor in a managed run worktree
-    status                Show current run state
-    prepare-delivery      Validate delivery readiness (approval evidence only; no real Git mutations)
-    generate-task-graph   Generate deterministic task graph for a delivery type
-    update-task-status    Update a task's status with state transition validation
-    record-qa-evidence    Record QA test results authoritatively and update approval gates
-    generate-run-report   Generate run evidence report with merge recommendation
+    init-target               Initialize .devflow/ workspace in a target project (non-protected branch only)
+    create-run                Create a new delivery run (non-protected branch only)
+    launch                    Launch Claude Code supervisor in a managed run worktree
+    status                    Show current run state
+    prepare-delivery          Validate delivery readiness (approval evidence only; no real Git mutations)
+    generate-task-graph       Generate deterministic task graph for a delivery type
+    update-task-status        Update a task's status with state transition validation
+    record-qa-evidence        Record QA test results authoritatively and update approval gates
+    record-security-evidence  Record security review evidence authoritatively
+    generate-run-report       Generate run evidence report with merge recommendation
 
 Usage:
     python3 scripts/devflow_operations.py init-target --target PATH [--force]
@@ -25,6 +26,7 @@ Usage:
     python3 scripts/devflow_operations.py generate-task-graph --target PATH --delivery-type TYPE [--objective TEXT] [--force]
     python3 scripts/devflow_operations.py update-task-status --target PATH --task-id ID --status STATUS
     python3 scripts/devflow_operations.py record-qa-evidence --target PATH --total N --passed N --failed N --exit-code N [--evidence-path PATH]
+    python3 scripts/devflow_operations.py record-security-evidence --target PATH --run-id RUN-NNN --verdict pass|blocked --max-severity none|low|medium|high|critical --evidence-path RELATIVE_PATH
     python3 scripts/devflow_operations.py generate-run-report --target PATH
 
 Exit codes:
@@ -45,6 +47,7 @@ Exit codes:
     14  Task not found in active run
     15  Invalid task state transition
     16  generate-task-graph --force rejected: run is active (tasks progressed, events, or artifacts exist)
+    17  Security evidence recording rejected (review not required, invalid verdict/severity, or invalid path)
 
 IMPORTANT — validate_forbidden_git_operation:
     This function validates planned operation *strings* passed to it by callers.
@@ -291,6 +294,23 @@ SECURITY_REVIEW_STATUS_ENUM = frozenset({
     "pending",
     "completed",
 })
+
+# ---------------------------------------------------------------------------
+# Security evidence recording
+#
+# record-security-evidence writes narrow metadata to canonical run state.
+# It does NOT copy evidence file content, session IDs, or free text.
+# ---------------------------------------------------------------------------
+
+SECURITY_EVIDENCE_VERDICTS = frozenset({"pass", "blocked"})
+SECURITY_EVIDENCE_SEVERITIES = frozenset({"none", "low", "medium", "high", "critical"})
+SECURITY_EVIDENCE_PATH_PREFIX = "docs/quality/security-reports/"
+
+# Verdict → allowed max-severity values (closed enum; enforced at record time)
+VALID_VERDICT_SEVERITY_COMBOS: dict[str, frozenset] = {
+    "pass": frozenset({"none", "low"}),
+    "blocked": frozenset({"medium", "high", "critical"}),
+}
 
 # ---------------------------------------------------------------------------
 # Delivery type task graph templates
@@ -909,6 +929,63 @@ def validate_task_transition(
     return True, ""
 
 
+def _inject_security_review_task(tasks: list, run_id: str, objective: str) -> list:
+    """
+    Insert a Security Review task before the final release/approval task.
+
+    Called only for delivery types that gain security_review_required=True
+    from objective risk signals but do NOT already have a security_review task
+    in their template (i.e. non-mandatory types like backend_utility,
+    bug_resolution, etc.).
+
+    Security Review depends on all implementation + qa tasks that precede the
+    release task.  The release task is renumbered one position up and gains
+    Security Review as an additional dependency.
+    """
+    if not tasks:
+        return tasks
+
+    release_task = tasks[-1]
+    pre_release = tasks[:-1]
+
+    # Deps: all implementation and QA tasks in the pre-release list
+    sec_dep_types = frozenset({"implementation", "qa"})
+    sec_dep_ids = [t["id"] for t in pre_release if t["task_type"] in sec_dep_types]
+    if not sec_dep_ids and pre_release:
+        sec_dep_ids = [pre_release[-1]["id"]]
+
+    # Security Review gets the position of the current release task;
+    # release task is shifted one position up.
+    sec_suffix = f"{len(tasks):03d}"
+    release_new_suffix = f"{len(tasks) + 1:03d}"
+
+    sec_task_id = f"{run_id}-TASK-{sec_suffix}"
+    new_release_id = f"{run_id}-TASK-{release_new_suffix}"
+
+    sec_task = {
+        "id": sec_task_id,
+        "title": "Security Review",
+        "task_type": "security_review",
+        "assigned_role": "security-red-team",
+        "dependency_ids": sec_dep_ids,
+        "acceptance_criteria_ref": f"objective: {objective[:200]}",
+        "qa_expectation": "Güvenlik raporu üretildi; blocker bulgu yok",
+        "status": "planned",
+        "output_path": SECURITY_EVIDENCE_PATH_PREFIX,
+        "expected_evidence_path": SECURITY_EVIDENCE_PATH_PREFIX,
+        "delegation_status": "planned",
+    }
+
+    # Release task: new ID + security review added to its dependencies
+    updated_release = dict(release_task)
+    updated_release["id"] = new_release_id
+    updated_release["dependency_ids"] = list(
+        release_task.get("dependency_ids", [])
+    ) + [sec_task_id]
+
+    return pre_release + [sec_task, updated_release]
+
+
 def generate_task_graph_nodes(run_id: str, delivery_type: str, objective: str) -> list:
     """Return a deterministic list of task node dicts for the given delivery type."""
     templates = DELIVERY_TYPE_TASK_TEMPLATES.get(delivery_type, [])
@@ -929,7 +1006,73 @@ def generate_task_graph_nodes(run_id: str, delivery_type: str, objective: str) -
             "expected_evidence_path": tmpl["output_path"],
             "delegation_status": "planned",
         })
+
+    # Inject a Security Review task for delivery types not already having one
+    # in their template, when the objective triggers risk signals.
+    if delivery_type not in DELIVERY_TYPES_WITH_MANDATORY_SECURITY_REVIEW:
+        already_has_security = any(t["task_type"] == "security_review" for t in tasks)
+        if not already_has_security:
+            sec_app = determine_security_applicability(delivery_type, objective)
+            if sec_app["security_review_required"]:
+                tasks = _inject_security_review_task(tasks, run_id, objective)
+
     return tasks
+
+
+def validate_security_evidence_path(target: Path, evidence_path: str) -> tuple[bool, str]:
+    """
+    Validate a security evidence path for record-security-evidence.
+
+    Rules (all enforced before existence check):
+    - Must not be empty
+    - Must not be absolute
+    - Must not contain '..' traversal
+    - Must not contain wildcards (* or ?)
+    - Must start with docs/quality/security-reports/
+    - File must exist at target/evidence_path
+
+    Returns (ok, error_message).
+    """
+    if not evidence_path:
+        return False, "evidence-path gereklidir"
+
+    # Must not be absolute
+    if Path(evidence_path).is_absolute():
+        return False, f"evidence-path mutlak yol olamaz: {evidence_path!r}"
+
+    # Normalize separators for consistent checks
+    normalized = evidence_path.replace("\\", "/")
+
+    # Must not contain path traversal
+    parts = normalized.split("/")
+    if ".." in parts or any(p.startswith("..") for p in parts):
+        return False, f"evidence-path '..' traversal içeremez: {evidence_path!r}"
+
+    # Must not contain wildcards
+    if "*" in normalized or "?" in normalized:
+        return False, f"evidence-path wildcard içeremez: {evidence_path!r}"
+
+    # Must start with the allowed prefix
+    if not normalized.startswith(SECURITY_EVIDENCE_PATH_PREFIX):
+        return False, (
+            f"evidence-path yalnızca '{SECURITY_EVIDENCE_PATH_PREFIX}' altında kabul edilir. "
+            f"Verilen: {evidence_path!r}"
+        )
+
+    # File must exist inside target
+    full_path = (target / evidence_path).resolve()
+    try:
+        full_path.relative_to(target.resolve())
+    except ValueError:
+        return False, f"evidence-path target dizini dışına çıkıyor: {evidence_path!r}"
+
+    if not full_path.exists():
+        return False, f"evidence-path dosyası bulunamadı: {evidence_path!r}"
+
+    if not full_path.is_file():
+        return False, f"evidence-path bir dosya olmalıdır: {evidence_path!r}"
+
+    return True, ""
 
 
 def validate_task_packet_dict(packet: dict) -> None:
@@ -1050,10 +1193,13 @@ def build_run_report(
     # security_review_required is written to run state by generate-task-graph.
     # Default True for backward compatibility with run states that predate this field.
     #
-    # security_gate_satisfied logic:
-    #   required=False → status="not_applicable", gate satisfied (no review needed)
-    #   required=True + evidence present → status="completed", gate satisfied
-    #   required=True + no evidence → status="pending", gate NOT satisfied
+    # Three-state machine (checked in this order):
+    #   1. required=False → status="not_applicable", gate satisfied
+    #   2. required=True + record-security-evidence wrote completed status
+    #      → status="completed", gate satisfied iff verdict=pass
+    #   3. required=True + backward-compat security_review_complete gate=True
+    #      → status="completed", gate satisfied (legacy path)
+    #   4. required=True + no evidence → status="pending", gate NOT satisfied
     # ---------------------------------------------------------------------------
     security_review_required = run_data.get("security_review_required", True)
     security_applicability_reason = run_data.get(
@@ -1062,12 +1208,22 @@ def build_run_report(
     if not security_review_required:
         security_review_status = "not_applicable"
         security_gate_satisfied = True
-    elif security_done:
-        security_review_status = "completed"
-        security_gate_satisfied = True
     else:
-        security_review_status = "pending"
-        security_gate_satisfied = False
+        # Check for security evidence written by record-security-evidence.
+        # A stored "completed" status with an explicit gate value takes precedence
+        # over the backward-compat approval gate flag.
+        _stored_sec_status = run_data.get("security_review_status")
+        _stored_sec_gate = run_data.get("security_gate_satisfied")
+        if _stored_sec_status == "completed" and _stored_sec_gate is not None:
+            security_review_status = "completed"
+            security_gate_satisfied = bool(_stored_sec_gate)
+        elif security_done:
+            # Backward compat: approval_gates.security_review_complete=True
+            security_review_status = "completed"
+            security_gate_satisfied = True
+        else:
+            security_review_status = "pending"
+            security_gate_satisfied = False
 
     # Technical readiness: all auto gates + tasks done (human approval is separate)
     auto_gates_pass = (
@@ -1177,12 +1333,13 @@ def build_run_report(
     # independent sign-off.  Security checklists from the same run are never
     # presented as a separate security-agent session without native evidence.
     # ---------------------------------------------------------------------------
+    _sec_evidence_meta = run_data.get("security_evidence")
     evidence_provenance = {
         "acceptance_criteria": "generated_in_run",
         "qa_result": "test_command" if qa_done else "unavailable",
         "security_review": (
             "not_applicable" if not security_review_required
-            else "generated_in_run" if security_done
+            else "generated_in_run" if security_review_status == "completed"
             else "unavailable"
         ),
         "human_approval": "human_review" if human_done else "unavailable",
@@ -1239,6 +1396,7 @@ def build_run_report(
             "security_review_status": security_review_status,
             "security_gate_satisfied": security_gate_satisfied,
             "security_applicability_reason": security_applicability_reason,
+            "security_evidence": _sec_evidence_meta,
         },
         "merge_recommendation": merge_recommendation,
         "report_generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -1956,6 +2114,128 @@ def cmd_record_qa_evidence(args) -> int:
     return 0
 
 
+def cmd_record_security_evidence(args) -> int:
+    target = Path(args.target).resolve()
+    validate_target_path(target)
+    validate_not_on_protected_branch(target, "record-security-evidence")
+
+    verdict = args.verdict
+    max_severity = args.max_severity
+    run_id_override = getattr(args, "run_id", None)
+    evidence_path = args.evidence_path
+
+    # Validate verdict (argparse choices already enforce this; double-check)
+    if verdict not in SECURITY_EVIDENCE_VERDICTS:
+        print(
+            f"Hata: Geçersiz verdict: '{verdict}'. "
+            f"Geçerliler: {sorted(SECURITY_EVIDENCE_VERDICTS)}",
+            file=sys.stderr,
+        )
+        sys.exit(17)
+
+    # Validate severity
+    if max_severity not in SECURITY_EVIDENCE_SEVERITIES:
+        print(
+            f"Hata: Geçersiz max-severity: '{max_severity}'. "
+            f"Geçerliler: {sorted(SECURITY_EVIDENCE_SEVERITIES)}",
+            file=sys.stderr,
+        )
+        sys.exit(17)
+
+    # Validate verdict+severity combination
+    allowed_severities = VALID_VERDICT_SEVERITY_COMBOS.get(verdict, frozenset())
+    if max_severity not in allowed_severities:
+        print(
+            f"Hata: Geçersiz verdict+severity kombinasyonu: "
+            f"verdict='{verdict}' max-severity='{max_severity}'.",
+            file=sys.stderr,
+        )
+        if verdict == "pass":
+            print(
+                "  'pass' yalnızca max-severity='none' veya 'low' ile geçerlidir.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "  'blocked' yalnızca max-severity='medium', 'high' veya 'critical' ile geçerlidir.",
+                file=sys.stderr,
+            )
+        sys.exit(17)
+
+    devflow = get_devflow_dir(target)
+    if not is_initialized(target):
+        print("Hata: .devflow/ başlatılmamış.", file=sys.stderr)
+        sys.exit(4)
+
+    project_data = read_json(devflow / "project.json")
+    run_id = project_data.get("current_run_id")
+    if not run_id:
+        print("Hata: Aktif run yok.", file=sys.stderr)
+        sys.exit(4)
+
+    # Optional run-id override: must match the current run
+    if run_id_override and run_id_override != run_id:
+        print(
+            f"Hata: --run-id '{run_id_override}' aktif run '{run_id}' ile eşleşmiyor. "
+            "Yalnızca aktif/current run için evidence kaydedilebilir.",
+            file=sys.stderr,
+        )
+        sys.exit(17)
+
+    run_file = devflow / "runs" / f"{run_id}.json"
+    if not run_file.exists():
+        print(f"Hata: Run state dosyası bulunamadı: {run_file}", file=sys.stderr)
+        sys.exit(4)
+
+    run_data = read_json(run_file)
+
+    # Reject if security review is not required for this run.
+    # Default False so that runs without generate-task-graph are also rejected.
+    if not run_data.get("security_review_required", False):
+        print(
+            "Hata: Bu run için security review gerekli değil "
+            "(security_review_required=false veya henüz belirlenmemiş). "
+            "Low-risk run'a security evidence kaydedilemez.",
+            file=sys.stderr,
+        )
+        sys.exit(17)
+
+    # Validate evidence path (relative, safe, under allowed prefix, file must exist)
+    path_ok, path_err = validate_security_evidence_path(target, evidence_path)
+    if not path_ok:
+        print(f"Hata: {path_err}", file=sys.stderr)
+        sys.exit(17)
+
+    security_gate_satisfied = verdict == "pass"
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Write narrow canonical metadata to run state.
+    # Never copies evidence file content, session IDs, or free text.
+    run_data["security_review_status"] = "completed"
+    run_data["security_gate_satisfied"] = security_gate_satisfied
+    run_data["security_evidence"] = {
+        "evidence_path": evidence_path,
+        "verdict": verdict,
+        "max_severity": max_severity,
+        "recorded_at": now,
+        "provenance": "generated_in_run",
+    }
+    # Update approval gate for backward compatibility with report logic
+    run_data.setdefault("approval_gates", {})
+    run_data["approval_gates"]["security_review_complete"] = security_gate_satisfied
+
+    atomic_write_json(run_file, run_data)
+
+    gate_str = "SAĞLANDI" if security_gate_satisfied else "BAŞARISIZ (blocked)"
+    print(f"Security evidence kaydedildi: {run_id} [{gate_str}]")
+    print(f"  verdict: {verdict}")
+    print(f"  max_severity: {max_severity}")
+    print(f"  evidence_path: {evidence_path}")
+    print(f"  security_gate_satisfied: {security_gate_satisfied}")
+    print(f"  provenance: generated_in_run")
+    return 0
+
+
 def cmd_generate_run_report(args) -> int:
     target = Path(args.target).resolve()
 
@@ -2000,6 +2280,11 @@ def cmd_generate_run_report(args) -> int:
     sec_status = sec_app.get("security_review_status", "pending")
     sec_satisfied = sec_app.get("security_gate_satisfied", False)
     sec_reason = sec_app.get("security_applicability_reason", "explicit_security_signal")
+    sec_evidence = sec_app.get("security_evidence") or {}
+    sec_verdict = sec_evidence.get("verdict", "")
+    sec_max_severity = sec_evidence.get("max_severity", "")
+    sec_evidence_path = sec_evidence.get("evidence_path", "")
+    sec_evidence_provenance = sec_evidence.get("provenance", "")
 
     if not sec_required:
         security_gate_lines = [
@@ -2010,6 +2295,20 @@ def cmd_generate_run_report(args) -> int:
             "- NOTE: Security review not applicable for this deterministic low-risk profile.",
             "  Security gate satisfied: yes",
             "  This is NOT a claim that a Security Red Team session occurred.",
+        ]
+    elif sec_evidence:
+        security_gate_lines = [
+            f"- security_review_required: {sec_required}",
+            f"- security_review_status: {sec_status}",
+            f"- security_gate_satisfied: {sec_satisfied}",
+            f"- security_applicability_reason: {sec_reason}",
+            f"- evidence_verdict: {sec_verdict}",
+            f"- evidence_max_severity: {sec_max_severity}",
+            f"- evidence_path: {sec_evidence_path}",
+            f"- evidence_provenance: {sec_evidence_provenance or 'generated_in_run'}",
+            "- NOTE: Security evidence is a local artifact generated within this run.",
+            "  Native lifecycle event observation (if any) does not constitute",
+            "  causal binding to this specific evidence artifact or Security Red Team session.",
         ]
     else:
         security_gate_lines = [
@@ -2204,6 +2503,44 @@ def main() -> None:
         help="Test kanıtı dosyasına göreli yol (opsiyonel)",
     )
     p_qa.set_defaults(func=cmd_record_qa_evidence)
+
+    p_sec_ev = subparsers.add_parser(
+        "record-security-evidence",
+        help="Security review kanıtını authoritative olarak kaydet",
+    )
+    p_sec_ev.add_argument("--target", required=True, help="Target project path")
+    p_sec_ev.add_argument(
+        "--run-id",
+        default=None,
+        dest="run_id",
+        help="Run ID (varsayılan: aktif/current run)",
+    )
+    p_sec_ev.add_argument(
+        "--verdict",
+        required=True,
+        choices=sorted(SECURITY_EVIDENCE_VERDICTS),
+        help="Security review sonucu (pass veya blocked)",
+    )
+    p_sec_ev.add_argument(
+        "--max-severity",
+        required=True,
+        choices=sorted(SECURITY_EVIDENCE_SEVERITIES),
+        dest="max_severity",
+        help=(
+            f"Bulunan maksimum severity "
+            f"(pass ile: none/low; blocked ile: medium/high/critical)"
+        ),
+    )
+    p_sec_ev.add_argument(
+        "--evidence-path",
+        required=True,
+        dest="evidence_path",
+        help=(
+            f"Security raporu dosyasına göreli yol "
+            f"(yalnızca '{SECURITY_EVIDENCE_PATH_PREFIX}' altında)"
+        ),
+    )
+    p_sec_ev.set_defaults(func=cmd_record_security_evidence)
 
     p_report = subparsers.add_parser(
         "generate-run-report",
