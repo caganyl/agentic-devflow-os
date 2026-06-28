@@ -343,11 +343,18 @@ class SafePathWriteTest(unittest.TestCase):
     def test_devflow_plans_write_allowed(self):
         self._assert_write_allowed("/project/.devflow/plans/RUN-001-task-graph.md")
 
-    def test_devflow_runs_write_allowed(self):
-        self._assert_write_allowed("/project/.devflow/runs/RUN-001.json")
+    def test_devflow_runs_write_blocked(self):
+        result = run_guard(write_payload("/project/.devflow/runs/RUN-001.json"))
+        self.assertEqual(result.returncode, 2,
+                         "Write to .devflow/runs/ must be blocked (canonical run state)")
 
-    def test_devflow_reports_write_allowed(self):
-        self._assert_write_allowed("/project/.devflow/reports/RUN-001-delivery-summary.md")
+    def test_devflow_reports_write_blocked(self):
+        result = run_guard(write_payload("/project/.devflow/reports/RUN-001-delivery-summary.md"))
+        self.assertEqual(result.returncode, 2,
+                         "Write to .devflow/reports/ must be blocked (canonical scorecard)")
+
+    def test_devflow_delegation_events_write_allowed(self):
+        self._assert_write_allowed("/project/.devflow/delegation-events/evt-001.json")
 
     def test_readme_write_allowed(self):
         self._assert_write_allowed("/project/README.md")

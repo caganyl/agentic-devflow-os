@@ -34,7 +34,11 @@ SOURCES = {
 PLUGIN_VERSION = "1.0.0"
 
 EXCLUDED_FILES = {".gitkeep", ".DS_Store"}
-INCLUDED_SCRIPTS = frozenset({"devflow_operations.py", "devflow_target_guard.py"})
+INCLUDED_SCRIPTS = frozenset({
+    "devflow_operations.py",
+    "devflow_target_guard.py",
+    "devflow_delegation_recorder.py",
+})
 INCLUDED_HOOKS = frozenset({"hooks.json"})
 
 

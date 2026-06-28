@@ -13,6 +13,7 @@ Subcommands:
     prepare-delivery      Validate delivery readiness (approval evidence only; no real Git mutations)
     generate-task-graph   Generate deterministic task graph for a delivery type
     update-task-status    Update a task's status with state transition validation
+    record-qa-evidence    Record QA test results authoritatively and update approval gates
     generate-run-report   Generate run evidence report with merge recommendation
 
 Usage:
@@ -23,6 +24,7 @@ Usage:
     python3 scripts/devflow_operations.py prepare-delivery --target PATH [--confirm-delivery]
     python3 scripts/devflow_operations.py generate-task-graph --target PATH --delivery-type TYPE [--objective TEXT] [--force]
     python3 scripts/devflow_operations.py update-task-status --target PATH --task-id ID --status STATUS
+    python3 scripts/devflow_operations.py record-qa-evidence --target PATH --total N --passed N --failed N --exit-code N [--evidence-path PATH]
     python3 scripts/devflow_operations.py generate-run-report --target PATH
 
 Exit codes:
@@ -42,6 +44,7 @@ Exit codes:
     13  Unknown or unsupported delivery type
     14  Task not found in active run
     15  Invalid task state transition
+    16  generate-task-graph --force rejected: run is active (tasks progressed, events, or artifacts exist)
 
 IMPORTANT — validate_forbidden_git_operation:
     This function validates planned operation *strings* passed to it by callers.
@@ -144,6 +147,149 @@ SUPPORTED_DELIVERY_TYPES = frozenset({
     "release_readiness",
     "cost_optimization",
     "new_product_discovery",
+    "backend_utility",
+})
+
+# ---------------------------------------------------------------------------
+# Objective risk signal detection
+#
+# Deterministic keyword-based classification.  No LLM interpretation.
+# Each category maps to a frozenset of lowercase signal words.
+# Signals drive delivery type selection and task graph omission decisions.
+# ---------------------------------------------------------------------------
+
+OBJECTIVE_RISK_SIGNALS: dict[str, frozenset[str]] = {
+    "api_surface": frozenset({
+        "api", "http", "https", "endpoint", "rest", "graphql",
+        "webhook", "route", "openapi", "swagger",
+    }),
+    "auth": frozenset({
+        "auth", "authentication", "authorization", "login", "oauth",
+        "jwt", "session", "token", "permission", "role", "rbac",
+        "privilege",
+    }),
+    "payment": frozenset({
+        "payment", "billing", "stripe", "subscription", "invoice",
+        "checkout", "purchase", "transaction", "charge",
+    }),
+    "external_service": frozenset({
+        "integrate", "integration", "email", "sms", "slack",
+        "twilio", "sendgrid", "notification", "push",
+    }),
+    "sensitive_data": frozenset({
+        "sensitive", "pii", "personal", "gdpr", "privacy",
+        "credential", "confidential", "private",
+    }),
+    "deployment": frozenset({
+        "deploy", "kubernetes", "docker", "production", "infrastructure",
+        "cloud", "aws", "gcp", "azure", "k8s", "container",
+    }),
+    "schema_migration": frozenset({
+        "migration", "database", "schema", "db", "sql", "postgres",
+        "mysql", "sqlite", "alembic", "table",
+    }),
+    "significant_architecture": frozenset({
+        "architecture", "microservice", "refactor", "redesign",
+        "modular", "distributed",
+    }),
+    "frontend": frozenset({
+        "frontend", "ui", "ux", "react", "vue", "angular", "component",
+        "page", "form", "button", "html", "css", "web", "browser",
+    }),
+    "dependency_change": frozenset({
+        "pip", "npm", "yarn",
+    }),
+}
+
+# Negation phrases: removed from objective text before signal matching.
+# Longer / more-specific phrases are listed first.
+_OBJECTIVE_NEGATION_PHRASES: list[tuple[str, frozenset]] = [
+    ("no third-party dependencies", frozenset({"external_service", "dependency_change"})),
+    ("no third party dependencies", frozenset({"external_service", "dependency_change"})),
+    ("no external dependencies",    frozenset({"external_service", "dependency_change"})),
+    ("no external dependency",      frozenset({"external_service", "dependency_change"})),
+    ("local deterministic",         frozenset({"external_service"})),
+    ("no external service",         frozenset({"external_service"})),
+    ("no filesystem io",            frozenset({"filesystem_io"})),
+    ("no external api",             frozenset({"external_service", "api_surface"})),
+    ("no network io",               frozenset({"external_service"})),
+    ("no filesystem",               frozenset({"filesystem_io"})),
+    ("pure python",                 frozenset({"external_service", "dependency_change"})),
+    ("stdlib-only",                 frozenset({"external_service", "dependency_change"})),
+    ("stdlib only",                 frozenset({"external_service", "dependency_change"})),
+    ("no network",                  frozenset({"external_service"})),
+    ("no file io",                  frozenset({"filesystem_io"})),
+    ("no api",                      frozenset({"api_surface", "external_service"})),
+]
+
+# Positive multi-word phrases matched against the objective *after* negation removal.
+_OBJECTIVE_POSITIVE_PHRASES: list[tuple[str, str]] = [
+    ("external service",       "external_service"),
+    ("external api",           "external_service"),
+    ("third-party service",    "external_service"),
+    ("third party service",    "external_service"),
+    ("third-party api",        "external_service"),
+    ("third party api",        "external_service"),
+    ("add dependency",         "dependency_change"),
+    ("third-party dependency", "dependency_change"),
+    ("third party dependency", "dependency_change"),
+]
+
+# ---------------------------------------------------------------------------
+# Security review applicability model
+#
+# Three concepts are kept strictly separate:
+#   security_review_required      — bool, written at task-graph generation time
+#   security_review_status        — "not_applicable" | "pending" | "completed"
+#   security_gate_satisfied       — bool, drives auto_gates_pass in build_run_report
+#
+# Applicability is written to canonical run state by generate-task-graph and
+# MUST NOT be changed by finalization or free-form JSON writes.  The target
+# guard blocks direct Write/Edit to .devflow/runs/ and .devflow/reports/.
+# ---------------------------------------------------------------------------
+
+# Delivery types whose task template always includes a security_review task.
+# For these, security_review_required is always True.
+DELIVERY_TYPES_WITH_MANDATORY_SECURITY_REVIEW = frozenset({
+    "new_feature",
+    "ai_rag",
+    "security_response",
+    "release_readiness",
+})
+
+# Risk signal categories (from OBJECTIVE_RISK_SIGNALS) that trigger
+# security_review_required = True for non-mandatory delivery types.
+SECURITY_TRIGGERING_RISK_SIGNALS = frozenset({
+    "api_surface",
+    "auth",
+    "payment",
+    "external_service",
+    "sensitive_data",
+    "deployment",
+    "schema_migration",
+    "dependency_change",
+})
+
+# Closed enum for security_applicability_reason written to canonical run state.
+# Set only by determine_security_applicability(); never by LLM or free text.
+SECURITY_APPLICABILITY_REASONS = frozenset({
+    "low_risk_local_utility",
+    "api_or_http_surface",
+    "auth_or_authorization",
+    "external_integration",
+    "sensitive_or_user_data",
+    "database_or_migration",
+    "deployment_or_infrastructure",
+    "filesystem_or_network_io",
+    "dependency_change",
+    "explicit_security_signal",
+})
+
+# Closed enum for security_review_status in run reports.
+SECURITY_REVIEW_STATUS_ENUM = frozenset({
+    "not_applicable",
+    "pending",
+    "completed",
 })
 
 # ---------------------------------------------------------------------------
@@ -348,6 +494,27 @@ DELIVERY_TYPE_TASK_TEMPLATES: dict[str, list[dict]] = {
          "qa_expectation": "PRD ve feasibility insan tarafından review edildi ve onaylandı",
          "output_path": ".devflow/context/"},
     ],
+    # Minimal profile for low-risk, local, pure-Python backend utility objectives.
+    # Omits: frontend implementation, API contract design, ADR, standalone security review.
+    # Add-on tasks (security, contract, ADR) are included only when risk signals are detected.
+    "backend_utility": [
+        {"id_suffix": "001", "title": "Delivery Planning", "task_type": "planning",
+         "assigned_role": "delivery-lead", "dep_suffixes": [],
+         "qa_expectation": "Task graph ve context pack hazır",
+         "output_path": ".devflow/context/"},
+        {"id_suffix": "002", "title": "Backend Implementation", "task_type": "implementation",
+         "assigned_role": "backend-engineer", "dep_suffixes": ["001"],
+         "qa_expectation": "Implementation tamamlandı; birim testler geçiyor",
+         "output_path": "src/"},
+        {"id_suffix": "003", "title": "QA Verification", "task_type": "qa",
+         "assigned_role": "qa-automation", "dep_suffixes": ["002"],
+         "qa_expectation": "Tüm testler geçiyor; regression temiz",
+         "output_path": "tests/"},
+        {"id_suffix": "004", "title": "Integration and Release Evidence", "task_type": "release",
+         "assigned_role": "integration-release", "dep_suffixes": ["003"],
+         "qa_expectation": "Scorecard ve merge recommendation hazır; human approval bekleniyor",
+         "output_path": ".devflow/reports/"},
+    ],
 }
 
 # ---------------------------------------------------------------------------
@@ -363,6 +530,163 @@ def atomic_write_json(path: Path, data: dict) -> None:
 
 def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# Objective risk signal detection
+# ---------------------------------------------------------------------------
+
+def detect_objective_risk_signals(objective: str) -> frozenset[str]:
+    """
+    Return risk signal categories detected in objective text.
+    Deterministic phrase-precedence matching — no LLM interpretation.
+
+    Negation phrases are removed from the normalized text first; positive phrases
+    and word-level signals are matched only on what remains.  A positive signal
+    that co-occurs with a negation phrase wins only if it appears outside it.
+    """
+    normalized = re.sub(r"\bi[/\\]o\b", "io", objective.lower())
+    remaining = normalized
+    for phrase, _ in _OBJECTIVE_NEGATION_PHRASES:
+        remaining = remaining.replace(phrase, " ")
+
+    found: set[str] = set()
+    for phrase, category in _OBJECTIVE_POSITIVE_PHRASES:
+        if phrase in remaining:
+            found.add(category)
+
+    words = frozenset(re.findall(r"\b\w+\b", remaining))
+    for signal_name, keywords in OBJECTIVE_RISK_SIGNALS.items():
+        if words & keywords:
+            found.add(signal_name)
+
+    return frozenset(found)
+
+
+# ---------------------------------------------------------------------------
+# Security applicability helpers
+# ---------------------------------------------------------------------------
+
+def _security_reason_from_signals(triggering: frozenset) -> str:
+    """Return the highest-priority closed-enum reason from triggering risk signals."""
+    if "auth" in triggering:
+        return "auth_or_authorization"
+    if "payment" in triggering:
+        return "sensitive_or_user_data"
+    if "external_service" in triggering:
+        return "external_integration"
+    if "api_surface" in triggering:
+        return "api_or_http_surface"
+    if "sensitive_data" in triggering:
+        return "sensitive_or_user_data"
+    if "deployment" in triggering:
+        return "deployment_or_infrastructure"
+    if "schema_migration" in triggering:
+        return "database_or_migration"
+    if "dependency_change" in triggering:
+        return "dependency_change"
+    return "explicit_security_signal"
+
+
+def determine_security_applicability(delivery_type: str, objective: str) -> dict:
+    """
+    Determine whether security review is required for this delivery run.
+
+    Returns:
+        {
+            "security_review_required": bool,
+            "security_applicability_reason": str  — from SECURITY_APPLICABILITY_REASONS
+        }
+
+    Rules (deterministic; no LLM interpretation):
+    - Delivery types in DELIVERY_TYPES_WITH_MANDATORY_SECURITY_REVIEW → required=True.
+    - Other types: required=True only when the objective contains at least one signal
+      from SECURITY_TRIGGERING_RISK_SIGNALS.
+    - Pure local / stdlib-only utility with no triggering signals → required=False,
+      reason="low_risk_local_utility".
+
+    This is the authoritative applicability gate.  Same inputs → same output.
+    """
+    risk_signals = detect_objective_risk_signals(objective)
+    triggering = risk_signals & SECURITY_TRIGGERING_RISK_SIGNALS
+
+    if delivery_type in DELIVERY_TYPES_WITH_MANDATORY_SECURITY_REVIEW:
+        reason = _security_reason_from_signals(triggering) if triggering else "explicit_security_signal"
+        return {
+            "security_review_required": True,
+            "security_applicability_reason": reason,
+        }
+
+    if triggering:
+        return {
+            "security_review_required": True,
+            "security_applicability_reason": _security_reason_from_signals(triggering),
+        }
+
+    return {
+        "security_review_required": False,
+        "security_applicability_reason": "low_risk_local_utility",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Delegation evidence loader and event validation
+# ---------------------------------------------------------------------------
+
+VALID_HOOK_EVENTS = frozenset({"SubagentStart", "SubagentStop"})
+VALID_LIFECYCLE_STATES = frozenset({"started", "stopped"})
+
+
+def _is_valid_delegation_event(event: dict, run_id: str) -> bool:
+    """
+    Return True if event passes schema and run_id validation.
+
+    Criteria:
+    - hook_event must be SubagentStart or SubagentStop
+    - lifecycle_state must be started or stopped
+    - if run_id field is present AND not the recorder's "unknown" fallback sentinel,
+      it must match the run's run_id
+    - agent_type may be "unknown" (unattributed) or any string; does not affect validity
+    """
+    if event.get("hook_event") not in VALID_HOOK_EVENTS:
+        return False
+    if event.get("lifecycle_state") not in VALID_LIFECYCLE_STATES:
+        return False
+    event_run_id = event.get("run_id")
+    # "unknown" is the recorder's fallback sentinel when project.json was unreadable
+    # at hook-fire time.  Treat it as absent — the event belongs to this project's
+    # delegation-events/ directory and should still be counted as unattributed.
+    if event_run_id is not None and event_run_id != "unknown" and event_run_id != run_id:
+        return False
+    return True
+
+
+def load_delegation_events(devflow_dir: Path) -> tuple[list[dict], str]:
+    """
+    Load sanitized delegation evidence events from .devflow/delegation-events/.
+
+    Returns (events, status) where status is one of:
+        "unavailable"  — delegation-events/ directory does not exist
+        "not_observed" — directory exists but no SubagentStart events found
+        "observed"     — at least one SubagentStart event was recorded
+    """
+    events_dir = devflow_dir / "delegation-events"
+    if not events_dir.exists():
+        return [], "unavailable"
+
+    events: list[dict] = []
+    for event_file in sorted(events_dir.glob("*.json")):
+        try:
+            data = json.loads(event_file.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                events.append(data)
+        except Exception:
+            pass
+
+    subagent_starts = [e for e in events if e.get("hook_event") == "SubagentStart"]
+    if not subagent_starts:
+        return events, "not_observed"
+    return events, "observed"
 
 
 # ---------------------------------------------------------------------------
@@ -649,8 +973,44 @@ def generate_task_packet_dict(task: dict, run_id: str, objective: str) -> dict:
     }
 
 
-def build_run_report(run_data: dict, run_id: str) -> dict:
-    """Build an evidence report dict from run state. No sys.exit."""
+def is_run_active(run_data: dict, devflow_dir: Path) -> bool:
+    """
+    Return True if the run has begun work that makes the task graph immutable.
+
+    A run is considered active when any of these conditions hold:
+    - Any task has a status other than 'planned'
+    - The artifacts list is non-empty
+    - QA evidence has been recorded via record-qa-evidence
+    - context_pack_status is 'ready' (context was prepared for this graph)
+    - Delegation events exist in .devflow/delegation-events/
+    """
+    tasks = run_data.get("tasks", [])
+    if any(t.get("status") != "planned" for t in tasks):
+        return True
+    if run_data.get("artifacts"):
+        return True
+    if run_data.get("qa_evidence"):
+        return True
+    if run_data.get("context_pack_status") == "ready":
+        return True
+    events_dir = devflow_dir / "delegation-events"
+    if events_dir.exists() and any(events_dir.glob("*.json")):
+        return True
+    return False
+
+
+def build_run_report(
+    run_data: dict,
+    run_id: str,
+    delegation_events: list[dict] | None = None,
+) -> dict:
+    """
+    Build an evidence report dict from run state. No sys.exit.
+
+    delegation_events: list of sanitized delegation event dicts loaded from
+        .devflow/delegation-events/, or None when the directory was absent
+        (status=unavailable).  Pass [] for "directory exists but no events".
+    """
     tasks = run_data.get("tasks", [])
     gates = run_data.get("approval_gates", {})
 
@@ -684,26 +1044,157 @@ def build_run_report(run_data: dict, run_id: str) -> dict:
         t["status"] in ("completed", "verified") for t in tasks
     )
 
-    if all_tasks_done and qa_done and security_done and human_done and tests_passing:
-        merge_recommendation = "ready"
-    elif qa_done and security_done and tests_passing and not human_done:
+    # ---------------------------------------------------------------------------
+    # Security gate applicability
+    #
+    # security_review_required is written to run state by generate-task-graph.
+    # Default True for backward compatibility with run states that predate this field.
+    #
+    # security_gate_satisfied logic:
+    #   required=False → status="not_applicable", gate satisfied (no review needed)
+    #   required=True + evidence present → status="completed", gate satisfied
+    #   required=True + no evidence → status="pending", gate NOT satisfied
+    # ---------------------------------------------------------------------------
+    security_review_required = run_data.get("security_review_required", True)
+    security_applicability_reason = run_data.get(
+        "security_applicability_reason", "explicit_security_signal"
+    )
+    if not security_review_required:
+        security_review_status = "not_applicable"
+        security_gate_satisfied = True
+    elif security_done:
+        security_review_status = "completed"
+        security_gate_satisfied = True
+    else:
+        security_review_status = "pending"
+        security_gate_satisfied = False
+
+    # Technical readiness: all auto gates + tasks done (human approval is separate)
+    auto_gates_pass = (
+        all_tasks_done and qa_done and security_gate_satisfied and tests_passing
+    )
+    technical_readiness = "ready" if auto_gates_pass else "not_ready"
+
+    if auto_gates_pass and human_done:
+        merge_recommendation = "ready_for_human_merge"
+        run_status = "ready_for_human_merge"
+    elif auto_gates_pass and not human_done:
         merge_recommendation = "awaiting_human_approval"
+        run_status = "awaiting_human_approval"
     else:
         merge_recommendation = "not_ready"
+        run_status = "not_ready"
 
-    boundary_note = (
-        "Tüm task'lar 'planned' delegation durumunda. "
-        "Gerçek agent dispatch doğrulanmadı."
-        if not any_confirmed
-        else "En az bir task gerçek agent session kanıtıyla doğrulandı."
+    # ---------------------------------------------------------------------------
+    # Delegation evidence: requested/configured vs observed distinction
+    #
+    # "requested_execution_mode" / "agent_teams_requested" — what was configured
+    # "native_delegation_observed" / "observed_delegation_count" — from hook events
+    # "delegation_evidence_status" — "unavailable" | "not_observed" | "observed"
+    # "observed_agent_types" — distinct non-unknown agent types seen in events
+    # "unattributed_event_count" — events with agent_type == "unknown"
+    #
+    # Rules:
+    # - delegation_events=None  → status="unavailable" (hook not running)
+    # - delegation_events=[]    → status="not_observed" (hook ran; no subagent started)
+    # - SubagentStart in events → status="observed"
+    # Never claim delegation success without a native hook event.
+    # observed_delegation_count counts ALL valid lifecycle event files loaded.
+    # ---------------------------------------------------------------------------
+    # Backward-compat: prefer new canonical names, fall back to legacy fields.
+    execution_mode = run_data.get(
+        "requested_execution_mode",
+        run_data.get("execution_mode", "subagents"),
     )
+    agent_teams_requested = run_data.get(
+        "agent_teams_requested",
+        run_data.get("requested_agent_teams", False),
+    )
+
+    if delegation_events is None:
+        delegation_status = "unavailable"
+        native_observed = False
+        observed_count = 0
+        start_count = 0
+        observed_agent_types: list[str] = []
+        unattributed_event_count = 0
+    else:
+        subagent_starts = [e for e in delegation_events if e.get("hook_event") == "SubagentStart"]
+        start_count = len(subagent_starts)
+        observed_count = len(delegation_events)  # ALL loaded lifecycle event files
+        native_observed = start_count > 0
+        delegation_status = "observed" if native_observed else "not_observed"
+        observed_agent_types = sorted({
+            e.get("agent_type", "unknown")
+            for e in delegation_events
+            if e.get("agent_type", "unknown") != "unknown"
+        })
+        unattributed_event_count = sum(
+            1 for e in delegation_events
+            if e.get("agent_type", "unknown") == "unknown"
+        )
+
+    limitation_note = (
+        "Native lifecycle event kayıtları local, sanitize edilmiş çalışma kanıtıdır. "
+        "Cryptographic audit trail veya tamper-proof storage içermez. "
+        "Session ID saklanmadığından start-stop eşleşmesi veya "
+        "artifact-to-session causal binding kesin olarak iddia edilemez."
+    )
+
+    boundary_note: str
+    if native_observed:
+        boundary_note = (
+            f"{observed_count} lifecycle event kayıtlı "
+            f"({start_count} SubagentStart). "
+            "Native role lifecycle gözlemlendi. "
+            "Session ID saklanmadığından start-stop eşleşmesi veya "
+            "artifact-to-session causal binding doğrulanamaz."
+        )
+    elif delegation_status == "not_observed":
+        boundary_note = (
+            "Delegation events dizini mevcut ancak SubagentStart kaydı yok. "
+            "Gerçek agent dispatch gözlemlenmedi."
+        )
+    else:
+        boundary_note = (
+            "Tüm task'lar 'planned' delegation durumunda. "
+            "Gerçek agent dispatch doğrulanmadı."
+            if not any_confirmed
+            else "En az bir task gerçek agent session kanıtıyla doğrulandı."
+        )
+
+    # ---------------------------------------------------------------------------
+    # Evidence provenance — each source category is classified independently.
+    #
+    # "user_provided"    — supplied by the user outside this run
+    # "generated_in_run" — produced by an agent within this same run
+    # "test_command"     — verified by a test runner command (tests_passing gate)
+    # "native_hook_event"— recorded by the native hook mechanism
+    # "human_review"     — confirmed by a human (human_approval gate)
+    # "unavailable"      — not present or not verifiable
+    #
+    # AC generated in the same run is never presented as user-approved or
+    # independent sign-off.  Security checklists from the same run are never
+    # presented as a separate security-agent session without native evidence.
+    # ---------------------------------------------------------------------------
+    evidence_provenance = {
+        "acceptance_criteria": "generated_in_run",
+        "qa_result": "test_command" if qa_done else "unavailable",
+        "security_review": (
+            "not_applicable" if not security_review_required
+            else "generated_in_run" if security_done
+            else "unavailable"
+        ),
+        "human_approval": "human_review" if human_done else "unavailable",
+        "native_delegation": "native_hook_event" if native_observed else "unavailable",
+    }
 
     return {
         "schema_version": "1",
         "run_id": run_id,
         "objective": run_data.get("objective", ""),
-        "execution_mode": run_data.get("execution_mode", "subagents"),
-        "requested_agent_teams": run_data.get("requested_agent_teams", False),
+        "execution_mode": execution_mode,
+        "agent_teams_requested": agent_teams_requested,
         "task_graph_summary": {
             "total": total,
             "completed_or_verified": completed_count,
@@ -724,13 +1215,30 @@ def build_run_report(run_data: dict, run_id: str) -> dict:
         "pending_dependencies": pending_deps,
         "approval_gates": gates,
         "qa_result": "passed" if qa_done else "not_completed",
+        "technical_readiness": technical_readiness,
+        "status": run_status,
         "human_approval_required": [
             "main merge insan tarafından yapılmalıdır",
             "production deploy insan tarafından yapılmalıdır",
         ],
         "delegation_evidence": {
+            "requested_execution_mode": execution_mode,
+            "agent_teams_requested": agent_teams_requested,
+            "native_delegation_observed": native_observed,
+            "observed_delegation_count": observed_count,
+            "delegation_evidence_status": delegation_status,
             "any_delegation_confirmed": any_confirmed,
+            "observed_agent_types": observed_agent_types,
+            "unattributed_event_count": unattributed_event_count,
+            "limitation_note": limitation_note,
             "boundary_note": boundary_note,
+        },
+        "evidence_provenance": evidence_provenance,
+        "security_applicability": {
+            "security_review_required": security_review_required,
+            "security_review_status": security_review_status,
+            "security_gate_satisfied": security_gate_satisfied,
+            "security_applicability_reason": security_applicability_reason,
         },
         "merge_recommendation": merge_recommendation,
         "report_generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -902,7 +1410,12 @@ def cmd_create_run(args) -> int:
         "branch_name": branch_name,
         "objective": getattr(args, "objective", None) or "",
         "execution_mode": execution_mode,
-        "requested_agent_teams": agent_teams_requested,
+        "requested_execution_mode": execution_mode,
+        "agent_teams_requested": agent_teams_requested,
+        # "requested_agent_teams" intentionally omitted — backward compat on read only
+        "native_delegation_observed": False,
+        "observed_delegation_count": 0,
+        "delegation_evidence_status": "unavailable",
         "task_graph_status": "not_started",
         "context_pack_status": "not_started",
         "artifacts": [],
@@ -1274,6 +1787,23 @@ def cmd_generate_task_graph(args) -> int:
         )
         return 0
 
+    if run_data.get("tasks") and force:
+        if is_run_active(run_data, devflow):
+            print(
+                "Hata: Aktif run için task graph yeniden oluşturulamaz.",
+                file=sys.stderr,
+            )
+            print(
+                "  Görevler ilerletilmiş, delegation event'ları, QA kanıtı veya artefaktlar mevcut.",
+                file=sys.stderr,
+            )
+            print(
+                "  Farklı delivery routing için yeni run başlatın: "
+                "'create-run --target ...'",
+                file=sys.stderr,
+            )
+            sys.exit(16)
+
     objective = getattr(args, "objective", None) or run_data.get("objective", "")
     tasks = generate_task_graph_nodes(run_id, delivery_type, objective)
 
@@ -1288,6 +1818,14 @@ def cmd_generate_task_graph(args) -> int:
     run_data["tasks"] = tasks
     run_data["task_graph_status"] = "generated"
     run_data["delivery_type"] = delivery_type
+
+    # Write security applicability at task-graph generation time.
+    # Canonical: not overridden by finalization; not writable via direct JSON edit
+    # (target guard blocks .devflow/runs/ writes except via this CLI).
+    sec_app = determine_security_applicability(delivery_type, objective)
+    run_data["security_review_required"] = sec_app["security_review_required"]
+    run_data["security_applicability_reason"] = sec_app["security_applicability_reason"]
+
     atomic_write_json(run_file, run_data)
 
     print(f"Task graph oluşturuldu: {run_id} / {delivery_type}")
@@ -1355,6 +1893,69 @@ def cmd_update_task_status(args) -> int:
     return 0
 
 
+def cmd_record_qa_evidence(args) -> int:
+    target = Path(args.target).resolve()
+    validate_target_path(target)
+    validate_not_on_protected_branch(target, "record-qa-evidence")
+
+    total = args.total
+    passed = args.passed
+    failed = args.failed
+    exit_code_val = args.exit_code
+    evidence_path = getattr(args, "evidence_path", None) or ""
+
+    if evidence_path:
+        ep = Path(evidence_path)
+        if ep.is_absolute() or ".." in ep.parts:
+            print(
+                "Hata: evidence_path göreli ve güvenli bir yol olmalıdır "
+                "(mutlak yol veya '..' yasak).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    devflow = get_devflow_dir(target)
+    if not is_initialized(target):
+        print("Hata: .devflow/ başlatılmamış.", file=sys.stderr)
+        sys.exit(4)
+
+    project_data = read_json(devflow / "project.json")
+    run_id = project_data.get("current_run_id")
+    if not run_id:
+        print("Hata: Aktif run yok.", file=sys.stderr)
+        sys.exit(4)
+
+    run_file = devflow / "runs" / f"{run_id}.json"
+    run_data = read_json(run_file)
+
+    qa_passed = (exit_code_val == 0 and failed == 0)
+
+    run_data.setdefault("approval_gates", {})
+    run_data["approval_gates"]["tests_passing"] = qa_passed
+    run_data["approval_gates"]["qa_sign_off"] = qa_passed
+
+    run_data["qa_evidence"] = {
+        "recorded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "exit_code": exit_code_val,
+        "evidence_path": evidence_path,
+        "qa_passed": qa_passed,
+    }
+
+    atomic_write_json(run_file, run_data)
+
+    status_str = "GEÇTİ" if qa_passed else "BAŞARISIZ"
+    print(f"QA kanıtı kaydedildi: {run_id} [{status_str}]")
+    print(f"  toplam: {total}, geçen: {passed}, başarısız: {failed}, exit code: {exit_code_val}")
+    print(f"  tests_passing: {qa_passed}")
+    print(f"  qa_sign_off: {qa_passed}")
+    if evidence_path:
+        print(f"  evidence_path: {evidence_path}")
+    return 0
+
+
 def cmd_generate_run_report(args) -> int:
     target = Path(args.target).resolve()
 
@@ -1376,15 +1977,108 @@ def cmd_generate_run_report(args) -> int:
     run_file = devflow / "runs" / f"{run_id}.json"
     run_data = read_json(run_file)
 
-    report = build_run_report(run_data, run_id)
+    raw_events, _delegation_status = load_delegation_events(devflow)
+    # Filter to valid events (schema + run_id validation) before projecting.
+    # Pass None when the directory is absent so build_run_report can distinguish
+    # "hook not configured" (unavailable) from "hook ran but no subagent started" (not_observed).
+    if _delegation_status == "unavailable":
+        events_arg = None
+    else:
+        events_arg = [e for e in raw_events if _is_valid_delegation_event(e, run_id)]
+    report = build_run_report(run_data, run_id, delegation_events=events_arg)
 
     reports_dir = devflow / "reports"
     reports_dir.mkdir(exist_ok=True)
     report_path = reports_dir / f"{run_id}-report.json"
     atomic_write_json(report_path, report)
 
+    # Write canonical Markdown scorecard
+    scorecard_path = reports_dir / f"{run_id}-scorecard.md"
+    delegation = report["delegation_evidence"]
+    sec_app = report.get("security_applicability", {})
+    sec_required = sec_app.get("security_review_required", True)
+    sec_status = sec_app.get("security_review_status", "pending")
+    sec_satisfied = sec_app.get("security_gate_satisfied", False)
+    sec_reason = sec_app.get("security_applicability_reason", "explicit_security_signal")
+
+    if not sec_required:
+        security_gate_lines = [
+            f"- security_review_required: {sec_required}",
+            f"- security_review_status: {sec_status}",
+            f"- security_gate_satisfied: {sec_satisfied}",
+            f"- security_applicability_reason: {sec_reason}",
+            "- NOTE: Security review not applicable for this deterministic low-risk profile.",
+            "  Security gate satisfied: yes",
+            "  This is NOT a claim that a Security Red Team session occurred.",
+        ]
+    else:
+        security_gate_lines = [
+            f"- security_review_required: {sec_required}",
+            f"- security_review_status: {sec_status}",
+            f"- security_gate_satisfied: {sec_satisfied}",
+            f"- security_applicability_reason: {sec_reason}",
+        ]
+
+    scorecard_lines = [
+        f"# DevFlow Scorecard: {run_id}",
+        "",
+        f"**objective:** {report.get('objective', '')[:120]}",
+        f"**execution_mode:** {report.get('execution_mode', '')}",
+        f"**technical_readiness:** {report.get('technical_readiness', '')}",
+        f"**status:** {report.get('status', '')}",
+        f"**merge_recommendation:** {report.get('merge_recommendation', '')}",
+        "",
+        "## Security Gate",
+    ] + security_gate_lines + [
+        "",
+        "## Delegation Evidence",
+        f"- agent_teams_requested: {delegation.get('agent_teams_requested')}",
+        f"- native_delegation_observed: {delegation.get('native_delegation_observed')}",
+        f"- observed_delegation_count: {delegation.get('observed_delegation_count')}",
+        f"- delegation_evidence_status: {delegation.get('delegation_evidence_status')}",
+        f"- observed_agent_types: {delegation.get('observed_agent_types', [])}",
+        f"- unattributed_event_count: {delegation.get('unattributed_event_count', 0)}",
+        "",
+        "## Limitations",
+        delegation.get("limitation_note", ""),
+        "",
+        "## Human Approval Required",
+    ] + [f"- {item}" for item in report.get("human_approval_required", [])] + [
+        "",
+        f"*generated_at: {report.get('report_generated_at', '')}*",
+    ]
+    scorecard_path.write_text("\n".join(scorecard_lines) + "\n", encoding="utf-8")
+
+    # Authoritative state writeback — all derived fields from single projection, atomically.
+    # security_review_required and security_applicability_reason are written at
+    # generate-task-graph time and are preserved here without override.
+    now_updated = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    run_data["technical_readiness"] = report["technical_readiness"]
+    run_data["status"] = report["status"]
+    run_data["merge_recommendation"] = report["merge_recommendation"]
+    run_data["security_review_status"] = sec_app.get("security_review_status")
+    run_data["security_gate_satisfied"] = sec_app.get("security_gate_satisfied")
+    run_data["native_delegation_observed"] = delegation["native_delegation_observed"]
+    run_data["observed_delegation_count"] = delegation["observed_delegation_count"]
+    run_data["delegation_evidence_status"] = delegation["delegation_evidence_status"]
+    run_data["observed_agent_types"] = delegation["observed_agent_types"]
+    run_data["unattributed_event_count"] = delegation["unattributed_event_count"]
+    run_data["updated_at"] = now_updated
+
+    # Add canonical artifact paths to state.artifacts (no duplicates)
+    report_artifact = f".devflow/reports/{run_id}-report.json"
+    scorecard_artifact = f".devflow/reports/{run_id}-scorecard.md"
+    existing_artifacts = run_data.get("artifacts", [])
+    for art in [report_artifact, scorecard_artifact]:
+        if art not in existing_artifacts:
+            existing_artifacts.append(art)
+    run_data["artifacts"] = existing_artifacts
+
+    atomic_write_json(run_file, run_data)
+
     summary = report["task_graph_summary"]
     delegation = report["delegation_evidence"]
+    provenance = report["evidence_provenance"]
     print(f"Run raporu: {run_id}")
     print(f"  objective: {report['objective'][:80]}")
     print(f"  execution_mode: {report['execution_mode']}")
@@ -1392,11 +2086,15 @@ def cmd_generate_run_report(args) -> int:
           f"{summary['completed_or_verified']} tamamlandı, "
           f"{summary['verified']} doğrulandı")
     print(f"  qa_result: {report['qa_result']}")
-    print(f"  delegation_confirmed: {delegation['any_delegation_confirmed']}")
+    print(f"  delegation_evidence_status: {delegation['delegation_evidence_status']}")
+    print(f"  native_delegation_observed: {delegation['native_delegation_observed']}")
+    print(f"  agent_teams_requested: {delegation['agent_teams_requested']}")
     print(f"  merge_recommendation: {report['merge_recommendation']}")
     print()
     print(f"  NOT (delegation): {delegation['boundary_note']}")
     print(f"  NOT (human gate): {report['human_approval_required'][0]}")
+    print(f"  provenance.acceptance_criteria: {provenance['acceptance_criteria']}")
+    print(f"  provenance.human_approval: {provenance['human_approval']}")
     print(f"  rapor kaydedildi: {report_path}")
     return 0
 
@@ -1484,6 +2182,28 @@ def main() -> None:
         help="Hedef durum",
     )
     p_update.set_defaults(func=cmd_update_task_status)
+
+    p_qa = subparsers.add_parser(
+        "record-qa-evidence",
+        help="QA test sonuçlarını authoritative olarak kaydet ve approval gate'leri güncelle",
+    )
+    p_qa.add_argument("--target", required=True, help="Target project path")
+    p_qa.add_argument("--total", type=int, required=True, help="Toplam test sayısı")
+    p_qa.add_argument("--passed", type=int, required=True, help="Geçen test sayısı")
+    p_qa.add_argument("--failed", type=int, required=True, help="Başarısız test sayısı")
+    p_qa.add_argument(
+        "--exit-code",
+        type=int,
+        required=True,
+        dest="exit_code",
+        help="Test runner exit kodu (0 = başarılı)",
+    )
+    p_qa.add_argument(
+        "--evidence-path",
+        default=None,
+        help="Test kanıtı dosyasına göreli yol (opsiyonel)",
+    )
+    p_qa.set_defaults(func=cmd_record_qa_evidence)
 
     p_report = subparsers.add_parser(
         "generate-run-report",

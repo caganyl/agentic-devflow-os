@@ -120,6 +120,25 @@ Task graph şablonu:
 | T-005 | Security review | security-red-team | T-002, T-003 | — | security_review_complete |
 ```
 
+**Task Graph Immutability — Kritik Kural:**
+
+Task graph bir kez oluşturulup run'a bağlandıktan sonra, run aktif ise
+`generate-task-graph --force` **kesinlikle kullanılmaz.** Aktif run, şu koşullardan birinin
+geçerli olduğu run demektir:
+- Herhangi bir task `"planned"` dışında bir statüde ise
+- `.devflow/delegation-events/` altında event dosyası varsa
+- Run state'te QA kanıtı (`qa_evidence`) kayıtlıysa
+- Run'a artefakt bağlanmışsa
+
+`--force` bu korumaları aşamaz; aktif run'da çağrılırsa exit code 16 ile reddedilir
+ve run state dosyası değiştirilmez.
+
+Farklı delivery routing gerekiyorsa mevcut run'ı değiştirme; yeni run başlat:
+```bash
+python3 scripts/devflow_operations.py create-run --target . --objective "..."
+python3 scripts/devflow_operations.py generate-task-graph --target . --delivery-type ...
+```
+
 ### 5. Dispatch Modu Seç
 
 #### Agent Team Kullanma Koşulları (tümü sağlanmalı)
@@ -172,9 +191,19 @@ Implementation → QA (qa-automation) → Security Review (security-red-team)
                          task_graph_status: "ready_for_delivery"
 ```
 
-QA tamamlanmadan ve gerekiyorsa security review yapılmadan:
-- `task_graph_status` → `"ready_for_delivery"` yapılamaz
-- `qa_sign_off: true` ve `security_review_complete: true` gate'leri beklenir
+QA tamamlanmadan delivery bitmiş sayılmaz.  Security gate için üç kavram ayrı tutulur:
+
+| Alan | Anlamı |
+|------|--------|
+| `security_review_required` | Delivery type + objective sinyallerine göre belirlenir; generate-task-graph yazır |
+| `security_review_status` | `not_applicable` \| `pending` \| `completed` |
+| `security_gate_satisfied` | `required=false` → `true`; `required=true` + evidence → `true`; aksi → `false` |
+
+**Kural:**
+- `required=false` (low-risk, sinyalsiz `backend_utility` vb.) → `security_review_status: not_applicable`, `security_gate_satisfied: true`. Security Red Team çağrılmaz; scorecard'da "not applicable" yazar.
+- `required=true` → security evidence olmadan `security_gate_satisfied: false`; `technical_readiness: not_ready`.
+
+Applicability kararı `determine_security_applicability(delivery_type, objective)` fonksiyonuyla deterministik olarak üretilir. LLM yorumuna bırakılmaz.
 
 ### 7. İnsan Onayı Gerektiren İşlemler
 
@@ -193,16 +222,45 @@ Aşağıdaki işlemler **hiçbir koşulda** agent tarafından yapılamaz:
 | External MCP bağlantısı kurma | İnsan onayı gerektirir |
 | Main branch merge | PR review + insan onayı |
 
-### 8. Sonuç Artefaktları
+### 8. Sonuç Artefaktları — Zorunlu Finalization Adımı
 
-Delivery tamamlandığında şunları üret:
+Delivery tamamlandığında canonical run state ve scorecard **yalnızca** yetkili CLI
+komutuyla üretilir. Doğrudan Write/Edit ile `.devflow/runs/` veya `.devflow/reports/`
+altına yazma **yasaktır** ve target guard tarafından engellenir.
 
+**Adım 1 — QA kanıtını authoritative olarak kaydet:**
+```bash
+python3 scripts/devflow_operations.py record-qa-evidence \
+  --target . \
+  --total <toplam test sayısı> \
+  --passed <geçen> \
+  --failed <başarısız> \
+  --exit-code <runner exit kodu> \
+  --evidence-path <göreli kanıt yolu>   # opsiyonel
 ```
-.devflow/reports/RUN-NNN-delivery-summary.md
-.devflow/runs/RUN-NNN.json  (güncellendi)
+
+Bu komut `approval_gates.tests_passing` ve `approval_gates.qa_sign_off` değerlerini
+otomatik olarak günceller. Doğrudan Write/Edit ile bu alanları yazmak yasaktır.
+
+- Exit code 0 ve failed = 0 ise: `tests_passing: true`, `qa_sign_off: true`
+- Exit code ≠ 0 veya failed > 0 ise: `tests_passing: false`, `qa_sign_off: false`
+
+**Adım 2 — Canonical raporu üret:**
+```bash
+python3 scripts/devflow_operations.py generate-run-report --target .
 ```
 
-Delivery summary şablonu:
+Bu komut:
+- `.devflow/runs/RUN-NNN.json` içindeki `native_delegation_observed`, `observed_delegation_count`,
+  `delegation_evidence_status` ve `updated_at` alanlarını hook event'lerinden projekte eder.
+- `.devflow/reports/RUN-NNN-report.json` canonical JSON raporu üretir.
+- `.devflow/reports/RUN-NNN-scorecard.md` canonical Markdown scorecard üretir.
+
+Canonical status değerleri (serbest string yasak):
+- `delegation_evidence_status`: yalnızca `"observed"` | `"not_observed"` | `"unavailable"`
+- `status` / `merge_recommendation`: yalnızca `"awaiting_human_approval"` | `"ready_for_human_merge"` | `"not_ready"`
+
+Delivery summary taslağı (opsiyonel, `.devflow/context/` altına yazılabilir):
 ```markdown
 # Delivery Summary: RUN-NNN
 
@@ -222,13 +280,42 @@ Delivery summary şablonu:
 - [sınırlama]
 ```
 
-Run state son güncellemesi:
-```json
-{
-  "status": "awaiting_human_approval",
-  "task_graph_status": "ready_for_delivery"
-}
-```
+Finalization tamamlandıktan sonra human approval göndermek için insan kullanıcıya
+`.devflow/reports/RUN-NNN-scorecard.md` göster.
+
+## 9. Delegation Evidence Honesty
+
+Native delegasyonu raporlarken şu kavramlar kesinlikle ayrı tutulur:
+
+| Kavram | Açıklama |
+|--------|----------|
+| `requested_execution_mode` | `--agent-teams` ile yapılandırılan çalışma modu (konfigürasyon) |
+| `agent_teams_requested` | `--agent-teams` bayrağının verilip verilmediği (konfigürasyon) |
+| `native_delegation_observed` | Gerçek SubagentStart/SubagentStop hook event'inin kaydedilip kaydedilmediği (gözlem) |
+| `delegation_evidence_status` | `unavailable` / `not_observed` / `observed` (hook evidence durumu) |
+
+### Kurallar
+
+1. **Native hook event olmadan "delegated", "executed by role", "agent teams active" iddiası yapılmaz.**
+2. `--agent-teams` yalnızca konfigürasyon kanıtıdır; gerçek dispatch gözlemi değildir.
+3. Delegation event yoksa `delegation_evidence_status: "not_observed"` veya `"unavailable"` kullanılır.
+4. Bir task'ın work-product'ı QA tarafından doğrulanmış olabilir; ancak atanan rolün gerçek native session'da çalıştığı iddiası yalnızca native hook event varsa yapılır.
+5. Aynı run içinde üretilen acceptance criteria, bağımsız kullanıcı onayı gibi gösterilmez.
+6. Aynı run içinde yazılan security checklist, ayrı security-agent session kanıtı olmadan "security-red-team executed" olarak gösterilmez.
+
+### Minimum Artefact Politikası
+
+Küçük, düşük riskli, local objective'ler için gereksiz rol, görev ve belge üretilmez.
+
+**Risk sinyal yoksa (pure-Python utility, local tool, no API/auth/external):**
+- `backend_utility` delivery tipi kullanılır: planning + implementation + qa + release
+- Frontend, API contract design, ADR, standalone security report üretilmez
+
+**Risk sinyali varsa (API surface, auth, payment, external service, deployment, schema migration):**
+- Uygun delivery tipi (`new_feature`, `security_response`, vb.) seçilir
+- Gerekli ek görevler deterministik sinyal eşleşmesiyle eklenir; LLM yorumuna bırakılmaz
+
+Risk sinyali tespiti için `detect_objective_risk_signals()` fonksiyonu kullanılır.
 
 ## Kısıtlar
 
@@ -239,3 +326,5 @@ Run state son güncellemesi:
 - Main merge, force push, deploy, migration, credential değişikliği insan onayı olmadan yapılmaz.
 - Bu protokol native Claude Code agent team/subagent mekanizmasını yönlendirir;
   ayrı bir API/SDK dispatcher değildir.
+- Gerçek native dispatch olmayan yerde sahte delegation summary üretilmez.
+- Inline delivery, başarısızlık değildir; ancak "delegation success" olarak raporlanamaz.

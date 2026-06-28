@@ -1346,8 +1346,8 @@ class LaunchRealWorktreeTest(unittest.TestCase):
             "Default launch must write execution_mode='subagents' to run state",
         )
         self.assertFalse(
-            run_data.get("requested_agent_teams", True),
-            "Default launch must write requested_agent_teams=false",
+            run_data.get("agent_teams_requested", True),
+            "Default launch must write agent_teams_requested=false",
         )
         self.assertEqual(run_data.get("task_graph_status"), "not_started")
         self.assertEqual(run_data.get("context_pack_status"), "not_started")
@@ -1361,7 +1361,7 @@ class LaunchRealWorktreeTest(unittest.TestCase):
         run_id = project_data["current_run_id"]
         run_data = json.loads((wt / ".devflow" / "runs" / f"{run_id}.json").read_text())
         self.assertEqual(run_data.get("execution_mode"), "agent_teams")
-        self.assertTrue(run_data.get("requested_agent_teams", False))
+        self.assertTrue(run_data.get("agent_teams_requested", False))
 
     def test_agent_teams_sets_env_in_spawned_process(self):
         self._launch(extra_args=["--agent-teams"])
