@@ -116,7 +116,7 @@ class DeliveryTypeTaskGraphDeterminismTest(unittest.TestCase):
     def test_new_feature_has_contract_task(self):
         tasks = self._graph("new_feature")
         types = [t["task_type"] for t in tasks]
-        self.assertIn("contract", types)
+        self.assertIn("contract_definition", types)
 
     def test_ai_rag_has_eval_task(self):
         tasks = self._graph("ai_rag")

@@ -46,15 +46,17 @@ yoksa contract'ı kesin/final olarak sunma.
 
 ## Yazabileceğin Klasör
 
-Yalnızca `docs/contracts/` altında dosya yazabilir veya düzenleyebilirsin.
+Yalnızca `docs/quality/contracts/` altında dosya yazabilir veya düzenleyebilirsin.
 Bunun dışında hiçbir dosyaya yazma.
+Canonical run state (`.devflow/runs/`), report (`.devflow/reports/`),
+uygulama kodu ve testler kesinlikle yazma alanın dışındadır.
 
 ## Contract Dosya Konumları
 
-- OpenAPI: `docs/contracts/openapi/REQ-XXX.yaml`
-- Event: `docs/contracts/events/REQ-XXX.md`
-- Database: `docs/contracts/database/REQ-XXX.md`
-- Shared types: `docs/contracts/shared-types/REQ-XXX.md`
+- OpenAPI: `docs/quality/contracts/openapi/REQ-XXX.yaml`
+- Event: `docs/quality/contracts/events/REQ-XXX.md`
+- Database: `docs/quality/contracts/database/REQ-XXX.md`
+- Shared types: `docs/quality/contracts/shared-types/REQ-XXX.md`
 
 ## Contract Status Standardı
 
