@@ -1397,6 +1397,8 @@ def build_run_report(
             "security_gate_satisfied": security_gate_satisfied,
             "security_applicability_reason": security_applicability_reason,
             "security_evidence": _sec_evidence_meta,
+            "launch_risk_floor_required": run_data.get("launch_risk_floor_required", None),
+            "launch_risk_floor_reason": run_data.get("launch_risk_floor_reason", None),
         },
         "merge_recommendation": merge_recommendation,
         "report_generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -1560,13 +1562,23 @@ def cmd_create_run(args) -> int:
     agent_teams_requested = getattr(args, "agent_teams", False)
     execution_mode = "agent_teams" if agent_teams_requested else "subagents"
 
+    launch_objective = getattr(args, "objective", None) or ""
+    _launch_signals = detect_objective_risk_signals(launch_objective)
+    _launch_triggering = _launch_signals & SECURITY_TRIGGERING_RISK_SIGNALS
+    if _launch_triggering:
+        launch_risk_floor_required = True
+        launch_risk_floor_reason = _security_reason_from_signals(_launch_triggering)
+    else:
+        launch_risk_floor_required = False
+        launch_risk_floor_reason = "low_risk_local_utility"
+
     run_state = {
         "schema_version": DEVFLOW_SCHEMA_VERSION,
         "run_id": run_id,
         "created_at": now,
         "status": "created",
         "branch_name": branch_name,
-        "objective": getattr(args, "objective", None) or "",
+        "objective": launch_objective,
         "execution_mode": execution_mode,
         "requested_execution_mode": execution_mode,
         "agent_teams_requested": agent_teams_requested,
@@ -1585,6 +1597,8 @@ def cmd_create_run(args) -> int:
             "qa_sign_off": False,
             "human_approval": False,
         },
+        "launch_risk_floor_required": launch_risk_floor_required,
+        "launch_risk_floor_reason": launch_risk_floor_reason,
     }
 
     runs_dir = devflow / "runs"
@@ -1965,6 +1979,32 @@ def cmd_generate_task_graph(args) -> int:
     objective = getattr(args, "objective", None) or run_data.get("objective", "")
     tasks = generate_task_graph_nodes(run_id, delivery_type, objective)
 
+    # ---------------------------------------------------------------------------
+    # Launch risk floor enforcement
+    #
+    # launch_risk_floor_required is set at create-run time from the launch objective.
+    # It can only raise security_review_required — never lower it.
+    # Legacy run states without the floor fields default to False (backward compat).
+    # ---------------------------------------------------------------------------
+    launch_floor_required = run_data.get("launch_risk_floor_required", False)
+    launch_floor_reason = run_data.get("launch_risk_floor_reason", "low_risk_local_utility")
+
+    sec_app = determine_security_applicability(delivery_type, objective)
+    graph_required = sec_app["security_review_required"]
+    graph_reason = sec_app["security_applicability_reason"]
+
+    effective_required = launch_floor_required or graph_required
+    if effective_required:
+        # Floor triggered but graph didn't → use floor reason; else prefer graph reason
+        effective_reason = graph_reason if graph_required else launch_floor_reason
+    else:
+        effective_reason = "low_risk_local_utility"
+
+    # Inject security task when floor requires it but graph didn't include one
+    if effective_required and not any(t["task_type"] == "security_review" for t in tasks):
+        # Use the launch objective (canonical risk source) for task ref
+        tasks = _inject_security_review_task(tasks, run_id, run_data.get("objective", objective))
+
     packets_dir = devflow / "task-packets"
     packets_dir.mkdir(exist_ok=True)
     for task in tasks:
@@ -1977,12 +2017,11 @@ def cmd_generate_task_graph(args) -> int:
     run_data["task_graph_status"] = "generated"
     run_data["delivery_type"] = delivery_type
 
-    # Write security applicability at task-graph generation time.
-    # Canonical: not overridden by finalization; not writable via direct JSON edit
+    # Write effective security applicability (floor-enforced) to canonical run state.
+    # Not overridden by finalization; not writable via direct JSON edit
     # (target guard blocks .devflow/runs/ writes except via this CLI).
-    sec_app = determine_security_applicability(delivery_type, objective)
-    run_data["security_review_required"] = sec_app["security_review_required"]
-    run_data["security_applicability_reason"] = sec_app["security_applicability_reason"]
+    run_data["security_review_required"] = effective_required
+    run_data["security_applicability_reason"] = effective_reason
 
     atomic_write_json(run_file, run_data)
 
