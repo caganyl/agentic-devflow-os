@@ -111,6 +111,36 @@ def _verified_new_feature_tasks(mod) -> list:
     return tasks
 
 
+def _make_wp_evidence(tasks: list) -> dict:
+    """Return mock work_product_evidence for all implementation/QA tasks in a task list."""
+    ev = {}
+    for t in tasks:
+        tt = t.get("task_type", "")
+        if tt == "implementation":
+            ev[t["id"]] = {
+                "task_type": "implementation",
+                "evidence_path": "src/feature.py",
+                "recorded_at": "2026-06-29T00:00:00Z",
+                "git_change_verified_at_record_time": True,
+            }
+        elif tt == "qa":
+            ev[t["id"]] = {
+                "task_type": "qa",
+                "evidence_path": "tests/test_feature.py",
+                "recorded_at": "2026-06-29T00:00:00Z",
+                "git_change_verified_at_record_time": True,
+            }
+    return ev
+
+
+def _create_wp_stub_files(target: Path) -> None:
+    """Create untracked stub files so git-status check in build_run_report passes."""
+    (target / "src").mkdir(exist_ok=True)
+    (target / "src" / "feature.py").write_text("# stub\n", encoding="utf-8")
+    (target / "tests").mkdir(exist_ok=True)
+    (target / "tests" / "test_feature.py").write_text("# stub\n", encoding="utf-8")
+
+
 # ---------------------------------------------------------------------------
 # Test 1 & 2: Task graph contract task structure
 # ---------------------------------------------------------------------------
@@ -691,8 +721,10 @@ class ContractEvidenceTaskStatusTest(unittest.TestCase):
             })
             run_data["security_review_required"] = False
             run_data["security_applicability_reason"] = "low_risk_local_utility"
+            run_data["work_product_evidence"] = _make_wp_evidence(run_data["tasks"])
 
             run_path.write_text(json.dumps(run_data))
+            _create_wp_stub_files(target)
 
             res_report = run_ops(["generate-run-report", "--target", str(target)])
             self.assertEqual(res_report.returncode, 0)
@@ -797,6 +829,7 @@ class ContractGateReadinessTest(unittest.TestCase):
             "contract_gate_satisfied": True,
             "security_review_required": False,
             "security_applicability_reason": "low_risk_local_utility",
+            "work_product_evidence": _make_wp_evidence(tasks),
         }
         report = self.mod.build_run_report(run_data, "RUN-001")
         cont = report["contract_applicability"]
@@ -826,12 +859,13 @@ class ContractGateHumanApprovalTest(unittest.TestCase):
 
     def test_awaiting_human_when_all_gates_except_human(self):
         """Test 8a: Contract evidence + QA + security done, human=False → awaiting_human_approval."""
+        tasks = self._verified_tasks()
         run_data = {
             "run_id": "RUN-001",
             "objective": "Add user onboarding",
             "execution_mode": "subagents",
             "agent_teams_requested": False,
-            "tasks": self._verified_tasks(),
+            "tasks": tasks,
             "approval_gates": {
                 "contract_approved": True,
                 "tests_passing": True,
@@ -849,6 +883,7 @@ class ContractGateHumanApprovalTest(unittest.TestCase):
             },
             "security_review_required": False,
             "security_applicability_reason": "low_risk_local_utility",
+            "work_product_evidence": _make_wp_evidence(tasks),
         }
         report = self.mod.build_run_report(run_data, "RUN-001")
         self.assertEqual(report["technical_readiness"], "ready")
@@ -857,12 +892,13 @@ class ContractGateHumanApprovalTest(unittest.TestCase):
 
     def test_ready_for_human_merge_when_all_gates_including_human(self):
         """Test 8b: Contract evidence + all gates including human → ready_for_human_merge."""
+        tasks = self._verified_tasks()
         run_data = {
             "run_id": "RUN-001",
             "objective": "Add user onboarding",
             "execution_mode": "subagents",
             "agent_teams_requested": False,
-            "tasks": self._verified_tasks(),
+            "tasks": tasks,
             "approval_gates": {
                 "contract_approved": True,
                 "tests_passing": True,
@@ -880,18 +916,20 @@ class ContractGateHumanApprovalTest(unittest.TestCase):
             },
             "security_review_required": False,
             "security_applicability_reason": "low_risk_local_utility",
+            "work_product_evidence": _make_wp_evidence(tasks),
         }
         report = self.mod.build_run_report(run_data, "RUN-001")
         self.assertEqual(report["merge_recommendation"], "ready_for_human_merge")
 
     def test_no_automatic_merge_ever(self):
         """Merge recommendation is never 'auto_merge' or similar — always requires human."""
+        tasks = self._verified_tasks()
         run_data = {
             "run_id": "RUN-001",
             "objective": "Add user onboarding",
             "execution_mode": "subagents",
             "agent_teams_requested": False,
-            "tasks": self._verified_tasks(),
+            "tasks": tasks,
             "approval_gates": {
                 "contract_approved": True,
                 "tests_passing": True,
@@ -903,6 +941,7 @@ class ContractGateHumanApprovalTest(unittest.TestCase):
             "contract_status": "completed",
             "contract_gate_satisfied": True,
             "security_review_required": False,
+            "work_product_evidence": _make_wp_evidence(tasks),
         }
         report = self.mod.build_run_report(run_data, "RUN-001")
         recommendation = report["merge_recommendation"]
@@ -1172,6 +1211,7 @@ class ContractGateRegressionTest(unittest.TestCase):
             },
             "security_review_required": False,
             "security_applicability_reason": "low_risk_local_utility",
+            "work_product_evidence": _make_wp_evidence(tasks),
             # NOTE: no contract_required, contract_status, or contract_gate_satisfied
         }
         report = self.mod.build_run_report(run_data, "RUN-001")

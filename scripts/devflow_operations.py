@@ -15,8 +15,9 @@ Subcommands:
     update-task-status        Update a task's status with state transition validation
     record-qa-evidence        Record QA test results authoritatively and update approval gates
     record-security-evidence  Record security review evidence authoritatively
-    record-contract-evidence  Record contract evidence authoritatively for new_feature runs
-    generate-run-report       Generate run evidence report with merge recommendation
+    record-contract-evidence      Record contract evidence authoritatively for new_feature runs
+    record-work-product-evidence  Record verifiable implementation or QA work-product evidence
+    generate-run-report           Generate run evidence report with merge recommendation
 
 Usage:
     python3 scripts/devflow_operations.py init-target --target PATH [--force]
@@ -29,6 +30,7 @@ Usage:
     python3 scripts/devflow_operations.py record-qa-evidence --target PATH --total N --passed N --failed N --exit-code N [--evidence-path PATH]
     python3 scripts/devflow_operations.py record-security-evidence --target PATH --run-id RUN-NNN --verdict pass|blocked --max-severity none|low|medium|high|critical --evidence-path RELATIVE_PATH
     python3 scripts/devflow_operations.py record-contract-evidence --target PATH --run-id RUN-NNN --evidence-path RELATIVE_PATH
+    python3 scripts/devflow_operations.py record-work-product-evidence --target PATH --run-id RUN-NNN --task-id TASK-ID --evidence-path RELATIVE_PATH
     python3 scripts/devflow_operations.py generate-run-report --target PATH
 
 Exit codes:
@@ -51,6 +53,7 @@ Exit codes:
     16  generate-task-graph --force rejected: run is active (tasks progressed, events, or artifacts exist)
     17  Security evidence recording rejected (review not required, invalid verdict/severity, or invalid path)
     18  Contract evidence recording rejected (not required for this delivery type, or invalid path)
+    19  Work product evidence recording rejected (invalid path, not a git change, task type mismatch, or task not in run)
 
 IMPORTANT — validate_forbidden_git_operation:
     This function validates planned operation *strings* passed to it by callers.
@@ -341,6 +344,132 @@ CONTRACT_REVIEW_STATUS_ENUM = frozenset({
 
 # Task states that are blocked for implementation tasks when contract gate is unsatisfied.
 CONTRACT_GATE_BLOCKED_STATUSES = frozenset({"in_progress", "completed", "verified"})
+
+# ---------------------------------------------------------------------------
+# Work product evidence gate
+#
+# Blocks implementation and QA tasks from reaching completed/verified without
+# a verifiable local work-product file that is an active Git worktree change.
+# This gate verifies local work-product presence, not causal attribution to a
+# specific agent session.
+# ---------------------------------------------------------------------------
+
+WORK_PRODUCT_GATE_EXIT_CODE = 19
+
+# Task types that require verifiable work-product evidence before completion.
+WORK_PRODUCT_REQUIRED_TASK_TYPES = frozenset({"implementation", "qa"})
+
+# Statuses blocked for impl/QA tasks without recorded work-product evidence.
+WORK_PRODUCT_GATE_BLOCKED_STATUSES = frozenset({"completed", "verified"})
+
+# Valid path prefixes for implementation work-product evidence (source/template assets).
+IMPLEMENTATION_EVIDENCE_PREFIXES = (
+    "src/",
+    "app/",
+    "lib/",
+    "pkg/",
+    "cmd/",
+    "templates/",
+)
+
+# Valid path prefixes for QA work-product evidence (test assets).
+QA_EVIDENCE_PREFIXES = (
+    "tests/",
+    "test/",
+    "spec/",
+    "__tests__/",
+    "e2e/",
+)
+
+# Path prefixes that are NEVER accepted as work-product (docs, devflow state, scorecards).
+_WORK_PRODUCT_FORBIDDEN_DOC_PREFIXES = (
+    ".devflow/",
+    ".claude/",
+    "docs/",
+    "evals/scorecards/",
+)
+
+# File names that are never accepted (lockfiles, dependency specs, build/config files).
+_WORK_PRODUCT_FORBIDDEN_FILENAMES = frozenset({
+    "package-lock.json",
+    "yarn.lock",
+    "poetry.lock",
+    "Pipfile.lock",
+    "composer.lock",
+    "Gemfile.lock",
+    "requirements.txt",
+    "setup.py",
+    "setup.cfg",
+    "pyproject.toml",
+    "Gemfile",
+    "Makefile",
+    "Dockerfile",
+    ".dockerignore",
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    ".gitignore",
+    ".gitattributes",
+})
+
+# Directory component names that are never accepted (migrations, devflow internals).
+_WORK_PRODUCT_FORBIDDEN_PATH_COMPONENTS = frozenset({
+    ".devflow",
+    ".claude",
+    "migrations",
+    "migration",
+})
+
+# Exact file names that are always classified as test assets (not implementation evidence).
+_TEST_FILENAME_EXACT = frozenset({"tests.py", "test.py"})
+
+# Source/template file extensions whose presence (outside test naming) indicates impl evidence.
+_SOURCE_ASSET_EXTENSIONS = frozenset({
+    ".py", ".js", ".ts", ".jsx", ".tsx",
+    ".html", ".css", ".scss", ".sass", ".less",
+    ".vue", ".svelte", ".go", ".rb", ".java",
+    ".kt", ".swift", ".rs", ".c", ".cpp", ".h", ".hpp",
+})
+
+
+def _is_test_filename(filename: str) -> bool:
+    """Return True if filename matches conventional test asset naming patterns."""
+    name = filename.lower()
+    return (
+        name in _TEST_FILENAME_EXACT
+        or name.startswith("test_")
+        or name.endswith("_test.py")
+        or name.endswith("_tests.py")
+        or name.endswith("_spec.py")
+        or name.endswith(".spec.js")
+        or name.endswith(".test.js")
+        or name.endswith(".test.ts")
+        or name.endswith(".spec.ts")
+        or name.endswith(".spec.jsx")
+        or name.endswith(".test.jsx")
+        or name.endswith(".spec.tsx")
+        or name.endswith(".test.tsx")
+    )
+
+
+def _is_source_asset(filename: str) -> bool:
+    """Return True if filename has a recognised source code or template asset extension."""
+    from pathlib import Path as _Path
+    return _Path(filename).suffix.lower() in _SOURCE_ASSET_EXTENSIONS
+
+# File name prefixes indicating sensitive content (.env*).
+_WORK_PRODUCT_FORBIDDEN_NAME_PREFIXES = (".env",)
+
+# Substrings in file names that indicate secrets or credentials.
+_WORK_PRODUCT_FORBIDDEN_NAME_SENSITIVE = frozenset({
+    "secret",
+    "credential",
+    "password",
+    "apikey",
+    "api_key",
+    "private_key",
+    "id_rsa",
+    "id_ed25519",
+})
 
 # ---------------------------------------------------------------------------
 # Delivery type task graph templates
@@ -774,6 +903,19 @@ def is_working_tree_clean(repo_path: Path) -> bool:
     return result.returncode == 0 and not result.stdout.strip()
 
 
+def is_path_git_worktree_change(target: Path, evidence_path: str) -> bool:
+    """Return True if evidence_path appears in 'git status --short' output, including untracked."""
+    result = subprocess.run(
+        ["git", "status", "--short", "--", evidence_path],
+        cwd=str(target),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+    return bool(result.stdout.strip())
+
+
 def get_existing_run_count(target: Path) -> int:
     """Return the highest run number among existing devflow/run-run-NNN branches."""
     result = subprocess.run(
@@ -1162,6 +1304,120 @@ def validate_contract_evidence_path(target: Path, evidence_path: str) -> tuple[b
     return True, ""
 
 
+def validate_work_product_evidence_path(
+    target: Path,
+    task_type: str,
+    evidence_path: str,
+) -> tuple[bool, str]:
+    """
+    Validate a work-product evidence path for record-work-product-evidence.
+
+    Enforced rules (in order):
+    1. Not empty
+    2. Not absolute
+    3. No '..' traversal
+    4. No wildcards
+    5. Resolves inside target
+    6. Not under .devflow/, .claude/, docs/, or evals/scorecards/
+    7. Not a forbidden file name (lockfile, dep spec, build/config file)
+    8. No forbidden path component (migrations, .devflow, .claude)
+    9. Not a sensitive file name (.env*, *secret*, *credential*, ...)
+    10. For implementation: must start with an implementation prefix
+    11. For QA: must start with a QA prefix
+    12. File must exist
+
+    Returns (ok, error_message).
+    """
+    if not evidence_path:
+        return False, "evidence-path gereklidir"
+
+    if Path(evidence_path).is_absolute():
+        return False, f"evidence-path mutlak yol olamaz: {evidence_path!r}"
+
+    normalized = evidence_path.replace("\\", "/")
+    parts = normalized.split("/")
+
+    if ".." in parts or any(p.startswith("..") for p in parts):
+        return False, f"evidence-path '..' traversal içeremez: {evidence_path!r}"
+
+    if "*" in normalized or "?" in normalized:
+        return False, f"evidence-path wildcard içeremez: {evidence_path!r}"
+
+    full_path = (target / evidence_path).resolve()
+    try:
+        full_path.relative_to(target.resolve())
+    except ValueError:
+        return False, f"evidence-path target dizini dışına çıkıyor: {evidence_path!r}"
+
+    for forbidden_prefix in _WORK_PRODUCT_FORBIDDEN_DOC_PREFIXES:
+        if normalized.startswith(forbidden_prefix):
+            return False, (
+                f"evidence-path '{forbidden_prefix}' altındaki yollar work-product kanıtı "
+                f"sayılamaz. Kaynak kodu ({', '.join(IMPLEMENTATION_EVIDENCE_PREFIXES)}) "
+                f"veya test dosyası ({', '.join(QA_EVIDENCE_PREFIXES)}) olmalıdır: "
+                f"{evidence_path!r}"
+            )
+
+    filename = Path(normalized).name
+    if filename in _WORK_PRODUCT_FORBIDDEN_FILENAMES:
+        return False, (
+            f"evidence-path '{filename}' bağımlılık, konfigürasyon veya lockfile olarak "
+            f"work-product kanıtı sayılamaz: {evidence_path!r}"
+        )
+
+    for comp in parts[:-1]:
+        if comp in _WORK_PRODUCT_FORBIDDEN_PATH_COMPONENTS:
+            return False, (
+                f"evidence-path yasak dizin bileşeni '{comp}' içeriyor "
+                f"(migration, .devflow, .claude kabul edilmez): {evidence_path!r}"
+            )
+
+    filename_lower = filename.lower()
+    for prefix in _WORK_PRODUCT_FORBIDDEN_NAME_PREFIXES:
+        if filename_lower.startswith(prefix):
+            return False, (
+                f"evidence-path '{filename}' gizli/konfigürasyon dosyası olarak "
+                f"work-product kanıtı sayılamaz: {evidence_path!r}"
+            )
+
+    for sensitive in _WORK_PRODUCT_FORBIDDEN_NAME_SENSITIVE:
+        if sensitive in filename_lower:
+            return False, (
+                f"evidence-path '{filename}' gizli veri içerdiği için "
+                f"work-product kanıtı sayılamaz: {evidence_path!r}"
+            )
+
+    if task_type == "implementation":
+        starts_with_impl_prefix = any(normalized.startswith(p) for p in IMPLEMENTATION_EVIDENCE_PREFIXES)
+        # Also accept source/template assets nested inside application packages (e.g. jobs/views.py),
+        # but never accept a file whose name marks it as a test asset.
+        is_nested_source = _is_source_asset(filename) and not _is_test_filename(filename)
+        if not (starts_with_impl_prefix or is_nested_source):
+            impl_list = ", ".join(sorted(IMPLEMENTATION_EVIDENCE_PREFIXES))
+            return False, (
+                f"Implementation work-product kanıtı şu prefixlerden birinde olmalıdır: "
+                f"{impl_list}. Verilen: {evidence_path!r}"
+            )
+    elif task_type == "qa":
+        starts_with_qa_prefix = any(normalized.startswith(p) for p in QA_EVIDENCE_PREFIXES)
+        # Also accept conventional test modules inside application packages (e.g. jobs/tests.py).
+        is_nested_test = _is_test_filename(filename)
+        if not (starts_with_qa_prefix or is_nested_test):
+            qa_list = ", ".join(sorted(QA_EVIDENCE_PREFIXES))
+            return False, (
+                f"QA work-product kanıtı şu prefixlerden birinde olmalıdır: "
+                f"{qa_list}. Verilen: {evidence_path!r}"
+            )
+
+    if not full_path.exists():
+        return False, f"evidence-path dosyası bulunamadı: {evidence_path!r}"
+
+    if not full_path.is_file():
+        return False, f"evidence-path bir dosya olmalıdır: {evidence_path!r}"
+
+    return True, ""
+
+
 def validate_task_packet_dict(packet: dict) -> None:
     """Exit 10 if the packet contains a forbidden top-level field."""
     for field in FORBIDDEN_PACKET_FIELDS:
@@ -1175,14 +1431,15 @@ def validate_task_packet_dict(packet: dict) -> None:
 
 def generate_task_packet_dict(task: dict, run_id: str, objective: str) -> dict:
     """Return a task packet dict with no forbidden fields."""
-    return {
+    task_type = task.get("task_type", "")
+    packet: dict = {
         "schema_version": "1",
         "run_id": run_id,
         "task_id": task["id"],
         "objective_summary": (objective or "")[:500],
         "assigned_role": task.get("assigned_role", ""),
         "title": task.get("title", ""),
-        "task_type": task.get("task_type", ""),
+        "task_type": task_type,
         "context_refs": [".devflow/context/context-pack.md"],
         "dependency_ids": task.get("dependency_ids", []),
         "expected_output_paths": [task.get("output_path", "")],
@@ -1201,6 +1458,28 @@ def generate_task_packet_dict(task: dict, run_id: str, objective: str) -> dict:
         ],
         "delegation_status": task.get("delegation_status", "planned"),
     }
+    if task_type in WORK_PRODUCT_REQUIRED_TASK_TYPES:
+        if task_type == "implementation":
+            allowed_prefixes = ", ".join(sorted(IMPLEMENTATION_EVIDENCE_PREFIXES))
+        else:
+            allowed_prefixes = ", ".join(sorted(QA_EVIDENCE_PREFIXES))
+        packet["work_product_requirements"] = {
+            "required": True,
+            "instructions": [
+                f"Bu task '{task_type}' türündedir ve work-product kanıtı zorunludur.",
+                "Önce gerçek kaynak/test dosyasını oluştur veya değiştir.",
+                f"Kabul edilen yol prefixleri: {allowed_prefixes}",
+                "Ardından CLI komutu ile kanıtı kaydet:",
+                (
+                    f"  python3 scripts/devflow_operations.py record-work-product-evidence "
+                    f"--target <TARGET> --task-id {task['id']} --evidence-path <RELATIVE_PATH>"
+                ),
+                "Self-reported completion yeterli değildir. Kanıt kaydedilmeden task completed/verified yapılamaz.",
+                "Kanıt yolu: docs/, .devflow/, lockfile, credential veya config dosyaları kabul edilmez.",
+            ],
+            "gate": "record-work-product-evidence CLI çalıştırılmadan completed/verified durumuna geçilemez.",
+        }
+    return packet
 
 
 def is_run_active(run_data: dict, devflow_dir: Path) -> bool:
@@ -1233,6 +1512,7 @@ def build_run_report(
     run_data: dict,
     run_id: str,
     delegation_events: list[dict] | None = None,
+    target: "Path | None" = None,
 ) -> dict:
     """
     Build an evidence report dict from run state. No sys.exit.
@@ -1340,10 +1620,77 @@ def build_run_report(
 
     _contract_evidence_meta = run_data.get("contract_evidence")
 
+    # ---------------------------------------------------------------------------
+    # Work product gate
+    #
+    # Requires each completed/verified implementation or QA task to have a
+    # recorded evidence path that is (or was) an active Git worktree change.
+    # When target is provided, staleness is checked live; otherwise it is marked
+    # as unknown (None).
+    #
+    # LIMITATION: this gate verifies local work-product presence only.
+    # It does not establish causal attribution to a specific agent session.
+    # ---------------------------------------------------------------------------
+    _work_product_evidence = run_data.get("work_product_evidence", {})
+    _required_wp_tasks = [
+        t for t in tasks
+        if t.get("task_type") in WORK_PRODUCT_REQUIRED_TASK_TYPES
+    ]
+    _wp_task_statuses: list[dict] = []
+    _wp_gate_satisfied = True
+
+    for _wpt in _required_wp_tasks:
+        _wpt_id = _wpt["id"]
+        _wpt_status = _wpt.get("status", "planned")
+        _ev = _work_product_evidence.get(_wpt_id)
+        if _ev:
+            _ep = _ev.get("evidence_path", "")
+            _git_active: "bool | None" = None
+            if target is not None and _ep:
+                _git_active = is_path_git_worktree_change(target, _ep)
+            _wp_task_statuses.append({
+                "task_id": _wpt_id,
+                "task_type": _wpt.get("task_type"),
+                "task_status": _wpt_status,
+                "evidence_recorded": True,
+                "evidence_path": _ep,
+                "recorded_at": _ev.get("recorded_at"),
+                "git_change_active": _git_active,
+            })
+            if _git_active is False:
+                _wp_gate_satisfied = False
+        else:
+            _wp_task_statuses.append({
+                "task_id": _wpt_id,
+                "task_type": _wpt.get("task_type"),
+                "task_status": _wpt_status,
+                "evidence_recorded": False,
+                "evidence_path": None,
+                "recorded_at": None,
+                "git_change_active": None,
+            })
+            if _wpt_status in WORK_PRODUCT_GATE_BLOCKED_STATUSES:
+                _wp_gate_satisfied = False
+
+    if not _required_wp_tasks:
+        _wp_gate_status = "not_applicable"
+        _wp_gate_satisfied = True
+    elif all(s["evidence_recorded"] for s in _wp_task_statuses):
+        _wp_gate_status = "completed"
+    else:
+        _wp_gate_status = "pending"
+
+    _wp_limitation_note = (
+        "Work Product Gate yerel work-product varlığını doğrular. "
+        "Bu gate belirli bir agent session'a causal attribution iddiası taşımaz. "
+        "Git worktree değişiklik kontrolü kayıt anında gerçekleştirildi; "
+        "raporlama anında yol artık değişmemiş olabilir."
+    )
+
     # Technical readiness: all auto gates + tasks done (human approval is separate)
     auto_gates_pass = (
         all_tasks_done and qa_done and security_gate_satisfied and tests_passing
-        and contract_gate_satisfied
+        and contract_gate_satisfied and _wp_gate_satisfied
     )
     technical_readiness = "ready" if auto_gates_pass else "not_ready"
 
@@ -1526,6 +1873,13 @@ def build_run_report(
             "contract_status": contract_status,
             "contract_gate_satisfied": contract_gate_satisfied,
             "contract_evidence": _contract_evidence_meta,
+        },
+        "work_product_gate": {
+            "required": bool(_required_wp_tasks),
+            "status": _wp_gate_status,
+            "gate_satisfied": _wp_gate_satisfied,
+            "tasks": _wp_task_statuses,
+            "limitation_note": _wp_limitation_note,
         },
         "merge_recommendation": merge_recommendation,
         "report_generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -2232,6 +2586,20 @@ def cmd_update_task_status(args) -> int:
                     )
                     sys.exit(15)
 
+    # Work product gate enforcement: implementation and QA tasks cannot reach
+    # completed/verified without a recorded work-product evidence entry.
+    if new_status in WORK_PRODUCT_GATE_BLOCKED_STATUSES:
+        if task.get("task_type") in WORK_PRODUCT_REQUIRED_TASK_TYPES:
+            _wp_evidence = run_data.get("work_product_evidence", {})
+            if task_id not in _wp_evidence:
+                print(
+                    f"Hata: Work-product kanıtı kaydedilmeden "
+                    f"'{task.get('task_type')}' görevi '{new_status}' durumuna geçirilemiyor. "
+                    "'record-work-product-evidence' CLI kullanın.",
+                    file=sys.stderr,
+                )
+                sys.exit(15)
+
     task["status"] = new_status
     atomic_write_json(run_file, run_data)
 
@@ -2540,6 +2908,113 @@ def cmd_record_contract_evidence(args) -> int:
     return 0
 
 
+def cmd_record_work_product_evidence(args) -> int:
+    """
+    Record verifiable work-product evidence for an implementation or QA task.
+
+    Validates:
+    - Run is active and task belongs to it
+    - Task type is implementation or qa
+    - Evidence path is relative, safe, and appropriate for the task type
+    - File exists inside the target
+    - File is currently an active Git worktree change (modified, staged, or untracked)
+    - Forbidden path categories are rejected (.devflow/, docs/, lockfiles, secrets, migrations)
+
+    LIMITATION: Verifies local work-product presence only.
+    Does not establish causal attribution to a specific agent session.
+
+    Exit code 19 for all rejections.
+    """
+    target = Path(args.target).resolve()
+    validate_target_path(target)
+    validate_not_on_protected_branch(target, "record-work-product-evidence")
+
+    run_id_override = getattr(args, "run_id", None)
+    task_id = args.task_id
+    evidence_path = args.evidence_path
+
+    devflow = get_devflow_dir(target)
+    if not is_initialized(target):
+        print("Hata: .devflow/ başlatılmamış.", file=sys.stderr)
+        sys.exit(4)
+
+    project_data = read_json(devflow / "project.json")
+    run_id = project_data.get("current_run_id")
+    if not run_id:
+        print("Hata: Aktif run yok.", file=sys.stderr)
+        sys.exit(4)
+
+    if run_id_override and run_id_override != run_id:
+        print(
+            f"Hata: --run-id '{run_id_override}' aktif run '{run_id}' ile eşleşmiyor. "
+            "Yalnızca aktif/current run için work-product evidence kaydedilebilir.",
+            file=sys.stderr,
+        )
+        sys.exit(WORK_PRODUCT_GATE_EXIT_CODE)
+
+    run_file = devflow / "runs" / f"{run_id}.json"
+    if not run_file.exists():
+        print(f"Hata: Run state dosyası bulunamadı: {run_file}", file=sys.stderr)
+        sys.exit(4)
+
+    run_data = read_json(run_file)
+
+    tasks = run_data.get("tasks", [])
+    task = next((t for t in tasks if t["id"] == task_id), None)
+    if task is None:
+        print(
+            f"Hata: Task '{task_id}' aktif run '{run_id}' içinde bulunamadı.",
+            file=sys.stderr,
+        )
+        sys.exit(WORK_PRODUCT_GATE_EXIT_CODE)
+
+    task_type = task.get("task_type", "")
+    if task_type not in WORK_PRODUCT_REQUIRED_TASK_TYPES:
+        print(
+            f"Hata: Task '{task_id}' türü '{task_type}' work-product evidence gerektirmiyor. "
+            f"Yalnızca {sorted(WORK_PRODUCT_REQUIRED_TASK_TYPES)} türleri desteklenir.",
+            file=sys.stderr,
+        )
+        sys.exit(WORK_PRODUCT_GATE_EXIT_CODE)
+
+    path_ok, path_err = validate_work_product_evidence_path(target, task_type, evidence_path)
+    if not path_ok:
+        print(f"Hata: {path_err}", file=sys.stderr)
+        sys.exit(WORK_PRODUCT_GATE_EXIT_CODE)
+
+    if not is_path_git_worktree_change(target, evidence_path):
+        print(
+            f"Hata: '{evidence_path}' dosyası target worktree'de aktif Git değişikliği olarak "
+            "görünmüyor (modified, staged veya untracked olmalıdır). "
+            "'git status' çıktısında bu dosya bulunmuyor.",
+            file=sys.stderr,
+        )
+        sys.exit(WORK_PRODUCT_GATE_EXIT_CODE)
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    run_data.setdefault("work_product_evidence", {})[task_id] = {
+        "task_type": task_type,
+        "evidence_path": evidence_path,
+        "recorded_at": now,
+        "git_change_verified_at_record_time": True,
+    }
+
+    atomic_write_json(run_file, run_data)
+
+    print(f"Work-product kanıtı kaydedildi: {task_id} [{task_type.upper()}]")
+    print(f"  run_id: {run_id}")
+    print(f"  task_id: {task_id}")
+    print(f"  task_type: {task_type}")
+    print(f"  evidence_path: {evidence_path}")
+    print(f"  git_change_verified: True")
+    print(
+        "  SINIR: Bu gate yerel work-product varlığını doğrular. "
+        "Belirli bir agent session'a causal attribution iddiası taşımaz."
+    )
+    return 0
+
+
 def cmd_generate_run_report(args) -> int:
     target = Path(args.target).resolve()
 
@@ -2569,7 +3044,7 @@ def cmd_generate_run_report(args) -> int:
         events_arg = None
     else:
         events_arg = [e for e in raw_events if _is_valid_delegation_event(e, run_id)]
-    report = build_run_report(run_data, run_id, delegation_events=events_arg)
+    report = build_run_report(run_data, run_id, delegation_events=events_arg, target=target)
 
     reports_dir = devflow / "reports"
     reports_dir.mkdir(exist_ok=True)
@@ -2656,6 +3131,39 @@ def cmd_generate_run_report(args) -> int:
             f"- contract_gate_satisfied: {cont_satisfied}",
         ]
 
+    wp_gate = report.get("work_product_gate", {})
+    wp_required = wp_gate.get("required", False)
+    wp_status = wp_gate.get("status", "not_applicable")
+    wp_satisfied = wp_gate.get("gate_satisfied", True)
+    wp_tasks = wp_gate.get("tasks", [])
+    wp_limitation = wp_gate.get("limitation_note", "")
+
+    wp_gate_lines = [
+        f"- required: {wp_required}",
+        f"- status: {wp_status}",
+        f"- gate_satisfied: {wp_satisfied}",
+    ]
+    for _wpt in wp_tasks:
+        _wpt_id = _wpt.get("task_id", "")
+        _wpt_type = _wpt.get("task_type", "")
+        _wpt_ev = _wpt.get("evidence_path")
+        _wpt_git = _wpt.get("git_change_active")
+        _wpt_recorded = _wpt.get("evidence_recorded", False)
+        if _wpt_recorded:
+            _git_label = f"git_change_active={_wpt_git}" if _wpt_git is not None else "git_change_active=not_checked"
+            wp_gate_lines.append(
+                f"- task {_wpt_id} ({_wpt_type}): evidence_path={_wpt_ev} [{_git_label}]"
+            )
+        else:
+            wp_gate_lines.append(
+                f"- task {_wpt_id} ({_wpt_type}): evidence_recorded=False [MISSING]"
+            )
+    if wp_required:
+        wp_gate_lines.append(
+            "- NOTE: This is NOT a claim of causal attribution to a specific agent session."
+        )
+        wp_gate_lines.append(f"- LIMITATION: {wp_limitation}")
+
     scorecard_lines = [
         f"# DevFlow Scorecard: {run_id}",
         "",
@@ -2670,6 +3178,9 @@ def cmd_generate_run_report(args) -> int:
         "",
         "## Contract Gate",
     ] + contract_gate_lines + [
+        "",
+        "## Work Product Gate",
+    ] + wp_gate_lines + [
         "",
         "## Delegation Evidence",
         f"- agent_teams_requested: {delegation.get('agent_teams_requested')}",
@@ -2705,6 +3216,8 @@ def cmd_generate_run_report(args) -> int:
     run_data["delegation_evidence_status"] = delegation["delegation_evidence_status"]
     run_data["observed_agent_types"] = delegation["observed_agent_types"]
     run_data["unattributed_event_count"] = delegation["unattributed_event_count"]
+    run_data["work_product_gate_status"] = wp_gate.get("status")
+    run_data["work_product_gate_satisfied"] = wp_gate.get("gate_satisfied")
     run_data["updated_at"] = now_updated
 
     # Add canonical artifact paths to state.artifacts (no duplicates)
@@ -2906,6 +3419,40 @@ def main() -> None:
         ),
     )
     p_cont_ev.set_defaults(func=cmd_record_contract_evidence)
+
+    p_wp_ev = subparsers.add_parser(
+        "record-work-product-evidence",
+        help=(
+            "Implementation veya QA görevi için doğrulanabilir work-product kanıtı kaydet. "
+            "Kanıt yolu aktif Git worktree değişikliği olmalıdır."
+        ),
+    )
+    p_wp_ev.add_argument("--target", required=True, help="Target project path")
+    p_wp_ev.add_argument(
+        "--run-id",
+        default=None,
+        dest="run_id",
+        help="Run ID (aktif run ile eşleşmeli; varsayılan: aktif run)",
+    )
+    p_wp_ev.add_argument(
+        "--task-id",
+        required=True,
+        dest="task_id",
+        help="Kanıt kaydedilecek implementation veya QA task ID",
+    )
+    p_wp_ev.add_argument(
+        "--evidence-path",
+        required=True,
+        dest="evidence_path",
+        help=(
+            "Target içinde kaynak kodu veya test dosyasına repository-relative göreli yol. "
+            f"Implementation için: {', '.join(sorted(IMPLEMENTATION_EVIDENCE_PREFIXES))} — "
+            f"QA için: {', '.join(sorted(QA_EVIDENCE_PREFIXES))}. "
+            "Aktif Git worktree değişikliği olmalıdır (modified, staged veya untracked). "
+            ".devflow/, docs/, lockfile, credential, migration kabul edilmez."
+        ),
+    )
+    p_wp_ev.set_defaults(func=cmd_record_work_product_evidence)
 
     p_report = subparsers.add_parser(
         "generate-run-report",

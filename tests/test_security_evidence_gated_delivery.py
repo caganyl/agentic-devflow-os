@@ -64,6 +64,36 @@ def run_ops(args: list) -> subprocess.CompletedProcess:
     )
 
 
+def _make_wp_evidence(tasks: list) -> dict:
+    """Return mock work_product_evidence for all implementation/QA tasks."""
+    ev = {}
+    for t in tasks:
+        tt = t.get("task_type", "")
+        if tt == "implementation":
+            ev[t["id"]] = {
+                "task_type": "implementation",
+                "evidence_path": "src/feature.py",
+                "recorded_at": "2026-06-29T00:00:00Z",
+                "git_change_verified_at_record_time": True,
+            }
+        elif tt == "qa":
+            ev[t["id"]] = {
+                "task_type": "qa",
+                "evidence_path": "tests/test_feature.py",
+                "recorded_at": "2026-06-29T00:00:00Z",
+                "git_change_verified_at_record_time": True,
+            }
+    return ev
+
+
+def _create_wp_stub_files(target: Path) -> None:
+    """Create untracked stub files so git-status check in build_run_report passes."""
+    (target / "src").mkdir(exist_ok=True)
+    (target / "src" / "feature.py").write_text("# stub\n", encoding="utf-8")
+    (target / "tests").mkdir(exist_ok=True)
+    (target / "tests" / "test_feature.py").write_text("# stub\n", encoding="utf-8")
+
+
 def _setup_risky_run(target: Path, objective: str = "Add REST API endpoint with JWT auth") -> str:
     """Init, create-run, generate-task-graph for a risky objective. Returns run_id."""
     run_ops(["init-target", "--target", str(target)])
@@ -380,6 +410,7 @@ class SecurityGateStateMachineTest(unittest.TestCase):
                 "recorded_at": "2026-06-28T12:00:00Z",
                 "provenance": "generated_in_run",
             },
+            "work_product_evidence": _make_wp_evidence(tasks),
         }
         report = self.mod.build_run_report(run_data, "RUN-001")
         self.assertEqual(report["technical_readiness"], "ready")
@@ -440,6 +471,7 @@ class SecurityGateStateMachineTest(unittest.TestCase):
             },
             "security_review_required": False,
             "security_applicability_reason": "low_risk_local_utility",
+            "work_product_evidence": _make_wp_evidence(tasks),
         }
         report = self.mod.build_run_report(run_data, "RUN-001")
         sec = report["security_applicability"]
@@ -812,6 +844,8 @@ class SecurityEvidenceFullScenarioTest(unittest.TestCase):
         run_data = json.loads(run_file.read_text())
         for t in run_data["tasks"]:
             t["status"] = "verified"
+        _create_wp_stub_files(self.target)
+        run_data["work_product_evidence"] = _make_wp_evidence(run_data["tasks"])
         run_file.write_text(json.dumps(run_data, indent=2) + "\n", encoding="utf-8")
 
     def _set_qa_gates(self, run_id: str) -> None:

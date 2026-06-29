@@ -76,6 +76,28 @@ def _init_and_run(target: Path, objective: str = "test run") -> str:
     return project_data["current_run_id"]
 
 
+def _make_wp_evidence(tasks: list) -> dict:
+    """Return mock work_product_evidence for all implementation/QA tasks."""
+    ev = {}
+    for t in tasks:
+        tt = t.get("task_type", "")
+        if tt == "implementation":
+            ev[t["id"]] = {
+                "task_type": "implementation",
+                "evidence_path": "src/feature.py",
+                "recorded_at": "2026-06-29T00:00:00Z",
+                "git_change_verified_at_record_time": True,
+            }
+        elif tt == "qa":
+            ev[t["id"]] = {
+                "task_type": "qa",
+                "evidence_path": "tests/test_feature.py",
+                "recorded_at": "2026-06-29T00:00:00Z",
+                "git_change_verified_at_record_time": True,
+            }
+    return ev
+
+
 def _all_delivery_types():
     mod = _load_ops_module()
     return sorted(mod.SUPPORTED_DELIVERY_TYPES)
@@ -1415,6 +1437,7 @@ class TaskGraphImmutabilityTest(unittest.TestCase):
                 "qa_sign_off": True,
                 "human_approval": human,
             },
+            "work_product_evidence": _make_wp_evidence(tasks),
         }
 
     def test_backend_utility_complete_human_false_awaiting_human_approval(self):
@@ -1495,18 +1518,20 @@ class SecurityApplicabilityPolicyTest(unittest.TestCase):
                 "security_review_required": security_review_required,
                 "security_applicability_reason": reason,
             }
+        tasks = self._verified_tasks(delivery_type, objective)
         return {
             "run_id": "RUN-001",
             "objective": objective,
             "execution_mode": "subagents",
             "agent_teams_requested": False,
-            "tasks": self._verified_tasks(delivery_type, objective),
+            "tasks": tasks,
             "approval_gates": {
                 "tests_passing": True,
                 "qa_sign_off": True,
                 "security_review_complete": security_evidence,
                 "human_approval": human,
             },
+            "work_product_evidence": _make_wp_evidence(tasks),
             **sec,
         }
 
