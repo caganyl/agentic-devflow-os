@@ -16,13 +16,32 @@ Delivery Lead'i plan oluşturmadan merge recommendation'a kadar adım adım yön
 
 ## Prosedür
 
-### 1. Girdileri Doğrula
+### 1. Managed Run Boundary Kontrolü
+
+`DEVFLOW_RUN_WORKTREE` ortam değişkeni tanımlıysa önce konumu doğrula:
+
+```bash
+pwd
+git rev-parse --show-toplevel
+git branch --show-current
+```
+
+- Kök `DEVFLOW_RUN_WORKTREE` ile eşleşmeli.
+- Branch `DEVFLOW_RUN_BRANCH` ile eşleşmeli.
+- Uyuşmazlık varsa delivery'yi başlatma; blocker'ı raporla ve dur.
+
+Managed operations CLI her zaman şu şekilde çağrılır:
+```bash
+python3 "$DEVFLOW_OPERATIONS_SCRIPT" ... --target "$DEVFLOW_RUN_WORKTREE"
+```
+
+### 2. Girdileri Doğrula
 
 - REQ-ID var mı? Yoksa Product Analyst devreye al.
 - Acceptance criteria tanımlı mı? Yoksa implementation başlatma.
 - Context pack hazır mı? Yoksa `project-context-synthesis` skill'ini çalıştır.
 
-### 2. Plan Üret
+### 3. Plan Üret
 
 Şunları içeren bir plan yaz:
 
@@ -57,7 +76,7 @@ Delivery Lead'i plan oluşturmadan merge recommendation'a kadar adım adım yön
 - [ ] İnsan: main merge
 ```
 
-### 3. Rolleri Dispatch Et
+### 4. Rolleri Dispatch Et
 
 `task-routing` skill'ini kullanarak minimum rol setini belirle.
 Her role şu formatla görev ver:
@@ -69,14 +88,14 @@ Her role şu formatla görev ver:
 - Gate: [hangi koşulda tamamlanmış sayılır]
 ```
 
-### 4. Çıktıları Topla ve İzle
+### 5. Çıktıları Topla ve İzle
 
 Her rolün çıktısını kısa structured handoff olarak topla:
 - Tamamlanan artefakt
 - Açık sorunlar
 - Sonraki adım
 
-### 5. Integration ve Merge Recommendation
+### 6. Integration ve Merge Recommendation
 
 `release-scorecard` skill'ini çalıştır.
 Tüm gate'ler geçilene kadar "merge ready" ilan etme.

@@ -41,6 +41,23 @@ read-only niteliğindedir. Yalnızca `docs/quality/security-reports/` altında
 bulgu raporu yazabilirsin; uygulama, test, migration, dependency veya
 infrastructure dosyalarına yazamazsın.
 
+## Managed Run Boundary
+
+`DEVFLOW_RUN_WORKTREE` ortam değişkeni tanımlıysa, o path bu run'ın tek
+yazılabilir repository köküdür. Yazma yapmadan önce konumu doğrula:
+
+```bash
+pwd
+git rev-parse --show-toplevel
+git branch --show-current
+```
+
+Kök `DEVFLOW_RUN_WORKTREE` ve branch `DEVFLOW_RUN_BRANCH` ile eşleşmeli.
+Uyuşmazlık varsa hiçbir yazma yapma ve blocker'ı raporla.
+
+Managed run sırasında başka bir worktree yaratma, geçiş yapma veya
+navigate etme.
+
 ## Sorumluluk Alanın
 
 - Threat model çıkarmak.

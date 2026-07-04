@@ -1578,5 +1578,160 @@ class PrepareDeliveryHonestyTest(unittest.TestCase):
         self.assertEqual(result.returncode, 9)
 
 
+# ---------------------------------------------------------------------------
+# Launch env propagation and supervisor prompt non-disclosure
+# ---------------------------------------------------------------------------
+
+class LaunchEnvPropagationTest(unittest.TestCase):
+    """
+    Tests that cmd_launch injects the required run boundary env vars into the
+    spawned process and that the supervisor prompt does not expose the original
+    target checkout path.
+    """
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp())
+        self.target = self.tmpdir / "myproject"
+        self.target.mkdir()
+        make_git_repo(self.target, branch="main")
+        self.report_file = self.tmpdir / "claude_report.json"
+        self.fake_claude = _make_fake_claude(self.tmpdir, self.report_file)
+
+    def tearDown(self):
+        _remove_worktrees_and_cleanup(self.target, self.tmpdir)
+
+    def _launch(self, extra_args=None):
+        return run_ops(
+            ["launch", "--target", str(self.target)] + (extra_args or []),
+            env={
+                "DEVFLOW_CLAUDE_BINARY": str(self.fake_claude),
+                "DEVFLOW_TEST_REPORT": str(self.report_file),
+            },
+        )
+
+    def _managed_root(self) -> Path:
+        return self.target.parent / ".devflow-worktrees" / self.target.name
+
+    def _worktree_path(self, run_num: int = 1) -> Path:
+        return self._managed_root() / f"run-{run_num:03d}"
+
+    def _get_report(self) -> dict:
+        if not self.report_file.exists():
+            self.skipTest("Fake claude did not write report (execve may have failed)")
+        return json.loads(self.report_file.read_text())
+
+    # --- Environment variable propagation ---
+
+    def test_devflow_run_worktree_in_spawned_env(self):
+        self._launch()
+        data = self._get_report()
+        env = data.get("env", {})
+        self.assertIn(
+            "DEVFLOW_RUN_WORKTREE", env,
+            "DEVFLOW_RUN_WORKTREE must be set in spawned process environment",
+        )
+        actual = Path(env["DEVFLOW_RUN_WORKTREE"]).resolve()
+        expected = self._worktree_path().resolve()
+        self.assertEqual(actual, expected,
+                         "DEVFLOW_RUN_WORKTREE must point to the managed run worktree")
+
+    def test_devflow_run_branch_in_spawned_env(self):
+        self._launch()
+        data = self._get_report()
+        env = data.get("env", {})
+        self.assertIn(
+            "DEVFLOW_RUN_BRANCH", env,
+            "DEVFLOW_RUN_BRANCH must be set in spawned process environment",
+        )
+        self.assertIn("devflow/run-run-001", env.get("DEVFLOW_RUN_BRANCH", ""),
+                      "DEVFLOW_RUN_BRANCH must contain the managed run branch name")
+
+    def test_devflow_operations_script_in_spawned_env(self):
+        self._launch()
+        data = self._get_report()
+        env = data.get("env", {})
+        self.assertIn(
+            "DEVFLOW_OPERATIONS_SCRIPT", env,
+            "DEVFLOW_OPERATIONS_SCRIPT must be set in spawned process environment",
+        )
+        ops_script = env.get("DEVFLOW_OPERATIONS_SCRIPT", "")
+        self.assertTrue(
+            ops_script.endswith("devflow_operations.py"),
+            f"DEVFLOW_OPERATIONS_SCRIPT must point to devflow_operations.py, got: {ops_script}",
+        )
+
+    # --- Supervisor prompt non-disclosure ---
+
+    def test_supervisor_prompt_no_original_target_path(self):
+        """The supervisor prompt must not expose the original target checkout path."""
+        self._launch()
+        data = self._get_report()
+        # The supervisor prompt is the last argument passed to the claude binary
+        args = data.get("args", [])
+        full_args_text = " ".join(str(a) for a in args)
+        original_target_str = str(self.target.resolve())
+        self.assertNotIn(
+            original_target_str, full_args_text,
+            "Original target checkout path must not appear in supervisor prompt or args",
+        )
+
+    def test_supervisor_prompt_references_devflow_run_worktree(self):
+        """The supervisor prompt must reference DEVFLOW_RUN_WORKTREE."""
+        self._launch()
+        data = self._get_report()
+        args = data.get("args", [])
+        full_args_text = " ".join(str(a) for a in args)
+        self.assertIn(
+            "DEVFLOW_RUN_WORKTREE", full_args_text,
+            "Supervisor prompt must state DEVFLOW_RUN_WORKTREE as the sole writable root",
+        )
+
+    def test_supervisor_prompt_references_devflow_operations_script(self):
+        """The supervisor prompt must reference DEVFLOW_OPERATIONS_SCRIPT."""
+        self._launch()
+        data = self._get_report()
+        args = data.get("args", [])
+        full_args_text = " ".join(str(a) for a in args)
+        self.assertIn(
+            "DEVFLOW_OPERATIONS_SCRIPT", full_args_text,
+            "Supervisor prompt must reference DEVFLOW_OPERATIONS_SCRIPT for managed operations",
+        )
+
+    # --- Static source analysis ---
+
+    def test_ops_script_sets_devflow_run_worktree_in_child_env(self):
+        """cmd_launch source must set DEVFLOW_RUN_WORKTREE in child_env."""
+        content = OPS_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("DEVFLOW_RUN_WORKTREE", content,
+                      "devflow_operations.py must set DEVFLOW_RUN_WORKTREE in child env")
+
+    def test_ops_script_sets_devflow_run_branch_in_child_env(self):
+        """cmd_launch source must set DEVFLOW_RUN_BRANCH in child_env."""
+        content = OPS_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("DEVFLOW_RUN_BRANCH", content,
+                      "devflow_operations.py must set DEVFLOW_RUN_BRANCH in child env")
+
+    def test_ops_script_sets_devflow_operations_script_in_child_env(self):
+        """cmd_launch source must set DEVFLOW_OPERATIONS_SCRIPT in child_env."""
+        content = OPS_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("DEVFLOW_OPERATIONS_SCRIPT", content,
+                      "devflow_operations.py must set DEVFLOW_OPERATIONS_SCRIPT in child env")
+
+    def test_ops_script_supervisor_prompt_no_hardcoded_target_var(self):
+        """supervisor_prompt source must not embed the target variable by name."""
+        content = OPS_SCRIPT.read_text(encoding="utf-8")
+        # Find the supervisor_prompt string block and confirm 'Target repo' line is gone
+        self.assertNotIn(
+            '"Target repo:',
+            content,
+            "supervisor_prompt must not include a 'Target repo:' line exposing original checkout",
+        )
+        self.assertNotIn(
+            "'Target repo:",
+            content,
+            "supervisor_prompt must not include a 'Target repo:' line exposing original checkout",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

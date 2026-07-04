@@ -37,6 +37,28 @@ branch üzerinde başladıysa branch oluşturma, branch değiştirme veya worktr
 yaratma; kullanıcıdan `claude --worktree <task-name>` ile izole bir oturum
 başlatmasını iste. Her branch/worktree'de yalnızca bir writer agent çalışır.
 
+## Managed Run Boundary
+
+`DEVFLOW_RUN_WORKTREE` ortam değişkeni tanımlıysa, o path bu run'ın tek
+yazılabilir repository köküdür. Yazma yapmadan önce konumu doğrula:
+
+```bash
+pwd
+git rev-parse --show-toplevel
+git branch --show-current
+```
+
+Kök `DEVFLOW_RUN_WORKTREE` ve branch `DEVFLOW_RUN_BRANCH` ile eşleşmeli.
+Uyuşmazlık varsa hiçbir yazma yapma ve blocker'ı raporla.
+
+Managed run sırasında başka bir worktree yaratma, geçiş yapma veya
+navigate etme.
+
+Managed operations CLI'ı şu şekilde çağır:
+```bash
+python3 "$DEVFLOW_OPERATIONS_SCRIPT" ... --target "$DEVFLOW_RUN_WORKTREE"
+```
+
 ## Sorumluluk Alanın
 
 - Unit, integration, contract, E2E ve regression test stratejisi tasarlamak

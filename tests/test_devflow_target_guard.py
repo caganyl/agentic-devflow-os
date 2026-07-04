@@ -13,8 +13,11 @@ Covers:
 
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -29,17 +32,26 @@ def _load_guard_module():
     return mod
 
 
-def run_guard(payload: dict | str) -> subprocess.CompletedProcess:
-    """Run the guard script with the given payload dict or JSON string as stdin."""
+def run_guard(payload: dict | str, env: dict | None = None) -> subprocess.CompletedProcess:
+    """Run the guard script with the given payload dict or JSON string as stdin.
+
+    env: if provided, merged on top of os.environ for the subprocess. Pass a
+    dict with explicit keys to add/override specific variables (including
+    DEVFLOW_RUN_WORKTREE for boundary-enforcement tests).
+    """
     if isinstance(payload, dict):
         stdin_data = json.dumps(payload)
     else:
         stdin_data = payload
+    run_env = os.environ.copy()
+    if env is not None:
+        run_env.update(env)
     return subprocess.run(
         [sys.executable, str(GUARD_SCRIPT)],
         input=stdin_data,
         capture_output=True,
         text=True,
+        env=run_env,
     )
 
 
@@ -524,6 +536,227 @@ class GuardFailClosedTest(unittest.TestCase):
         """Non-string tool_name must be blocked."""
         result = run_guard({"tool_name": 42, "tool_input": {"command": "git status"}})
         self.assertEqual(result.returncode, 2)
+
+
+# ---------------------------------------------------------------------------
+# Run worktree boundary — Write/Edit enforcement
+# (activated when DEVFLOW_RUN_WORKTREE is set)
+# ---------------------------------------------------------------------------
+
+class RunWorktreeBoundaryWriteTest(unittest.TestCase):
+    """Guard blocks Write/Edit outside DEVFLOW_RUN_WORKTREE when env var is set."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp())
+        self.worktree = self.tmpdir / "run_worktree"
+        self.worktree.mkdir()
+        self.external = self.tmpdir / "external"
+        self.external.mkdir()
+        # Pass the resolved path so the guard sees the same path after resolve()
+        self.boundary_env = {"DEVFLOW_RUN_WORKTREE": str(self.worktree.resolve())}
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _assert_write_allowed(self, path: str):
+        result = run_guard(write_payload(path), env=self.boundary_env)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Write inside worktree should be allowed (exit 0): {path!r}\n"
+            f"stderr={result.stderr}",
+        )
+
+    def _assert_write_blocked(self, path: str):
+        result = run_guard(write_payload(path), env=self.boundary_env)
+        self.assertEqual(
+            result.returncode, 2,
+            f"Write outside worktree should be blocked (exit 2): {path!r}\n"
+            f"stderr={result.stderr}",
+        )
+
+    def test_write_inside_worktree_allowed(self):
+        path = str(self.worktree / "src" / "api.py")
+        self._assert_write_allowed(path)
+
+    def test_write_absolute_external_denied(self):
+        path = str(self.external / "file.py")
+        self._assert_write_blocked(path)
+
+    def test_edit_inside_worktree_allowed(self):
+        path = str(self.worktree / "tests" / "test_api.py")
+        result = run_guard(edit_payload(path), env=self.boundary_env)
+        self.assertEqual(result.returncode, 0,
+                         f"Edit inside worktree should be allowed: {path!r}")
+
+    def test_edit_absolute_external_denied(self):
+        path = str(self.external / "file.py")
+        result = run_guard(edit_payload(path), env=self.boundary_env)
+        self.assertEqual(result.returncode, 2,
+                         f"Edit outside worktree should be blocked: {path!r}")
+
+    def test_write_dotdot_escape_denied(self):
+        # Absolute path that traverses above the worktree via ..
+        path = str(self.worktree / ".." / "external" / "escaped.py")
+        self._assert_write_blocked(path)
+
+    def test_write_symlink_escape_denied(self):
+        # Symlink inside worktree pointing to external dir
+        link = self.worktree / "link_to_external"
+        link.symlink_to(self.external)
+        path = str(link / "file.py")
+        self._assert_write_blocked(path)
+
+    def test_deny_message_does_not_echo_path(self):
+        path = str(self.external / "secret_output.py")
+        result = run_guard(write_payload(path), env=self.boundary_env)
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn(str(self.external), result.stderr)
+        self.assertNotIn("secret_output", result.stderr)
+
+    def test_boundary_message_is_fixed(self):
+        path1 = str(self.external / "a.py")
+        path2 = str(self.external / "b.py")
+        r1 = run_guard(write_payload(path1), env=self.boundary_env)
+        r2 = run_guard(write_payload(path2), env=self.boundary_env)
+        self.assertEqual(r1.returncode, 2)
+        self.assertEqual(r2.returncode, 2)
+        self.assertEqual(r1.stderr.strip(), r2.stderr.strip())
+
+
+# ---------------------------------------------------------------------------
+# Backward compatibility — no boundary when DEVFLOW_RUN_WORKTREE is absent
+# ---------------------------------------------------------------------------
+
+class NoBoundaryWithoutEnvTest(unittest.TestCase):
+    """When DEVFLOW_RUN_WORKTREE is not set, boundary enforcement is inactive."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp())
+        self.external = self.tmpdir / "external"
+        self.external.mkdir()
+        # Env without DEVFLOW_RUN_WORKTREE
+        self.no_boundary_env = {
+            k: v for k, v in os.environ.items() if k != "DEVFLOW_RUN_WORKTREE"
+        }
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_write_external_allowed_without_boundary(self):
+        path = str(self.external / "file.py")
+        result = run_guard(write_payload(path), env=self.no_boundary_env)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Without DEVFLOW_RUN_WORKTREE, external path should not be blocked: {path!r}",
+        )
+
+    def test_edit_external_allowed_without_boundary(self):
+        path = str(self.external / "file.py")
+        result = run_guard(edit_payload(path), env=self.no_boundary_env)
+        self.assertEqual(result.returncode, 0)
+
+    def test_cd_external_allowed_without_boundary(self):
+        cmd = f"cd {self.external}"
+        result = run_guard(bash_payload(cmd), env=self.no_boundary_env)
+        self.assertEqual(
+            result.returncode, 0,
+            "Without DEVFLOW_RUN_WORKTREE, cd to external path must not be blocked",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Bash boundary — cd / git -C / git --work-tree enforcement
+# ---------------------------------------------------------------------------
+
+class BashBoundaryTest(unittest.TestCase):
+    """Guard blocks explicit navigation outside DEVFLOW_RUN_WORKTREE in Bash."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp())
+        self.worktree = self.tmpdir / "run_worktree"
+        self.worktree.mkdir()
+        self.external = self.tmpdir / "external"
+        self.external.mkdir()
+        self.boundary_env = {"DEVFLOW_RUN_WORKTREE": str(self.worktree.resolve())}
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _assert_bash_allowed(self, cmd: str):
+        result = run_guard(bash_payload(cmd), env=self.boundary_env)
+        self.assertEqual(
+            result.returncode, 0,
+            f"Bash command should be allowed (exit 0): {cmd!r}\nstderr={result.stderr}",
+        )
+
+    def _assert_bash_blocked(self, cmd: str):
+        result = run_guard(bash_payload(cmd), env=self.boundary_env)
+        self.assertEqual(
+            result.returncode, 2,
+            f"Bash command should be blocked (exit 2): {cmd!r}\nstderr={result.stderr}",
+        )
+
+    # --- cd tests ---
+
+    def test_cd_inside_worktree_allowed(self):
+        self._assert_bash_allowed(f"cd {self.worktree}")
+
+    def test_cd_absolute_external_blocked(self):
+        self._assert_bash_blocked(f"cd {self.external}")
+
+    def test_cd_dotdot_escape_blocked(self):
+        # Absolute path with .. that resolves outside worktree
+        escape = str(self.worktree / ".." / "external")
+        self._assert_bash_blocked(f"cd {escape}")
+
+    def test_cd_devflow_run_worktree_var_allowed(self):
+        # cd "$DEVFLOW_RUN_WORKTREE" must always be allowed
+        self._assert_bash_allowed('cd "$DEVFLOW_RUN_WORKTREE"')
+
+    def test_cd_simple_relative_allowed(self):
+        # Simple relative paths (no ..) are not checked — CWD unknown at hook time
+        self._assert_bash_allowed("cd src")
+
+    # --- git -C tests ---
+
+    def test_git_c_inside_worktree_allowed(self):
+        self._assert_bash_allowed(f"git -C {self.worktree} status")
+
+    def test_git_c_external_blocked(self):
+        self._assert_bash_blocked(f"git -C {self.external} status")
+
+    def test_git_c_dotdot_escape_blocked(self):
+        escape = str(self.worktree / ".." / "external")
+        self._assert_bash_blocked(f"git -C {escape} status")
+
+    # --- git --work-tree tests ---
+
+    def test_git_work_tree_space_external_blocked(self):
+        self._assert_bash_blocked(f"git --work-tree {self.external} status")
+
+    def test_git_work_tree_eq_external_blocked(self):
+        self._assert_bash_blocked(f"git --work-tree={self.external} status")
+
+    def test_git_work_tree_space_inside_allowed(self):
+        self._assert_bash_allowed(f"git --work-tree {self.worktree} status")
+
+    def test_git_work_tree_eq_inside_allowed(self):
+        self._assert_bash_allowed(f"git --work-tree={self.worktree} status")
+
+    def test_bash_boundary_deny_message_is_fixed(self):
+        cmd1 = f"cd {self.external}"
+        cmd2 = f"git -C {self.external} status"
+        r1 = run_guard(bash_payload(cmd1), env=self.boundary_env)
+        r2 = run_guard(bash_payload(cmd2), env=self.boundary_env)
+        self.assertEqual(r1.returncode, 2)
+        self.assertEqual(r2.returncode, 2)
+        self.assertEqual(r1.stderr.strip(), r2.stderr.strip())
+
+    def test_bash_boundary_deny_does_not_echo_path(self):
+        cmd = f"cd {self.external}"
+        result = run_guard(bash_payload(cmd), env=self.boundary_env)
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn(str(self.external), result.stderr)
 
 
 if __name__ == "__main__":

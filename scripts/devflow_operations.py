@@ -2265,14 +2265,17 @@ def cmd_launch(args) -> int:
         f"Run ID: {run_id}\n"
         f"Branch: {branch_name}\n"
         f"Objective: {objective}\n"
-        f"Worktree: {worktree_path}\n"
-        f"Target repo: {target}\n"
+        f"\n"
+        f"DEVFLOW_RUN_WORKTREE is the sole writable repository root for this managed run.\n"
+        f"Do not write to or modify any path outside DEVFLOW_RUN_WORKTREE.\n"
         f"\n"
         f"Sen bu run'ın Delivery Lead'isin. Sorumlulukların:\n"
         f"- /orchestrate-delivery skill'ini kullanarak delivery döngüsünü yönet\n"
-        f"- Managed operations için scripts/devflow_operations.py kullan\n"
+        f'- Managed operations için: python3 "$DEVFLOW_OPERATIONS_SCRIPT" ... --target "$DEVFLOW_RUN_WORKTREE"\n'
+        f"- Yazma öncesi konumu doğrula: pwd, git rev-parse --show-toplevel, git branch --show-current\n"
+        f"- Kök DEVFLOW_RUN_WORKTREE ve branch DEVFLOW_RUN_BRANCH ile eşleşmeli; uyuşmazlıkta yaz yapma, raporla\n"
         f"- main branch'e doğrudan yazma; insan approval gate'lerini koru\n"
-        f"- Bu worktree dışında dosya oluşturma veya değiştirme"
+        f"- DEVFLOW_RUN_WORKTREE dışında dosya oluşturma veya değiştirme"
     )
 
     print("Claude Code supervisor başlatılıyor (interaktif)...")
@@ -2289,6 +2292,11 @@ def cmd_launch(args) -> int:
         child_env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
     else:
         child_env.pop("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", None)
+
+    # Run boundary env vars — set before execve so the guard and agents can enforce them
+    child_env["DEVFLOW_RUN_WORKTREE"] = str(worktree_path)
+    child_env["DEVFLOW_RUN_BRANCH"] = branch_name
+    child_env["DEVFLOW_OPERATIONS_SCRIPT"] = str(plugin_dir / "scripts" / "devflow_operations.py")
 
     # Change CWD to run worktree before replacing process
     os.chdir(str(worktree_path))

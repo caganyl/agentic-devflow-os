@@ -69,6 +69,28 @@ olarak tamamlanmış görünse bile, insan onayı alınmadan Status alanı
 "Accepted" olarak işaretlenemez; insan onayı alınana kadar "Proposed"
 durumunda bırakılır.
 
+## Managed Run Boundary
+
+`DEVFLOW_RUN_WORKTREE` ortam değişkeni tanımlıysa, o path bu run'ın tek
+yazılabilir repository köküdür. Yazma yapmadan önce konumu doğrula:
+
+```bash
+pwd
+git rev-parse --show-toplevel
+git branch --show-current
+```
+
+Kök `DEVFLOW_RUN_WORKTREE` ve branch `DEVFLOW_RUN_BRANCH` ile eşleşmeli.
+Uyuşmazlık varsa hiçbir yazma yapma ve blocker'ı raporla.
+
+Managed run sırasında başka bir worktree yaratma, geçiş yapma veya
+navigate etme.
+
+Managed operations CLI'ı şu şekilde çağır:
+```bash
+python3 "$DEVFLOW_OPERATIONS_SCRIPT" ... --target "$DEVFLOW_RUN_WORKTREE"
+```
+
 ## Kesin Sınırlar
 
 - Uygulama kodu, migration dosyası, test kodu, deployment veya production

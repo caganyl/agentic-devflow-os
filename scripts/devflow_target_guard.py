@@ -13,12 +13,33 @@ SCOPE: This guard protects Claude Code tool calls (Bash, Write, Edit) only.
 Commands typed directly in the user's terminal are NOT intercepted.
 No network access, no credential access, no external processes.
 Standard library only.
+
+BOUNDARY ENFORCEMENT: When DEVFLOW_RUN_WORKTREE is set in the environment,
+Write/Edit calls that resolve outside the managed run worktree are denied,
+and Bash calls containing explicit cd/git -C/--work-tree navigation to paths
+outside the worktree are denied. This is tool-call enforcement and defense
+in depth — it is NOT an OS-level sandbox. Direct terminal commands and
+subprocess execution are not intercepted by this guard.
 """
 
 import json
+import os
 import re
 import sys
+from pathlib import Path
 from typing import Optional
+
+# ---------------------------------------------------------------------------
+# Run worktree boundary (activated only when DEVFLOW_RUN_WORKTREE is set)
+# ---------------------------------------------------------------------------
+
+_RUN_WORKTREE: Optional[Path] = None
+_raw_run_worktree = os.environ.get("DEVFLOW_RUN_WORKTREE", "")
+if _raw_run_worktree:
+    try:
+        _RUN_WORKTREE = Path(_raw_run_worktree).resolve()
+    except Exception:
+        pass
 
 # ---------------------------------------------------------------------------
 # Blocked Bash patterns
@@ -77,6 +98,20 @@ _PATH_BLOCK_PATTERNS = [
     re.compile(r"(^|[/\\])\.devflow[/\\]reports[/\\]"),
 ]
 
+# ---------------------------------------------------------------------------
+# Bash navigation boundary patterns (used only when _RUN_WORKTREE is set)
+# Matches explicit path-changing forms; simple relative paths are not checked.
+# ---------------------------------------------------------------------------
+
+# cd <path> — captures the path argument after cd
+_CD_PATH_RE = re.compile(r'\bcd\s+([^\s;&|><\n]+)')
+# git -C <path> — captures path after -C flag
+_GIT_C_PATH_RE = re.compile(r'\bgit\b[^|;&\n]*\s-C\s+([^\s;&|><\n]+)')
+# git --work-tree <path> — space form
+_GIT_WT_SPACE_RE = re.compile(r'\bgit\b[^|;&\n]*--work-tree\s+([^\s;&|><\n]+)')
+# git --work-tree=<path> — equals form
+_GIT_WT_EQ_RE = re.compile(r'\bgit\b[^|;&\n]*--work-tree=([^\s;&|><\n]+)')
+
 # Fixed deny messages — must NOT echo user-supplied data
 _DENY_BASH_MSG = (
     "DevFlow guard: destructive or unsafe shell operation blocked by policy."
@@ -86,6 +121,12 @@ _DENY_PATH_MSG = (
 )
 _DENY_VALIDATION_MSG = (
     "DevFlow guard: hook input validation failed; tool call blocked by policy."
+)
+_DENY_BOUNDARY_MSG = (
+    "DevFlow guard: write or edit outside the managed run worktree is blocked by policy."
+)
+_DENY_BASH_BOUNDARY_MSG = (
+    "DevFlow guard: shell navigation outside the managed run worktree is blocked by policy."
 )
 
 
@@ -100,6 +141,72 @@ def _check_path(path: str) -> Optional[str]:
     for pattern in _PATH_BLOCK_PATTERNS:
         if pattern.search(path):
             return _DENY_PATH_MSG
+    return None
+
+
+def _strip_shell_quotes(s: str) -> str:
+    """Strip surrounding single or double quotes from a shell argument."""
+    if len(s) >= 2 and ((s[0] == '"' and s[-1] == '"') or (s[0] == "'" and s[-1] == "'")):
+        return s[1:-1]
+    return s
+
+
+def _expand_run_worktree_var(s: str, run_worktree: Path) -> str:
+    """Replace $DEVFLOW_RUN_WORKTREE with the actual run worktree path string."""
+    return s.replace("$DEVFLOW_RUN_WORKTREE", str(run_worktree))
+
+
+def _check_path_boundary(file_path: str, run_worktree: Path) -> Optional[str]:
+    """
+    Return a deny message if file_path resolves outside run_worktree.
+
+    Handles absolute external paths, ../ traversal, and symlink escape via
+    Path.resolve() which follows symlinks. Empty paths are not checked.
+    """
+    if not file_path:
+        return None
+    try:
+        resolved = Path(file_path).resolve()
+        try:
+            resolved.relative_to(run_worktree)
+        except ValueError:
+            return _DENY_BOUNDARY_MSG
+    except Exception:
+        pass  # Unresolvable path — don't block
+    return None
+
+
+def _check_bash_boundary(command: str, run_worktree: Path) -> Optional[str]:
+    """
+    Return a deny message if the command attempts to navigate outside
+    run_worktree via cd, git -C, or git --work-tree.
+
+    Only absolute paths and paths containing '..' are checked; simple relative
+    paths (no '..' and not absolute) are skipped because their effective CWD
+    is unknown at hook-call time. $DEVFLOW_RUN_WORKTREE is expanded before
+    the check so that cd "$DEVFLOW_RUN_WORKTREE" is always allowed.
+
+    This is best-effort defense in depth — not an OS-level sandbox.
+    """
+    nav_patterns = [_CD_PATH_RE, _GIT_C_PATH_RE, _GIT_WT_SPACE_RE, _GIT_WT_EQ_RE]
+    for pattern in nav_patterns:
+        for m in pattern.finditer(command):
+            raw = _strip_shell_quotes(m.group(1))
+            raw = _expand_run_worktree_var(raw, run_worktree)
+            # Skip unresolvable shell variables
+            if raw.startswith("$") or "${" in raw:
+                continue
+            path_obj = Path(raw)
+            # Only check absolute paths or paths with explicit ../ traversal
+            if not path_obj.is_absolute() and ".." not in raw:
+                continue
+            try:
+                resolved = path_obj.resolve()
+                resolved.relative_to(run_worktree)
+            except ValueError:
+                return _DENY_BASH_BOUNDARY_MSG
+            except Exception:
+                pass
     return None
 
 
@@ -143,6 +250,11 @@ def main() -> None:
         if reason:
             print(reason, file=sys.stderr)
             sys.exit(2)
+        if _RUN_WORKTREE is not None:
+            reason = _check_bash_boundary(command, _RUN_WORKTREE)
+            if reason:
+                print(reason, file=sys.stderr)
+                sys.exit(2)
 
     elif tool_name in ("Write", "Edit"):
         file_path = tool_input.get("file_path")
@@ -153,6 +265,11 @@ def main() -> None:
         if reason:
             print(reason, file=sys.stderr)
             sys.exit(2)
+        if _RUN_WORKTREE is not None:
+            reason = _check_path_boundary(file_path, _RUN_WORKTREE)
+            if reason:
+                print(reason, file=sys.stderr)
+                sys.exit(2)
 
     sys.exit(0)
 
