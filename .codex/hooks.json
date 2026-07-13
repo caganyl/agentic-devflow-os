@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|bash|apply_patch|Edit|Write)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ \"${DEVFLOW_CODEX_GUARD_REQUIRED:-}\" != \"1\" ]; then exit 0; fi; denial='DevFlow guard: hook bootstrap failed; tool call blocked by policy.'; root=\"$(git rev-parse --show-toplevel 2>/dev/null)\" || { printf '%s\\n' \"$denial\" >&2; exit 2; }; adapter=\"$root/scripts/devflow_codex_target_guard.py\"; if [ ! -f \"$adapter\" ]; then printf '%s\\n' \"$denial\" >&2; exit 2; fi; exec /usr/bin/env python3 \"$adapter\"",
+            "timeout": 10,
+            "statusMessage": "Checking DevFlow target policy"
+          }
+        ]
+      }
+    ]
+  }
+}
