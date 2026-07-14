@@ -33,7 +33,10 @@ FORBIDDEN_GIT_MODES = {
 }
 
 GOVERNANCE_ALLOWED_PREFIXES = (
+    ".agents/plugins/",
+    ".agents/skills/",
     ".claude/",
+    ".codex/agents/",
     ".github/",
     "docs/",
     "scripts/",
@@ -45,6 +48,8 @@ GOVERNANCE_ALLOWED_PREFIXES = (
 GOVERNANCE_ALLOWED_EXACT_PATHS = frozenset(
     {
         ".gitignore",
+        ".codex/config.toml",
+        ".codex/hooks.json",
         "README.md",
         "PROJECT_CONSTITUTION.md",
         "CLAUDE.md",

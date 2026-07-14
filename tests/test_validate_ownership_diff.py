@@ -793,6 +793,64 @@ class OwnershipDiffTestCase(unittest.TestCase):
 
         self._assert_rejected(result)
 
+    # -- Codex control-plane narrow governance allowance tests -----------
+
+    def test_governance_branch_codex_control_plane_paths_succeed(self):
+        base_sha = self._write_base_fixture()
+        self._checkout_branch("governance-allow-codex-control-plane")
+
+        self._write(".agents/plugins/marketplace.json", "{}\n")
+        self._write(
+            ".agents/skills/example-skill/SKILL.md",
+            "---\nname: example-skill\ndescription: Example skill.\n---\n",
+        )
+        self._write(
+            ".codex/agents/example_agent.toml",
+            'name = "example-agent"\n',
+        )
+        self._write(".codex/config.toml", 'model = "example"\n')
+        self._write(".codex/hooks.json", '{"hooks": {}}\n')
+
+        head_sha = self._commit("add Codex control-plane files")
+
+        result = self._run_validator(
+            base_sha,
+            head_sha,
+            "governance-allow-codex-control-plane",
+        )
+
+        self._assert_allowed(result)
+
+    def test_governance_branch_unrelated_agents_path_rejected(self):
+        base_sha = self._write_base_fixture()
+        self._checkout_branch("governance-allow-codex-control-plane")
+        self._write(".agents/runtime/state.json", "{}\n")
+        head_sha = self._commit("add unrelated agents runtime file")
+
+        result = self._run_validator(
+            base_sha,
+            head_sha,
+            "governance-allow-codex-control-plane",
+        )
+
+        self._assert_rejected(result)
+        self.assertIn(".agents/runtime/state.json", result.stderr)
+
+    def test_governance_branch_unrelated_codex_path_rejected(self):
+        base_sha = self._write_base_fixture()
+        self._checkout_branch("governance-allow-codex-control-plane")
+        self._write(".codex/runtime-state.json", "{}\n")
+        head_sha = self._commit("add unrelated Codex runtime file")
+
+        result = self._run_validator(
+            base_sha,
+            head_sha,
+            "governance-allow-codex-control-plane",
+        )
+
+        self._assert_rejected(result)
+        self.assertIn(".codex/runtime-state.json", result.stderr)
+
     # -- hooks/hooks.json narrow governance allowance tests ---------------
 
     def test_governance_branch_hooks_json_change_succeeds(self):
