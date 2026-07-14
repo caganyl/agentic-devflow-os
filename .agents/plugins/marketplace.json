@@ -1,0 +1,20 @@
+{
+  "name": "agentic-devflow-local",
+  "interface": {
+    "displayName": "Agentic DevFlow Local"
+  },
+  "plugins": [
+    {
+      "name": "codex-devflow",
+      "source": {
+        "source": "local",
+        "path": "./dist/codex-devflow-plugin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
