@@ -46,10 +46,14 @@ if _raw_run_worktree:
 # ---------------------------------------------------------------------------
 
 _BASH_BLOCK_PATTERNS = [
-    # git merge (direct)
-    re.compile(r"\bgit\s+merge\b"),
+    # git merge (direct). (?![-\w]) instead of \b: a trailing \b also matches
+    # before a hyphen, so `git merge-base` — a read-only ancestry query, along
+    # with `git merge-tree` and `git merge-file` — was refused as if it were a
+    # merge. The lookahead keeps `git merge` blocked and lets the hyphenated
+    # plumbing commands through.
+    re.compile(r"\bgit\s+merge(?![-\w])"),
     # git merge via global flags (e.g. git -C /path merge, git -c k=v merge)
-    re.compile(r"\bgit\s+(?:-[^\s]+\s+\S+\s+)+merge\b"),
+    re.compile(r"\bgit\s+(?:-[^\s]+\s+\S+\s+)+merge(?![-\w])"),
     # git push with any force variant (flag anywhere after 'push')
     re.compile(r"\bgit\s+push\b[^|;&\n]*(?:--force-with-lease\b|--force\b|\s-f\b)"),
     # git branch delete (short: -d/-D; long: --delete)

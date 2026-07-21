@@ -268,5 +268,37 @@ class CodexTargetGuardTest(unittest.TestCase):
         })
 
 
+class SharedCoreMergePatternTest(unittest.TestCase):
+    """devflow_guard_core feeds this guard, so its blocklist is tested here.
+
+    `git merge-base` / `merge-tree` / `merge-file` are read-only plumbing and
+    must pass; a real merge must not.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+
+        core = REPO_ROOT / "scripts" / "devflow_guard_core.py"
+        spec = importlib.util.spec_from_file_location("devflow_guard_core", core)
+        cls.core = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.core)
+
+    def test_real_merge_is_refused(self):
+        for command in ("git merge feature/x", "git merge --no-ff x",
+                        "git merge", "git -C /repo merge x"):
+            with self.subTest(command=command):
+                self.assertIsNotNone(self.core.dangerous_command_reason(command))
+
+    def test_merge_plumbing_is_allowed(self):
+        for command in ("git merge-base --is-ancestor abc origin/main",
+                        "git merge-base main HEAD",
+                        "git merge-tree base b1 b2",
+                        "git merge-file cur.py base.py other.py",
+                        "git -C /repo merge-base main HEAD"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.core.dangerous_command_reason(command))
+
+
 if __name__ == "__main__":
     unittest.main()
