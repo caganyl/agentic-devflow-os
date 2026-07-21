@@ -62,6 +62,14 @@ IMPORTANT — validate_forbidden_git_operation:
     commands in delivery workflows, not to enforce at the OS level.
 """
 
+# PEP 563: keep annotations as strings instead of evaluating them at import.
+# Without this, `list[dict] | None` and `str | None` below are evaluated on
+# import and raise TypeError on Python 3.9 — the interpreter macOS ships as
+# /usr/bin/python3 — so `python3 scripts/devflow_operations.py` aborted before
+# argparse ever ran. The hooks stayed unaffected (they use typing.Optional),
+# which is why this only ever broke the operations runner.
+from __future__ import annotations
+
 import argparse
 import json
 import os

@@ -5,6 +5,7 @@ Tests for DevFlow OS file structure:
 - Delivery Lead task routing covers all task types
 """
 
+import ast
 import re
 import unittest
 from pathlib import Path
@@ -299,6 +300,61 @@ class DeliveryLeadAgentTest(unittest.TestCase):
             self.content,
             "delivery-lead.md missing human approval section",
         )
+
+
+class ScriptPythonCompatibilityTest(unittest.TestCase):
+    """Scripts must import on the Python the operator actually has.
+
+    macOS ships 3.9 as /usr/bin/python3, and the docs tell people to run these
+    with a bare `python3`. PEP 604 unions (`str | None`) in an annotation are
+    evaluated at import time there and raise TypeError before argparse runs —
+    which is exactly how devflow_operations.py became unrunnable while its
+    tests, executed under a newer interpreter, stayed green.
+
+    `from __future__ import annotations` defers annotation evaluation, so a
+    script may use the modern syntax as long as it opts in. Quoted annotations
+    ("Path | None") are already strings and are correctly ignored here.
+    """
+
+    @staticmethod
+    def _annotations_of(tree):
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AnnAssign) and node.annotation:
+                yield node.annotation
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.returns:
+                    yield node.returns
+                args = node.args
+                for arg in (list(args.posonlyargs) + list(args.args)
+                            + list(args.kwonlyargs)
+                            + [a for a in (args.vararg, args.kwarg) if a]):
+                    if arg.annotation:
+                        yield arg.annotation
+
+    def test_pep604_annotations_require_future_import(self):
+        scripts = sorted((REPO_ROOT / "scripts").glob("*.py"))
+        self.assertTrue(scripts, "no scripts found to check")
+        for path in scripts:
+            with self.subTest(script=path.name):
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+                has_future = any(
+                    isinstance(node, ast.ImportFrom)
+                    and node.module == "__future__"
+                    and any(alias.name == "annotations" for alias in node.names)
+                    for node in tree.body
+                )
+                uses_pep604 = any(
+                    isinstance(sub, ast.BinOp) and isinstance(sub.op, ast.BitOr)
+                    for annotation in self._annotations_of(tree)
+                    for sub in ast.walk(annotation)
+                )
+                if uses_pep604:
+                    self.assertTrue(
+                        has_future,
+                        f"{path.name} uses `X | Y` annotations but lacks "
+                        "`from __future__ import annotations`; it will fail to "
+                        "import on Python 3.9 (/usr/bin/python3 on macOS).",
+                    )
 
 
 class GitignoreTest(unittest.TestCase):
