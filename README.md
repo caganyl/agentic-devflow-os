@@ -7,6 +7,9 @@ Claude Code merkezli, evidence-driven ve güvenlik odaklı AI yazılım gelişti
 Bu repository; farklı projelerde tekrar kullanılacak Claude Code kuralları, agent rolleri,
 skill'ler, hook'lar, kalite kapıları, handoff şablonları ve proje yönetim standartlarını içerir.
 
+Sistemin nasıl çalıştığı, hangi parçalardan oluştuğu ve bilinen sınırları için:
+**[docs/SYSTEM_OVERVIEW.md](docs/SYSTEM_OVERVIEW.md)**
+
 ## Temel İlkeler
 
 - Git repository, projenin teknik gerçek kaynağıdır.
