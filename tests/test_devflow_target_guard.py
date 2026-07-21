@@ -114,6 +114,14 @@ class ForbiddenBashTest(unittest.TestCase):
     def test_git_merge_with_flags_blocked(self):
         self._assert_blocked("git merge --no-ff feature/abc")
 
+    # Narrowing the pattern so `merge-base` passes must not open a hole for a
+    # bare merge (nothing follows `merge`) or one buried mid-command.
+    def test_git_merge_bare_blocked(self):
+        self._assert_blocked("git merge")
+
+    def test_git_merge_after_cd_blocked(self):
+        self._assert_blocked("cd /tmp/repo && git merge origin/main")
+
     def test_git_push_force_blocked(self):
         self._assert_blocked("git push --force origin main")
 
@@ -246,6 +254,24 @@ class SafeBashTest(unittest.TestCase):
 
     def test_git_restore_specific_file_allowed(self):
         self._assert_allowed("git restore src/some_file.py")
+
+    # `git merge-base` and friends are read-only plumbing: they compute
+    # ancestry or diff trees and mutate nothing. They were refused because the
+    # blocklist ended `merge` with \b, which also matches before a hyphen.
+    def test_git_merge_base_allowed(self):
+        self._assert_allowed("git merge-base --is-ancestor abc123 origin/main")
+
+    def test_git_merge_base_plain_allowed(self):
+        self._assert_allowed("git merge-base main HEAD")
+
+    def test_git_merge_tree_allowed(self):
+        self._assert_allowed("git merge-tree base branch1 branch2")
+
+    def test_git_merge_file_allowed(self):
+        self._assert_allowed("git merge-file current.py base.py other.py")
+
+    def test_git_c_merge_base_allowed(self):
+        self._assert_allowed("git -C /some/repo merge-base main HEAD")
 
 
 # ---------------------------------------------------------------------------

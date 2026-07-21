@@ -36,9 +36,14 @@ class PatchValidationError(ValueError):
     """Raised when apply_patch input cannot be interpreted unambiguously."""
 
 
+# `merge` is followed by (?![-\w]) rather than \b: a trailing \b also matches
+# before a hyphen, so `git merge-base` — a read-only ancestry query, along with
+# `git merge-tree` and `git merge-file` — was refused as if it were a merge.
+# The lookahead keeps `git merge` and `git merge --no-ff` blocked while letting
+# the hyphenated plumbing commands through.
 _DANGEROUS_COMMAND_PATTERNS = (
-    re.compile(r"\bgit\s+merge\b"),
-    re.compile(r"\bgit\s+(?:-[^\s]+\s+\S+\s+)+merge\b"),
+    re.compile(r"\bgit\s+merge(?![-\w])"),
+    re.compile(r"\bgit\s+(?:-[^\s]+\s+\S+\s+)+merge(?![-\w])"),
     re.compile(r"\bgit\s+push\b[^|;&\n]*(?:--force-with-lease\b|--force\b|\s-f\b)"),
     re.compile(r"\bgit\b[^|;&\n]*?\bpush\b[^|;&\n]*(?:--force-with-lease\b|--force\b|\s-f\b)"),
     re.compile(r"\bgit\s+branch\b[^|;&\n]*(?:--delete|-[dD])\b"),
