@@ -1,8 +1,9 @@
 # ADR-008: Run-Scoped Ownership Binding for Work-Product Evidence
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-26
-- **Owner:** Human maintainer (acceptance pending)
+- **Acceptance Date:** 2026-07-26
+- **Owner:** Human maintainer
 - **Related controls:** AGENT_CAPABILITY_MATRIX.md,
   ADR-002-task-ownership-manifest.md,
   ADR-003-ownership-runtime-enforcement.md,
