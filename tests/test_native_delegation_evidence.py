@@ -14,6 +14,12 @@ Required test coverage (10 areas):
 10. Existing target guard, plugin build, and full test suite pass (run externally)
 """
 
+# PEP 563: without this, the `list | None` annotations below are evaluated at
+# def-time and raise TypeError on Python 3.9 — the interpreter macOS ships as
+# /usr/bin/python3 — which silently dropped this entire module from
+# `unittest discover` while CI (3.12) stayed green.
+from __future__ import annotations
+
 import importlib.util
 import json
 import os
@@ -1054,15 +1060,34 @@ class HumanApprovalGateSemanticTest(unittest.TestCase):
             "execution_mode": "subagents", "agent_teams_requested": False,
             "tasks": self._completed_tasks(),
             "approval_gates": self._auto_gates_passed(human),
+            # Measured QA, not asserted counts — otherwise the run is held at
+            # "unverified_evidence" and these human-gate assertions never get
+            # to exercise what they are about.
+            "qa_evidence": {"source": "executed", "qa_passed": True, "exit_code": 0},
         }
+
+    def _observed_delegation(self) -> list:
+        """A SubagentStart event, so the run counts as actually delegated."""
+        return [{
+            "hook_event": "SubagentStart",
+            "lifecycle_state": "started",
+            "run_id": "RUN-001",
+            "agent_type": "backend-engineer",
+        }]
 
     # Test 5: human approval false
     def test_human_approval_false_merge_recommendation_awaiting(self):
-        report = self.mod.build_run_report(self._run_data(human=False), "RUN-001")
+        report = self.mod.build_run_report(
+            self._run_data(human=False), "RUN-001",
+            delegation_events=self._observed_delegation(),
+        )
         self.assertEqual(report["merge_recommendation"], "awaiting_human_approval")
 
     def test_human_approval_false_status_awaiting(self):
-        report = self.mod.build_run_report(self._run_data(human=False), "RUN-001")
+        report = self.mod.build_run_report(
+            self._run_data(human=False), "RUN-001",
+            delegation_events=self._observed_delegation(),
+        )
         self.assertEqual(report["status"], "awaiting_human_approval")
 
     def test_human_approval_false_technical_readiness_ready(self):
@@ -1072,12 +1097,28 @@ class HumanApprovalGateSemanticTest(unittest.TestCase):
 
     # Test 6: human approval true
     def test_human_approval_true_merge_recommendation_ready_for_human_merge(self):
-        report = self.mod.build_run_report(self._run_data(human=True), "RUN-001")
+        report = self.mod.build_run_report(
+            self._run_data(human=True), "RUN-001",
+            delegation_events=self._observed_delegation(),
+        )
         self.assertEqual(report["merge_recommendation"], "ready_for_human_merge")
 
     def test_human_approval_true_status_ready_for_human_merge(self):
-        report = self.mod.build_run_report(self._run_data(human=True), "RUN-001")
+        report = self.mod.build_run_report(
+            self._run_data(human=True), "RUN-001",
+            delegation_events=self._observed_delegation(),
+        )
         self.assertEqual(report["status"], "ready_for_human_merge")
+
+    def test_unobserved_delegation_holds_recommendation(self):
+        """The gap this exists to close: every auto gate green, no agent ever ran."""
+        report = self.mod.build_run_report(self._run_data(human=True), "RUN-001")
+        self.assertEqual(report["technical_readiness"], "ready")
+        self.assertEqual(report["merge_recommendation"], "unverified_evidence")
+        self.assertIn(
+            "delegation_unobserved",
+            report["evidence_verification"]["unverified_reasons"],
+        )
 
     def test_merge_recommendation_never_plain_ready(self):
         # "ready" must not appear as merge_recommendation (replaced by ready_for_human_merge)

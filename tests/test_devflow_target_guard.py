@@ -11,6 +11,12 @@ Covers:
 13. Guard blocks equivalent destructive command variants (force-with-lease, --delete, -C merge, rm -fr, etc.).
 """
 
+# PEP 563: without this, the `dict | None` annotations below are evaluated at
+# def-time and raise TypeError on Python 3.9 — the interpreter macOS ships as
+# /usr/bin/python3 — which silently dropped this entire module from
+# `unittest discover` while CI (3.12) stayed green.
+from __future__ import annotations
+
 import importlib.util
 import json
 import os
@@ -187,6 +193,47 @@ class ForbiddenBashTest(unittest.TestCase):
     def test_rm_long_force_recursive_blocked(self):
         self._assert_blocked("rm --force --recursive /tmp/example")
 
+    # --- Destructive git subcommands behind global flags ---
+    #
+    # `git -C <path> <sub>` was allowed by every pattern except merge: the
+    # subcommand had to follow `git` immediately. When <path> is the managed
+    # run worktree the boundary check passes too, so these commands destroyed
+    # the run's own work while satisfying both halves of the guard.
+
+    def test_git_c_reset_hard_blocked(self):
+        self._assert_blocked("git -C /some/repo reset --hard HEAD~5")
+
+    def test_git_c_push_force_blocked(self):
+        self._assert_blocked("git -C /some/repo push --force origin main")
+
+    def test_git_c_branch_delete_blocked(self):
+        self._assert_blocked("git -C /some/repo branch -D devflow/run-run-001")
+
+    def test_git_config_flag_reset_hard_blocked(self):
+        self._assert_blocked("git -c core.pager=cat reset --hard")
+
+    # --- git clean force in non-trailing flag position ---
+
+    def test_git_clean_fd_blocked(self):
+        self._assert_blocked("git clean -fd")
+
+    def test_git_clean_split_flags_blocked(self):
+        self._assert_blocked("git clean -d -f")
+
+    def test_git_clean_ffdx_blocked(self):
+        self._assert_blocked("git clean -ffdx")
+
+    def test_git_clean_long_force_blocked(self):
+        self._assert_blocked("git clean --force")
+
+    # --- rm recursive+force as separate arguments ---
+
+    def test_rm_split_short_flags_blocked(self):
+        self._assert_blocked("rm -r -f /tmp/example")
+
+    def test_rm_mixed_notation_blocked(self):
+        self._assert_blocked("rm -r --force /tmp/example")
+
 
 # ---------------------------------------------------------------------------
 # Test 8: Allowed Bash — safe Git commands and test commands
@@ -260,6 +307,31 @@ class SafeBashTest(unittest.TestCase):
     # blocklist ended `merge` with \b, which also matches before a hyphen.
     def test_git_merge_base_allowed(self):
         self._assert_allowed("git merge-base --is-ancestor abc123 origin/main")
+
+    # --- Non-destructive neighbours of the newly widened patterns ---
+    # These lock in that broadening the git/rm rules did not start refusing
+    # read-only or single-flag forms.
+
+    def test_git_clean_dry_run_allowed(self):
+        self._assert_allowed("git clean -n")
+
+    def test_git_clean_dry_run_with_dirs_allowed(self):
+        self._assert_allowed("git clean -nd")
+
+    def test_git_c_status_allowed(self):
+        self._assert_allowed("git -C /some/repo status")
+
+    def test_git_c_log_allowed(self):
+        self._assert_allowed("git -C /some/repo log --oneline -5")
+
+    def test_git_reset_without_mode_flag_allowed(self):
+        self._assert_allowed("git reset HEAD~1 -- src/api.py")
+
+    def test_rm_force_single_file_allowed(self):
+        self._assert_allowed("rm -f /tmp/somefile.txt")
+
+    def test_rm_interactive_verbose_allowed(self):
+        self._assert_allowed("rm -iv /tmp/somefile.txt")
 
     def test_git_merge_base_plain_allowed(self):
         self._assert_allowed("git merge-base main HEAD")

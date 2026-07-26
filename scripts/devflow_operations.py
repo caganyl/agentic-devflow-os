@@ -71,9 +71,13 @@ IMPORTANT — validate_forbidden_git_operation:
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -262,7 +266,10 @@ _OBJECTIVE_POSITIVE_PHRASES: list[tuple[str, str]] = [
 #
 # Applicability is written to canonical run state by generate-task-graph and
 # MUST NOT be changed by finalization or free-form JSON writes.  The target
-# guard blocks direct Write/Edit to .devflow/runs/ and .devflow/reports/.
+# guard blocks direct Write/Edit to .devflow/runs/ and .devflow/reports/, and
+# run state carries an HMAC (see "Run state integrity") so writes that reach
+# the file by a path the guard cannot see — a shell redirect, tee, an editor —
+# fail verification instead of silently satisfying a gate.
 # ---------------------------------------------------------------------------
 
 # Delivery types whose task template always includes a security_review task.
@@ -363,6 +370,8 @@ CONTRACT_GATE_BLOCKED_STATUSES = frozenset({"in_progress", "completed", "verifie
 # ---------------------------------------------------------------------------
 
 WORK_PRODUCT_GATE_EXIT_CODE = 19
+# QA evidence must be measured, not asserted (see cmd_record_qa_evidence).
+QA_EVIDENCE_EXIT_CODE = 21
 
 # Task types that require verifiable work-product evidence before completion.
 WORK_PRODUCT_REQUIRED_TASK_TYPES = frozenset({"implementation", "qa"})
@@ -717,6 +726,142 @@ def atomic_write_json(path: Path, data: dict) -> None:
 
 def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# Run state integrity (HMAC-SHA256)
+#
+# Every approval gate in this file reads its decision inputs out of
+# .devflow/runs/<run-id>.json.  The target guard blocks Write/Edit to that
+# directory, but a guard cannot see a shell redirect: `echo '{...}' >
+# .devflow/runs/run-001.json` reached the same file and could flip
+# approval_gates or work_product_evidence without ever calling this CLI.  The
+# gates then read forged input and passed.
+#
+# Signing moves the trust from "the guard blocked every write path" — which no
+# tool-call guard can guarantee — to "the state carries a MAC only this CLI
+# produces".  State written by any other means fails verification regardless of
+# which write path produced it.
+#
+# SCOPE: this is tamper *evidence*, not tamper *proofing*.  The key is a local
+# file readable by any process running as this user, so an adversary with shell
+# and intent can read it and re-sign.  What it does stop is the realistic
+# failure mode — an agent shortcutting the CLI and writing state directly, a
+# hand edit, or a stale file — by making those states fail closed instead of
+# silently satisfying a gate.
+# ---------------------------------------------------------------------------
+
+RUN_STATE_SIGNATURE_FIELD = "_signature"
+RUN_STATE_SIGNATURE_ALG = "HMAC-SHA256"
+STATE_INTEGRITY_EXIT_CODE = 20
+
+
+STATE_KEY_REL_PATH = ".devflow/cache/state-signing.key"
+
+
+def state_key_path(target: Path) -> Path:
+    """Return the signing key file for a target.
+
+    Lives under .devflow/cache/, which is already gitignored, so the key is
+    never committed and is per-worktree: state signed in one run worktree does
+    not verify in another.  The target guard blocks Write/Edit to this path, so
+    the tool-call surface cannot re-key a run.
+    """
+    override = os.environ.get("DEVFLOW_STATE_KEY_FILE")
+    if override:
+        return Path(override).expanduser()
+    return target / ".devflow" / "cache" / "state-signing.key"
+
+
+def load_or_create_state_key(target: Path) -> bytes:
+    """Return the per-target signing key, creating it 0600 on first use."""
+    path = state_key_path(target)
+    if path.exists():
+        try:
+            return bytes.fromhex(path.read_text(encoding="utf-8").strip())
+        except ValueError:
+            print(
+                f"Hata: State imza anahtarı okunamadı (bozuk içerik): {path}",
+                file=sys.stderr,
+            )
+            sys.exit(STATE_INTEGRITY_EXIT_CODE)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key = secrets.token_bytes(32)
+    try:
+        # O_EXCL + 0600 so the key is never briefly world-readable and a
+        # concurrent creator cannot be clobbered.
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return bytes.fromhex(path.read_text(encoding="utf-8").strip())
+    with os.fdopen(fd, "w") as handle:
+        handle.write(key.hex())
+    return key
+
+
+def canonical_state_bytes(data: dict) -> bytes:
+    """Serialize state deterministically, excluding the signature field itself."""
+    payload = {k: v for k, v in data.items() if k != RUN_STATE_SIGNATURE_FIELD}
+    return json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+
+
+def sign_run_state(data: dict, key: bytes) -> dict:
+    """Return a copy of data carrying a fresh signature field."""
+    signed = {k: v for k, v in data.items() if k != RUN_STATE_SIGNATURE_FIELD}
+    signed[RUN_STATE_SIGNATURE_FIELD] = {
+        "alg": RUN_STATE_SIGNATURE_ALG,
+        "value": hmac.new(
+            key, canonical_state_bytes(signed), hashlib.sha256
+        ).hexdigest(),
+    }
+    return signed
+
+
+def verify_run_state(data: dict, key: bytes) -> bool:
+    """Return whether data carries a valid signature for key."""
+    signature = data.get(RUN_STATE_SIGNATURE_FIELD)
+    if not isinstance(signature, dict):
+        return False
+    if signature.get("alg") != RUN_STATE_SIGNATURE_ALG:
+        return False
+    value = signature.get("value")
+    if not isinstance(value, str):
+        return False
+    expected = hmac.new(key, canonical_state_bytes(data), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, value)
+
+
+def write_run_state(target: Path, path: Path, data: dict) -> None:
+    """Sign and atomically persist run state."""
+    atomic_write_json(path, sign_run_state(data, load_or_create_state_key(target)))
+
+
+def read_run_state(target: Path, path: Path) -> dict:
+    """Read run state, exiting if it was not produced by this CLI.
+
+    The signature field is stripped from the returned dict so downstream gate
+    logic and generated reports never see it.
+    """
+    data = read_json(path)
+    if not verify_run_state(data, load_or_create_state_key(target)):
+        print(
+            f"Hata: Run state bütünlük doğrulaması başarısız: {path}",
+            file=sys.stderr,
+        )
+        print(
+            "  Bu dosya bu CLI dışında yazılmış, elle düzenlenmiş veya başka bir "
+            "worktree'den kopyalanmış.",
+            file=sys.stderr,
+        )
+        print(
+            "  Approval gate'leri doğrulanmamış state üzerinden çalıştırılmaz.",
+            file=sys.stderr,
+        )
+        sys.exit(STATE_INTEGRITY_EXIT_CODE)
+    data.pop(RUN_STATE_SIGNATURE_FIELD, None)
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -1702,15 +1847,8 @@ def build_run_report(
     )
     technical_readiness = "ready" if auto_gates_pass else "not_ready"
 
-    if auto_gates_pass and human_done:
-        merge_recommendation = "ready_for_human_merge"
-        run_status = "ready_for_human_merge"
-    elif auto_gates_pass and not human_done:
-        merge_recommendation = "awaiting_human_approval"
-        run_status = "awaiting_human_approval"
-    else:
-        merge_recommendation = "not_ready"
-        run_status = "not_ready"
+    # merge_recommendation is computed after the delegation block below, because
+    # it now depends on whether delegation was actually observed.
 
     # ---------------------------------------------------------------------------
     # Delegation evidence: requested/configured vs observed distinction
@@ -1822,6 +1960,43 @@ def build_run_report(
         "native_delegation": "native_hook_event" if native_observed else "unavailable",
     }
 
+    # ---------------------------------------------------------------------------
+    # Evidence verification
+    #
+    # The auto gates above check that artifacts exist and that recorded results
+    # say "pass".  They cannot tell whether anyone actually did the work.  A run
+    # where no agent was ever dispatched and where QA counts were typed by hand
+    # satisfied every one of them and still reported "awaiting_human_approval" —
+    # the report said "delegation doğrulanmadı" and "ready" in the same breath.
+    #
+    # These reasons are reported separately from the gates and hold the
+    # recommendation at "unverified_evidence" so the distinction survives into
+    # the merge decision instead of living only in a note a human may skim.
+    # ---------------------------------------------------------------------------
+    _qa_evidence_meta = run_data.get("qa_evidence", {}) or {}
+    unverified_reasons = []
+    # Either a native lifecycle event was recorded, or a task was explicitly
+    # confirmed as delegated. Neither means no agent was shown to have run.
+    if not (native_observed or any_confirmed):
+        unverified_reasons.append("delegation_unobserved")
+    if qa_done and _qa_evidence_meta.get("source") != "executed":
+        unverified_reasons.append("qa_self_reported")
+
+    evidence_verified = not unverified_reasons
+
+    if not auto_gates_pass:
+        merge_recommendation = "not_ready"
+        run_status = "not_ready"
+    elif unverified_reasons:
+        merge_recommendation = "unverified_evidence"
+        run_status = "unverified_evidence"
+    elif human_done:
+        merge_recommendation = "ready_for_human_merge"
+        run_status = "ready_for_human_merge"
+    else:
+        merge_recommendation = "awaiting_human_approval"
+        run_status = "awaiting_human_approval"
+
     return {
         "schema_version": "1",
         "run_id": run_id,
@@ -1848,7 +2023,17 @@ def build_run_report(
         "pending_dependencies": pending_deps,
         "approval_gates": gates,
         "qa_result": "passed" if qa_done else "not_completed",
+        "qa_evidence_source": _qa_evidence_meta.get("source", "none"),
         "technical_readiness": technical_readiness,
+        "evidence_verification": {
+            "verified": evidence_verified,
+            "unverified_reasons": unverified_reasons,
+            "note": (
+                "Approval gate'leri artefakt varlığını doğrular. Bu alan işin "
+                "gerçekten yapıldığına dair kanıtın ölçülüp ölçülmediğini ayrı "
+                "olarak raporlar."
+            ),
+        },
         "status": run_status,
         "human_approval_required": [
             "main merge insan tarafından yapılmalıdır",
@@ -2093,7 +2278,7 @@ def cmd_create_run(args) -> int:
     runs_dir = devflow / "runs"
     runs_dir.mkdir(exist_ok=True)
     run_file = runs_dir / f"{run_id}.json"
-    atomic_write_json(run_file, run_state)
+    write_run_state(target, run_file, run_state)
 
     project_data["run_counter"] = run_counter
     project_data["current_run_id"] = run_id
@@ -2343,7 +2528,7 @@ def cmd_status(args) -> int:
     if run_id:
         run_file = devflow / "runs" / f"{run_id}.json"
         if run_file.exists():
-            run_data = read_json(run_file)
+            run_data = read_run_state(target, run_file)
             print(f"  run durumu: {run_data.get('status', '-')}")
             print(f"  branch: {run_data.get('branch_name', '-')}")
 
@@ -2370,7 +2555,7 @@ def cmd_prepare_delivery(args) -> int:
         sys.exit(4)
 
     run_file = devflow / "runs" / f"{run_id}.json"
-    run_data = read_json(run_file) if run_file.exists() else {}
+    run_data = read_run_state(target, run_file) if run_file.exists() else {}
 
     current_branch = get_current_branch(target)
 
@@ -2447,7 +2632,7 @@ def cmd_generate_task_graph(args) -> int:
         sys.exit(4)
 
     run_file = devflow / "runs" / f"{run_id}.json"
-    run_data = read_json(run_file)
+    run_data = read_run_state(target, run_file)
 
     force = getattr(args, "force", False)
     if run_data.get("tasks") and not force:
@@ -2528,7 +2713,7 @@ def cmd_generate_task_graph(args) -> int:
     run_data["contract_status"] = "pending" if _contract_required else "not_applicable"
     run_data["contract_gate_satisfied"] = not _contract_required
 
-    atomic_write_json(run_file, run_data)
+    write_run_state(target, run_file, run_data)
 
     print(f"Task graph oluşturuldu: {run_id} / {delivery_type}")
     print(f"  task sayısı: {len(tasks)}")
@@ -2569,7 +2754,7 @@ def cmd_update_task_status(args) -> int:
         sys.exit(4)
 
     run_file = devflow / "runs" / f"{run_id}.json"
-    run_data = read_json(run_file)
+    run_data = read_run_state(target, run_file)
 
     tasks = run_data.get("tasks", [])
     task = next((t for t in tasks if t["id"] == task_id), None)
@@ -2617,7 +2802,7 @@ def cmd_update_task_status(args) -> int:
                 sys.exit(15)
 
     task["status"] = new_status
-    atomic_write_json(run_file, run_data)
+    write_run_state(target, run_file, run_data)
 
     print(f"Task durumu güncellendi: {task_id}")
     print(f"  {from_status} → {new_status}")
@@ -2634,6 +2819,42 @@ def cmd_record_qa_evidence(args) -> int:
     failed = args.failed
     exit_code_val = args.exit_code
     evidence_path = getattr(args, "evidence_path", None) or ""
+    test_command = getattr(args, "test_command", None)
+    allow_self_reported = getattr(args, "allow_self_reported", False)
+
+    # Counts alone are an assertion, not evidence: nothing here ever ran a test,
+    # so `--total 412 --passed 412` was accepted from a run where no test suite
+    # existed.  Either this CLI runs the suite and measures the exit code, or
+    # the caller states on the record that the numbers are self-reported.
+    if test_command and allow_self_reported:
+        print(
+            "Hata: --test-command ve --allow-self-reported birlikte kullanılamaz.",
+            file=sys.stderr,
+        )
+        sys.exit(QA_EVIDENCE_EXIT_CODE)
+
+    if not test_command and not allow_self_reported:
+        print(
+            "Hata: QA kanıtı ölçülmeden kaydedilemez.",
+            file=sys.stderr,
+        )
+        print(
+            "  Testleri bu CLI çalıştırsın:  --test-command 'pytest -q'",
+            file=sys.stderr,
+        )
+        print(
+            "  Ya da sayıların ölçülmediğini kayda geçirin: --allow-self-reported",
+            file=sys.stderr,
+        )
+        sys.exit(QA_EVIDENCE_EXIT_CODE)
+
+    if allow_self_reported and None in (total, passed, failed, exit_code_val):
+        print(
+            "Hata: --allow-self-reported ile --total, --passed, --failed ve "
+            "--exit-code zorunludur.",
+            file=sys.stderr,
+        )
+        sys.exit(QA_EVIDENCE_EXIT_CODE)
 
     if evidence_path:
         ep = Path(evidence_path)
@@ -2657,9 +2878,37 @@ def cmd_record_qa_evidence(args) -> int:
         sys.exit(4)
 
     run_file = devflow / "runs" / f"{run_id}.json"
-    run_data = read_json(run_file)
+    run_data = read_run_state(target, run_file)
 
-    qa_passed = (exit_code_val == 0 and failed == 0)
+    command_output_tail = ""
+    if test_command:
+        try:
+            argv = shlex.split(test_command)
+        except ValueError:
+            print("Hata: --test-command ayrıştırılamadı.", file=sys.stderr)
+            sys.exit(QA_EVIDENCE_EXIT_CODE)
+        if not argv:
+            print("Hata: --test-command boş olamaz.", file=sys.stderr)
+            sys.exit(QA_EVIDENCE_EXIT_CODE)
+
+        print(f"Test komutu çalıştırılıyor: {test_command}")
+        # No shell: the command is a test runner invocation, not shell script.
+        try:
+            completed = subprocess.run(
+                argv, cwd=str(target), capture_output=True, text=True
+            )
+        except (OSError, ValueError) as exc:
+            print(f"Hata: Test komutu çalıştırılamadı: {exc}", file=sys.stderr)
+            sys.exit(QA_EVIDENCE_EXIT_CODE)
+
+        exit_code_val = completed.returncode
+        combined = (completed.stdout or "") + (completed.stderr or "")
+        command_output_tail = "\n".join(combined.strip().splitlines()[-20:])
+        qa_evidence_source = "executed"
+        qa_passed = exit_code_val == 0
+    else:
+        qa_evidence_source = "self_reported"
+        qa_passed = (exit_code_val == 0 and failed == 0)
 
     run_data.setdefault("approval_gates", {})
     run_data["approval_gates"]["tests_passing"] = qa_passed
@@ -2667,19 +2916,31 @@ def cmd_record_qa_evidence(args) -> int:
 
     run_data["qa_evidence"] = {
         "recorded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "source": qa_evidence_source,
+        "test_command": test_command or "",
         "total": total,
         "passed": passed,
         "failed": failed,
         "exit_code": exit_code_val,
         "evidence_path": evidence_path,
         "qa_passed": qa_passed,
+        "command_output_tail": command_output_tail,
     }
 
-    atomic_write_json(run_file, run_data)
+    write_run_state(target, run_file, run_data)
 
     status_str = "GEÇTİ" if qa_passed else "BAŞARISIZ"
     print(f"QA kanıtı kaydedildi: {run_id} [{status_str}]")
-    print(f"  toplam: {total}, geçen: {passed}, başarısız: {failed}, exit code: {exit_code_val}")
+    print(f"  kanıt kaynağı: {qa_evidence_source}")
+    if test_command:
+        print(f"  komut: {test_command}")
+        print(f"  ölçülen exit code: {exit_code_val}")
+    else:
+        print(
+            f"  bildirilen: toplam {total}, geçen {passed}, başarısız {failed}, "
+            f"exit code {exit_code_val}"
+        )
+        print("  UYARI: Sayılar ölçülmedi. Run 'doğrulanmamış kanıt' sayılır.")
     print(f"  tests_passing: {qa_passed}")
     print(f"  qa_sign_off: {qa_passed}")
     if evidence_path:
@@ -2760,7 +3021,7 @@ def cmd_record_security_evidence(args) -> int:
         print(f"Hata: Run state dosyası bulunamadı: {run_file}", file=sys.stderr)
         sys.exit(4)
 
-    run_data = read_json(run_file)
+    run_data = read_run_state(target, run_file)
 
     # Reject if security review is not required for this run.
     # Default False so that runs without generate-task-graph are also rejected.
@@ -2797,7 +3058,7 @@ def cmd_record_security_evidence(args) -> int:
     run_data.setdefault("approval_gates", {})
     run_data["approval_gates"]["security_review_complete"] = security_gate_satisfied
 
-    atomic_write_json(run_file, run_data)
+    write_run_state(target, run_file, run_data)
 
     gate_str = "SAĞLANDI" if security_gate_satisfied else "BAŞARISIZ (blocked)"
     print(f"Security evidence kaydedildi: {run_id} [{gate_str}]")
@@ -2852,7 +3113,7 @@ def cmd_record_contract_evidence(args) -> int:
         print(f"Hata: Run state dosyası bulunamadı: {run_file}", file=sys.stderr)
         sys.exit(4)
 
-    run_data = read_json(run_file)
+    run_data = read_run_state(target, run_file)
 
     # Reject if contract gate is not required for this run.
     if not run_data.get("contract_required", False):
@@ -2912,7 +3173,7 @@ def cmd_record_contract_evidence(args) -> int:
     run_data.setdefault("approval_gates", {})
     run_data["approval_gates"]["contract_approved"] = True
 
-    atomic_write_json(run_file, run_data)
+    write_run_state(target, run_file, run_data)
 
     print(f"Contract evidence kaydedildi: {run_id} [TAMAMLANDI]")
     print(f"  evidence_path: {evidence_path}")
@@ -2973,7 +3234,7 @@ def cmd_record_work_product_evidence(args) -> int:
         print(f"Hata: Run state dosyası bulunamadı: {run_file}", file=sys.stderr)
         sys.exit(4)
 
-    run_data = read_json(run_file)
+    run_data = read_run_state(target, run_file)
 
     tasks = run_data.get("tasks", [])
     task = next((t for t in tasks if t["id"] == task_id), None)
@@ -3007,6 +3268,31 @@ def cmd_record_work_product_evidence(args) -> int:
         )
         sys.exit(WORK_PRODUCT_GATE_EXIT_CODE)
 
+    # One file cannot be the work product of two tasks.  Without this, a single
+    # src/api.py satisfied both the backend-engineer and the frontend-engineer
+    # implementation task — two roles, two acceptance decisions, one file that
+    # only one of them could plausibly have written.
+    existing_evidence = run_data.get("work_product_evidence", {})
+    normalized_evidence = evidence_path.replace("\\", "/")
+    for other_task_id, record in existing_evidence.items():
+        if other_task_id == task_id:
+            continue
+        if record.get("evidence_path", "").replace("\\", "/") != normalized_evidence:
+            continue
+        other_task = next((t for t in tasks if t["id"] == other_task_id), {})
+        print(
+            f"Hata: '{evidence_path}' zaten '{other_task_id}' "
+            f"({other_task.get('assigned_role', 'bilinmeyen rol')}) görevinin work-product "
+            "kanıtı. Aynı dosya iki görevin kanıtı olamaz.",
+            file=sys.stderr,
+        )
+        print(
+            f"  '{task_id}' ({task.get('assigned_role', 'bilinmeyen rol')}) için o görevin "
+            "kendi ürettiği dosyayı verin.",
+            file=sys.stderr,
+        )
+        sys.exit(WORK_PRODUCT_GATE_EXIT_CODE)
+
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     run_data.setdefault("work_product_evidence", {})[task_id] = {
@@ -3016,7 +3302,7 @@ def cmd_record_work_product_evidence(args) -> int:
         "git_change_verified_at_record_time": True,
     }
 
-    atomic_write_json(run_file, run_data)
+    write_run_state(target, run_file, run_data)
 
     print(f"Work-product kanıtı kaydedildi: {task_id} [{task_type.upper()}]")
     print(f"  run_id: {run_id}")
@@ -3050,7 +3336,7 @@ def cmd_generate_run_report(args) -> int:
         sys.exit(4)
 
     run_file = devflow / "runs" / f"{run_id}.json"
-    run_data = read_json(run_file)
+    run_data = read_run_state(target, run_file)
 
     raw_events, _delegation_status = load_delegation_events(devflow)
     # Filter to valid events (schema + run_id validation) before projecting.
@@ -3245,7 +3531,7 @@ def cmd_generate_run_report(args) -> int:
             existing_artifacts.append(art)
     run_data["artifacts"] = existing_artifacts
 
-    atomic_write_json(run_file, run_data)
+    write_run_state(target, run_file, run_data)
 
     summary = report["task_graph_summary"]
     delegation = report["delegation_evidence"]
@@ -3359,15 +3645,33 @@ def main() -> None:
         help="QA test sonuçlarını authoritative olarak kaydet ve approval gate'leri güncelle",
     )
     p_qa.add_argument("--target", required=True, help="Target project path")
-    p_qa.add_argument("--total", type=int, required=True, help="Toplam test sayısı")
-    p_qa.add_argument("--passed", type=int, required=True, help="Geçen test sayısı")
-    p_qa.add_argument("--failed", type=int, required=True, help="Başarısız test sayısı")
+    p_qa.add_argument(
+        "--test-command",
+        default=None,
+        dest="test_command",
+        help=(
+            "Çalıştırılacak test komutu (örn. 'pytest -q'). Verildiğinde exit "
+            "kodu bu CLI tarafından ölçülür; kanıt uydurulamaz."
+        ),
+    )
+    p_qa.add_argument("--total", type=int, default=None, help="Toplam test sayısı")
+    p_qa.add_argument("--passed", type=int, default=None, help="Geçen test sayısı")
+    p_qa.add_argument("--failed", type=int, default=None, help="Başarısız test sayısı")
     p_qa.add_argument(
         "--exit-code",
         type=int,
-        required=True,
+        default=None,
         dest="exit_code",
-        help="Test runner exit kodu (0 = başarılı)",
+        help="Test runner exit kodu (yalnızca --allow-self-reported ile)",
+    )
+    p_qa.add_argument(
+        "--allow-self-reported",
+        action="store_true",
+        dest="allow_self_reported",
+        help=(
+            "Testleri çalıştırmadan bildirilen sayıları kabul et. Kanıt "
+            "'self_reported' olarak işaretlenir ve run doğrulanmamış sayılır."
+        ),
     )
     p_qa.add_argument(
         "--evidence-path",
