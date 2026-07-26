@@ -164,6 +164,43 @@ class EnforceRoleBoundariesOwnershipTestCase(unittest.TestCase):
 
         self._assert_denied(result)
 
+    # --- Plugin-scoped agent_type normalization ---
+    # Per the Claude Code hook docs, a subagent loaded from a plugin reports a
+    # plugin-scoped agent_type (e.g. devflow-plugin:backend-engineer), which is
+    # exactly what `launch --plugin-dir` produces. The role matchers use bare
+    # names, so without stripping the scope every check silently no-matched and
+    # enforcement was bypassed for plugin-launched agents.
+
+    def test_plugin_scoped_backend_on_frontend_path_denied(self):
+        self._write_manifest(self._approved_manifest())
+
+        result = self._run_hook(
+            "devflow-plugin:backend-engineer",
+            "apps/web/src/features/auth/LoginForm.tsx",
+        )
+
+        self._assert_denied(result)
+
+    def test_plugin_scoped_frontend_owner_allowed(self):
+        self._write_manifest(self._approved_manifest())
+
+        result = self._run_hook(
+            "devflow-plugin:frontend-engineer",
+            "apps/web/src/features/auth/LoginForm.tsx",
+        )
+
+        self._assert_allowed(result)
+
+    def test_plugin_scoped_delivery_lead_denied(self):
+        # delivery-lead is planning-only: denied for any write regardless of
+        # branch/manifest, so it isolates the scope-stripping behavior.
+        result = self._run_hook(
+            "devflow-plugin:delivery-lead",
+            "docs/product/anything.md",
+        )
+
+        self._assert_denied(result)
+
     def test_draft_manifest_denied(self):
         manifest = self._approved_manifest()
         manifest["status"] = "draft"

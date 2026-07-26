@@ -16,6 +16,13 @@ fi
 
 TOOL_NAME="$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')"
 AGENT_TYPE="$(printf '%s' "$INPUT" | jq -r '.agent_type // empty')"
+
+# agent_type is plugin-scoped for plugin subagents (e.g.
+# devflow-plugin:backend-engineer), which is what `launch --plugin-dir`
+# produces. The role matchers below use bare names, so strip a leading
+# "<plugin>:" scope. Bare names carry no colon and are unaffected. Without
+# this, every role check silently no-matched for plugin-launched agents.
+AGENT_TYPE="${AGENT_TYPE##*:}"
 CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // empty')"
 
 if [ -z "$CWD" ]; then
