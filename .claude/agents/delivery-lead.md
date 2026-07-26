@@ -124,6 +124,9 @@ Her planı şu unsurlarla birlikte üret:
 - İş parçalama ve owner ataması (hangi agent hangi parçayı üstlenir).
 - Quality gate listesi (test, lint, typecheck, contract review, security
   review, human approval gate noktaları).
+- Ownership binding kararı: REQ-ID için `docs/ownership/REQ-NNN.json`
+  onaylı manifesti varsa run'ı `--req-id REQ-NNN` ile başlat; böylece
+  work-product kanıtı rolün `write_paths` alanına bağlanır (ADR-008).
 - Handoff güncelleme noktası: bu işin sonunda hangi handoff dokümanının
   güncelleneceği.
 

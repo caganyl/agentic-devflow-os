@@ -40,6 +40,13 @@ python3 "$DEVFLOW_OPERATIONS_SCRIPT" ... --target "$DEVFLOW_RUN_WORKTREE"
 - REQ-ID var mı? Yoksa Product Analyst devreye al.
 - Acceptance criteria tanımlı mı? Yoksa implementation başlatma.
 - Context pack hazır mı? Yoksa `project-context-synthesis` skill'ini çalıştır.
+- Ownership binding: REQ-ID için `docs/ownership/REQ-NNN.json` altında
+  **onaylı** (`status: approved`) bir manifest var mı? Varsa run'ı REQ'e
+  bağla — `create-run` (veya `launch`) çağrısına `--req-id REQ-NNN` ekle.
+  Böylece her implementer/QA görevinin work-product kanıtı, o rolün
+  manifestteki `write_paths` alanına bağlanır (bkz. ADR-008). Manifest yoksa
+  veya draft ise `--req-id` geçme; binding inert kalır ve mevcut coarse
+  kontroller geçerlidir.
 
 ### 3. Plan Üret
 

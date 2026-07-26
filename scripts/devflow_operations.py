@@ -1591,6 +1591,46 @@ def _path_under_write_path(evidence_path: str, write_path: str) -> bool:
     return target == owned or owned in target.parents
 
 
+def _ownership_binding_status(target: "Path | None", req_id: str) -> dict:
+    """Summarize whether run-scoped ownership binding is in effect (for reports).
+
+    Mirrors the applicability logic of authorize_work_product_ownership so a
+    human reading the run report can see whether work-product evidence was
+    actually bound to role write_paths, or the binding was inert (and why).
+    """
+    if not req_id:
+        return {"declared": False, "effective": False, "reason": "no_req_id"}
+    if target is None:
+        return {"declared": True, "effective": False, "reason": "manifest_uncheckable",
+                "req_id": req_id}
+
+    manifest_path = target / "docs" / "ownership" / f"{req_id}.json"
+    if not manifest_path.exists():
+        return {"declared": True, "effective": False, "reason": "manifest_missing",
+                "req_id": req_id}
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"declared": True, "effective": False, "reason": "manifest_unreadable",
+                "req_id": req_id}
+    if not isinstance(manifest, dict) or manifest.get("status") != "approved":
+        return {"declared": True, "effective": False, "reason": "manifest_not_approved",
+                "req_id": req_id}
+
+    governed = sorted({
+        o.get("agent") for o in (manifest.get("owners") or [])
+        if isinstance(o, dict) and o.get("agent") in OWNERSHIP_BINDABLE_ROLES
+    })
+    return {
+        "declared": True,
+        "effective": True,
+        "reason": "approved",
+        "req_id": req_id,
+        "manifest": f"docs/ownership/{req_id}.json",
+        "governed_roles": governed,
+    }
+
+
 def authorize_work_product_ownership(
     target: Path,
     req_id: str,
@@ -2105,6 +2145,10 @@ def build_run_report(
         "schema_version": "1",
         "run_id": run_id,
         "objective": run_data.get("objective", ""),
+        "req_id": run_data.get("req_id", ""),
+        "ownership_binding": _ownership_binding_status(
+            target, run_data.get("req_id", "")
+        ),
         "execution_mode": execution_mode,
         "agent_teams_requested": agent_teams_requested,
         "task_graph_summary": {
@@ -3611,6 +3655,12 @@ def cmd_generate_run_report(args) -> int:
         "## Work Product Gate",
     ] + wp_gate_lines + [
         "",
+        "## Ownership Binding",
+        f"- req_id: {report.get('req_id') or '(yok)'}",
+        f"- effective: {report.get('ownership_binding', {}).get('effective')}",
+        f"- reason: {report.get('ownership_binding', {}).get('reason')}",
+        f"- governed_roles: {report.get('ownership_binding', {}).get('governed_roles', [])}",
+        "",
         "## Delegation Evidence",
         f"- agent_teams_requested: {delegation.get('agent_teams_requested')}",
         f"- native_delegation_observed: {delegation.get('native_delegation_observed')}",
@@ -3670,6 +3720,10 @@ def cmd_generate_run_report(args) -> int:
           f"{summary['completed_or_verified']} tamamlandı, "
           f"{summary['verified']} doğrulandı")
     print(f"  qa_result: {report['qa_result']}")
+    _ob = report.get("ownership_binding", {})
+    if report.get("req_id"):
+        print(f"  ownership_binding: {_ob.get('reason')} "
+              f"(effective={_ob.get('effective')}, req_id={report['req_id']})")
     print(f"  delegation_evidence_status: {delegation['delegation_evidence_status']}")
     print(f"  native_delegation_observed: {delegation['native_delegation_observed']}")
     print(f"  agent_teams_requested: {delegation['agent_teams_requested']}")
