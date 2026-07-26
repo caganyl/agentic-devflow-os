@@ -4,6 +4,7 @@ Verifies that the build script produces the expected output structure.
 """
 
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -140,17 +141,42 @@ class PluginBuildOutputTest(unittest.TestCase):
             "scripts/devflow_target_guard.py must be in plugin output",
         )
 
-    def test_framework_hooks_not_copied(self):
+    def test_runtime_enforcement_hooks_shipped(self):
+        # Reversed invariant: the runtime enforcement shell hooks now ship so
+        # claude-devflow applies the same protection in any target project as
+        # the framework repo dogfoods on itself.
         for fname in [
             "enforce-role-boundaries.sh",
             "protect-main.sh",
             "protect-sensitive-paths.sh",
             "session-start.sh",
         ]:
-            self.assertFalse(
-                (self.plugin_dir / "hooks" / fname).exists(),
-                f"Framework hook script {fname} must NOT be in plugin output",
+            hook = self.plugin_dir / "hooks" / fname
+            self.assertTrue(
+                hook.exists(),
+                f"Runtime enforcement hook {fname} must be in plugin output",
             )
+            self.assertTrue(os.access(hook, os.X_OK), f"{fname} must be executable")
+
+    def test_ownership_validator_shipped(self):
+        # enforce-role-boundaries.sh resolves the validator from the plugin root,
+        # so it must ship for implementer authorization to work in a target.
+        validator = self.plugin_dir / "scripts" / "validate_ownership_manifest.py"
+        self.assertTrue(validator.exists(),
+                        "validate_ownership_manifest.py must be in plugin output")
+
+    def test_plugin_hooks_json_registers_enforcement_hooks(self):
+        hooks_json = json.loads(
+            (self.plugin_dir / "hooks" / "hooks.json").read_text(encoding="utf-8")
+        )
+        commands = json.dumps(hooks_json)
+        for fname in ["protect-main.sh", "protect-sensitive-paths.sh",
+                      "enforce-role-boundaries.sh", "session-start.sh"]:
+            self.assertIn(fname, commands,
+                          f"hooks.json must register {fname}")
+        # enforce-role-boundaries must receive the plugin root so it can find
+        # the validator.
+        self.assertIn("DEVFLOW_PLUGIN_ROOT", commands)
 
     def test_gitkeep_not_in_agents(self):
         gitkeep = self.plugin_dir / "agents" / ".gitkeep"

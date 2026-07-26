@@ -636,16 +636,19 @@ class PluginBuildOperationsTest(unittest.TestCase):
             "scripts/devflow_target_guard.py must be in plugin output",
         )
 
-    def test_framework_hooks_not_in_plugin(self):
+    def test_runtime_enforcement_hooks_in_plugin(self):
+        # Reversed invariant: the runtime enforcement shell hooks now ship so
+        # claude-devflow applies the same protection in a target project that
+        # the framework repo dogfoods on itself.
         for fname in [
             "enforce-role-boundaries.sh",
             "protect-main.sh",
             "protect-sensitive-paths.sh",
             "session-start.sh",
         ]:
-            self.assertFalse(
+            self.assertTrue(
                 (self.plugin_dir / "hooks" / fname).exists(),
-                f"Framework hook {fname} must NOT be in plugin output",
+                f"Runtime enforcement hook {fname} must be in plugin output",
             )
 
     def test_mcp_config_not_in_plugin(self):
