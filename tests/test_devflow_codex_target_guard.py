@@ -189,6 +189,26 @@ class CodexTargetGuardTest(unittest.TestCase):
     def test_dangerous_git_command_denied(self):
         self.assert_denied(bash_payload("git reset --hard HEAD~1"))
 
+    def test_git_clean_force_forms_denied(self):
+        # `-[^\s]*f\b` matched only a flag cluster ending in f, so `git clean -fd`
+        # — which still deletes untracked files — slipped through.
+        commands = (
+            "git clean -f target",
+            "git clean -fd target",
+            "git clean -ffdx",
+            "git clean -d -f target",
+            "git clean --force",
+            "git -C /some/repo clean -fd",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assert_denied(bash_payload(command))
+
+    def test_git_clean_dry_run_allowed(self):
+        for command in ("git clean -n", "git clean -nd"):
+            with self.subTest(command=command):
+                self.assert_allowed(bash_payload(command))
+
     def test_recursive_force_rm_forms_denied(self):
         commands = (
             "rm -r -f directory",
