@@ -50,8 +50,12 @@ _DANGEROUS_COMMAND_PATTERNS = (
     re.compile(r"\bgit\b[^|;&\n]*?\bbranch\b[^|;&\n]*(?:--delete|-[dD])\b"),
     re.compile(r"\bgit\s+reset\s+--(?:hard|soft|mixed)\b"),
     re.compile(r"\bgit\b[^|;&\n]*?\breset\s+--(?:hard|soft|mixed)\b"),
-    re.compile(r"\bgit\s+clean\s+-[^\s]*f\b"),
-    re.compile(r"\bgit\b[^|;&\n]*?\bclean\s+-[^\s]*f\b"),
+    # clean-force in any flag position (-f, -fd, -ffdx) or as a separate
+    # argument (-d -f), plus the long form. `-[^\s]*f\b` matched only a cluster
+    # *ending* in f, so `git clean -fd` — which still deletes untracked files —
+    # was allowed. `-n` (dry run) stays allowed: it carries no f.
+    re.compile(r"\bgit\s+clean\b[^|;&\n]*?(?:\s-[a-zA-Z]*f|\s--force\b)"),
+    re.compile(r"\bgit\b[^|;&\n]*?\bclean\b[^|;&\n]*?(?:\s-[a-zA-Z]*f|\s--force\b)"),
     re.compile(r"\bgit\s+checkout\s+--\s+\."),
     re.compile(r"\bgit\s+restore\s+\."),
 )
