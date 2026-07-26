@@ -1493,8 +1493,13 @@ def _setup_devflow_with_all_gates_passed(target: Path) -> None:
         }, indent=2) + "\n",
         encoding="utf-8",
     )
-    (devflow / "runs" / "RUN-001.json").write_text(
-        json.dumps({
+    # Run state must be signed: the gates refuse state this CLI did not write,
+    # so a hand-rolled JSON fixture would now fail integrity verification —
+    # which is exactly the forgery this signing exists to catch.
+    _load_ops_module().write_run_state(
+        target,
+        devflow / "runs" / "RUN-001.json",
+        {
             "schema_version": "1",
             "run_id": "RUN-001",
             "created_at": now,
@@ -1510,8 +1515,7 @@ def _setup_devflow_with_all_gates_passed(target: Path) -> None:
                 "qa_sign_off": True,
                 "human_approval": False,
             },
-        }, indent=2) + "\n",
-        encoding="utf-8",
+        },
     )
 
 
@@ -1571,8 +1575,9 @@ class PrepareDeliveryHonestyTest(unittest.TestCase):
         run_data = json.loads((devflow / "runs" / "RUN-001.json").read_text())
         for k in run_data["approval_gates"]:
             run_data["approval_gates"][k] = False
-        (devflow / "runs" / "RUN-001.json").write_text(
-            json.dumps(run_data, indent=2) + "\n", encoding="utf-8"
+        # Signed, not raw: the gates reject run state this CLI did not write.
+        _load_ops_module().write_run_state(
+            self.target, devflow / "runs" / "RUN-001.json", run_data
         )
         result = run_ops(["prepare-delivery", "--target", str(self.target), "--confirm-delivery"])
         self.assertEqual(result.returncode, 9)

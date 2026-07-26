@@ -119,16 +119,42 @@ def _mark_all_tasks_verified(target: Path, run_id: str) -> None:
         t["status"] = "verified"
     _create_wp_stub_files(target)
     run_data["work_product_evidence"] = _make_wp_evidence(run_data["tasks"])
-    run_file.write_text(json.dumps(run_data, indent=2) + "\n", encoding="utf-8")
+    # Signed, not raw: the gates reject run state this CLI did not write.
+    _load_ops_module().write_run_state(target, run_file, run_data)
 
 
 def _set_qa_gates(target: Path, run_id: str) -> None:
-    run_file = target / ".devflow" / "runs" / f"{run_id}.json"
-    run_data = json.loads(run_file.read_text())
-    run_data.setdefault("approval_gates", {})
-    run_data["approval_gates"]["tests_passing"] = True
-    run_data["approval_gates"]["qa_sign_off"] = True
-    run_file.write_text(json.dumps(run_data, indent=2) + "\n", encoding="utf-8")
+    """Set the QA gates the way a real run does: by measuring, not asserting.
+
+    Recording counts by hand marks the evidence "self_reported" and holds the
+    report at "unverified_evidence", so these fixtures run a real (trivially
+    passing) command through the CLI instead.
+    """
+    _record_observed_delegation(target, run_id)
+    subprocess.run(
+        [sys.executable, str(OPS_SCRIPT), "record-qa-evidence",
+         "--target", str(target), "--test-command", "python3 -c pass"],
+        capture_output=True, text=True, check=True,
+    )
+
+
+def _record_observed_delegation(target: Path, run_id: str) -> None:
+    """Write a SubagentStart event so the run counts as actually delegated.
+
+    Without it the report holds at "unverified_evidence": passing auto gates
+    never showed that any agent ran.
+    """
+    events_dir = target / ".devflow" / "delegation-events"
+    events_dir.mkdir(parents=True, exist_ok=True)
+    (events_dir / "subagent-start-001.json").write_text(
+        json.dumps({
+            "hook_event": "SubagentStart",
+            "lifecycle_state": "started",
+            "run_id": run_id,
+            "agent_type": "backend-engineer",
+        }),
+        encoding="utf-8",
+    )
 
 
 # ---------------------------------------------------------------------------

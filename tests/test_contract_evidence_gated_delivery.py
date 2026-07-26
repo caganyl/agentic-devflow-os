@@ -34,6 +34,27 @@ def _load_ops_module():
     return mod
 
 
+def _verified_report(mod, run_data, run_id="RUN-001"):
+    """build_run_report for a run whose evidence was actually measured.
+
+    The report holds at "unverified_evidence" unless delegation was observed
+    and QA was executed rather than self-reported. Tests about contract and
+    human-approval semantics should not have to restate that each time, so it
+    is supplied here; tests that care about the unverified path call
+    build_run_report directly.
+    """
+    data = dict(run_data)
+    data.setdefault(
+        "qa_evidence", {"source": "executed", "qa_passed": True, "exit_code": 0}
+    )
+    return mod.build_run_report(data, run_id, delegation_events=[{
+        "hook_event": "SubagentStart",
+        "lifecycle_state": "started",
+        "run_id": run_id,
+        "agent_type": "backend-engineer",
+    }])
+
+
 def make_git_repo(path: Path, branch: str = "feature-contract-test") -> None:
     subprocess.run(["git", "init", "-b", branch, str(path)], check=True, capture_output=True)
     subprocess.run(
@@ -629,7 +650,8 @@ class ContractEvidenceTaskStatusTest(unittest.TestCase):
             run_before["tasks"] = [
                 t for t in run_before["tasks"] if t["task_type"] != "contract_definition"
             ]
-            run_path.write_text(json.dumps(run_before))
+            # Signed, not raw: the gates reject run state this CLI did not write.
+            _load_ops_module().write_run_state(target, run_path, run_before)
 
             res = run_ops([
                 "record-contract-evidence",
@@ -723,8 +745,27 @@ class ContractEvidenceTaskStatusTest(unittest.TestCase):
             run_data["security_applicability_reason"] = "low_risk_local_utility"
             run_data["work_product_evidence"] = _make_wp_evidence(run_data["tasks"])
 
-            run_path.write_text(json.dumps(run_data))
+            # Signed, not raw: the gates reject run state this CLI did not write.
+            _load_ops_module().write_run_state(target, run_path, run_data)
             _create_wp_stub_files(target)
+
+            # Measured QA and observed delegation, otherwise the report holds at
+            # "unverified_evidence" regardless of the contract gate.
+            events_dir = devflow / "delegation-events"
+            events_dir.mkdir(parents=True, exist_ok=True)
+            (events_dir / "subagent-start-001.json").write_text(
+                json.dumps({
+                    "hook_event": "SubagentStart",
+                    "lifecycle_state": "started",
+                    "run_id": run_id,
+                    "agent_type": "backend-engineer",
+                }),
+                encoding="utf-8",
+            )
+            run_ops([
+                "record-qa-evidence", "--target", str(target),
+                "--test-command", "python3 -c pass",
+            ])
 
             res_report = run_ops(["generate-run-report", "--target", str(target)])
             self.assertEqual(res_report.returncode, 0)
@@ -777,7 +818,7 @@ class ContractGateReadinessTest(unittest.TestCase):
             "security_review_required": False,
             "security_applicability_reason": "low_risk_local_utility",
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertEqual(report["technical_readiness"], "not_ready",
                          "Without contract evidence, technical_readiness must be not_ready")
         self.assertNotEqual(report["merge_recommendation"], "ready_for_human_merge")
@@ -797,7 +838,7 @@ class ContractGateReadinessTest(unittest.TestCase):
             "contract_status": "pending",
             "contract_gate_satisfied": False,
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertIn("contract_applicability", report,
                       "build_run_report must include contract_applicability block")
         cont = report["contract_applicability"]
@@ -831,7 +872,7 @@ class ContractGateReadinessTest(unittest.TestCase):
             "security_applicability_reason": "low_risk_local_utility",
             "work_product_evidence": _make_wp_evidence(tasks),
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         cont = report["contract_applicability"]
         self.assertFalse(cont.get("contract_required"))
         self.assertEqual(cont.get("contract_status"), "not_applicable")
@@ -885,7 +926,7 @@ class ContractGateHumanApprovalTest(unittest.TestCase):
             "security_applicability_reason": "low_risk_local_utility",
             "work_product_evidence": _make_wp_evidence(tasks),
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertEqual(report["technical_readiness"], "ready")
         self.assertEqual(report["status"], "awaiting_human_approval")
         self.assertEqual(report["merge_recommendation"], "awaiting_human_approval")
@@ -918,7 +959,7 @@ class ContractGateHumanApprovalTest(unittest.TestCase):
             "security_applicability_reason": "low_risk_local_utility",
             "work_product_evidence": _make_wp_evidence(tasks),
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertEqual(report["merge_recommendation"], "ready_for_human_merge")
 
     def test_no_automatic_merge_ever(self):
@@ -943,7 +984,7 @@ class ContractGateHumanApprovalTest(unittest.TestCase):
             "security_review_required": False,
             "work_product_evidence": _make_wp_evidence(tasks),
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         recommendation = report["merge_recommendation"]
         self.assertNotIn("auto", recommendation.lower(),
                          f"Merge recommendation must never be automatic: {recommendation}")
@@ -1186,6 +1227,9 @@ class ContractGateRegressionTest(unittest.TestCase):
                 "--passed", "10",
                 "--failed", "0",
                 "--exit-code", "0",
+                # Reported counts are no longer accepted silently; the caller
+                # has to put on the record that nothing was measured.
+                "--allow-self-reported",
             ])
             self.assertEqual(res.returncode, 0,
                              f"record-qa-evidence must still work. stderr: {res.stderr}")
@@ -1214,7 +1258,7 @@ class ContractGateRegressionTest(unittest.TestCase):
             "work_product_evidence": _make_wp_evidence(tasks),
             # NOTE: no contract_required, contract_status, or contract_gate_satisfied
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         cont = report["contract_applicability"]
         # Backward compat: defaults to not_applicable and gate satisfied
         self.assertFalse(cont.get("contract_required"))

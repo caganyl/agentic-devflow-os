@@ -14,6 +14,12 @@ Covers (10 minimum test areas):
 10. generate-task-graph, update-task-status, generate-run-report subcommands work end-to-end
 """
 
+# PEP 563: without this, the `dict | None` annotations below are evaluated at
+# def-time and raise TypeError on Python 3.9 — the interpreter macOS ships as
+# /usr/bin/python3 — which silently dropped this entire module from
+# `unittest discover` while CI (3.12) stayed green.
+from __future__ import annotations
+
 import importlib.util
 import json
 import os
@@ -33,6 +39,26 @@ def _load_ops_module():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def _verified_report(mod, run_data, run_id="RUN-001"):
+    """build_run_report for a run whose evidence was actually measured.
+
+    The report holds at "unverified_evidence" unless delegation was observed
+    and QA was executed rather than self-reported. Tests about gate semantics
+    should not have to restate that each time, so it is supplied here; tests
+    that care about the unverified path call build_run_report directly.
+    """
+    data = dict(run_data)
+    data.setdefault(
+        "qa_evidence", {"source": "executed", "qa_passed": True, "exit_code": 0}
+    )
+    return mod.build_run_report(data, run_id, delegation_events=[{
+        "hook_event": "SubagentStart",
+        "lifecycle_state": "started",
+        "run_id": run_id,
+        "agent_type": "backend-engineer",
+    }])
 
 
 def make_git_repo(path: Path, branch: str = "main", feature_branch=None) -> None:
@@ -623,7 +649,7 @@ class QAGateEnforcementTest(unittest.TestCase):
             "qa_sign_off": False,
             "human_approval": False,
         }
-        report = self.mod.build_run_report(self._make_run_data(tasks, gates), "RUN-001")
+        report = _verified_report(self.mod, self._make_run_data(tasks, gates))
         self.assertNotEqual(
             report["merge_recommendation"], "ready",
             "Merge should not be 'ready' without qa_sign_off",
@@ -639,7 +665,7 @@ class QAGateEnforcementTest(unittest.TestCase):
             "qa_sign_off": True,
             "human_approval": False,
         }
-        report = self.mod.build_run_report(self._make_run_data(tasks, gates), "RUN-001")
+        report = _verified_report(self.mod, self._make_run_data(tasks, gates))
         self.assertNotEqual(report["merge_recommendation"], "ready")
 
     def test_run_report_awaiting_human_when_qa_done_human_not(self):
@@ -651,7 +677,7 @@ class QAGateEnforcementTest(unittest.TestCase):
             "qa_sign_off": True,
             "human_approval": False,
         }
-        report = self.mod.build_run_report(self._make_run_data(tasks, gates), "RUN-001")
+        report = _verified_report(self.mod, self._make_run_data(tasks, gates))
         self.assertEqual(
             report["merge_recommendation"], "awaiting_human_approval",
             "Should be awaiting_human_approval when qa done but human not yet",
@@ -673,7 +699,7 @@ class QAGateEnforcementTest(unittest.TestCase):
             "qa_sign_off": True,
             "human_approval": True,
         }
-        report = self.mod.build_run_report(self._make_run_data(tasks, gates), "RUN-001")
+        report = _verified_report(self.mod, self._make_run_data(tasks, gates))
         self.assertEqual(report["merge_recommendation"], "ready_for_human_merge")
         self.assertEqual(report["qa_result"], "passed")
 
@@ -689,7 +715,7 @@ class QAGateEnforcementTest(unittest.TestCase):
             "tests_passing": True,
             "human_approval": True,
         }
-        report = self.mod.build_run_report(self._make_run_data(tasks, gates), "RUN-001")
+        report = _verified_report(self.mod, self._make_run_data(tasks, gates))
         self.assertNotEqual(
             report["merge_recommendation"], "ready",
             "Should not be ready when tasks are still in progress",
@@ -728,7 +754,7 @@ class DelegationHonestyTest(unittest.TestCase):
     def test_delegation_not_confirmed_when_all_planned(self):
         tasks = self.mod.generate_task_graph_nodes("RUN-001", "new_feature", "test")
         run_data = self._make_run_data(tasks)
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertFalse(
             report["delegation_evidence"]["any_delegation_confirmed"],
             "delegation_confirmed should be False when all tasks have delegation_status='planned'",
@@ -737,6 +763,8 @@ class DelegationHonestyTest(unittest.TestCase):
     def test_delegation_boundary_note_mentions_not_confirmed(self):
         tasks = self.mod.generate_task_graph_nodes("RUN-001", "bug_resolution", "test")
         run_data = self._make_run_data(tasks)
+        # Deliberately no delegation events: this asserts what the note says
+        # when nothing was observed.
         report = self.mod.build_run_report(run_data, "RUN-001")
         note = report["delegation_evidence"]["boundary_note"].lower()
         # Should indicate delegation was NOT confirmed
@@ -749,13 +777,13 @@ class DelegationHonestyTest(unittest.TestCase):
         tasks = self.mod.generate_task_graph_nodes("RUN-001", "new_feature", "test")
         tasks[0]["delegation_status"] = "confirmed"
         run_data = self._make_run_data(tasks)
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertTrue(report["delegation_evidence"]["any_delegation_confirmed"])
 
     def test_report_includes_human_approval_notes(self):
         tasks = []
         run_data = self._make_run_data(tasks)
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertGreater(len(report["human_approval_required"]), 0)
         combined = " ".join(report["human_approval_required"]).lower()
         self.assertIn("main", combined)
@@ -763,7 +791,7 @@ class DelegationHonestyTest(unittest.TestCase):
     def test_report_merge_not_ready_without_confirmed_delegation_or_gates(self):
         tasks = self.mod.generate_task_graph_nodes("RUN-001", "security_response", "test")
         run_data = self._make_run_data(tasks)
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertEqual(
             report["merge_recommendation"], "not_ready",
             "Freshly created run with planned tasks should never be 'ready'",
@@ -802,7 +830,7 @@ class ExecutionModeTest(unittest.TestCase):
             "tasks": [],
             "approval_gates": {},
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertEqual(report["execution_mode"], "subagents")
         self.assertFalse(report["agent_teams_requested"])
 
@@ -815,7 +843,7 @@ class ExecutionModeTest(unittest.TestCase):
             "tasks": [],
             "approval_gates": {},
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertEqual(report["execution_mode"], "agent_teams")
         self.assertTrue(report["agent_teams_requested"])
 
@@ -825,7 +853,7 @@ class ExecutionModeTest(unittest.TestCase):
             "execution_mode": "subagents", "agent_teams_requested": False,
             "tasks": [], "approval_gates": {},
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertIn("execution_mode", report)
         self.assertIn("agent_teams_requested", report)
 
@@ -1030,7 +1058,8 @@ class UpdateTaskStatusSubcommandTest(unittest.TestCase):
         run_file = self.target / ".devflow" / "runs" / f"{self.run_id}.json"
         run_data = json.loads(run_file.read_text())
         run_data["approval_gates"]["qa_sign_off"] = True
-        run_file.write_text(json.dumps(run_data, indent=2) + "\n", encoding="utf-8")
+        # Signed, not raw: the gates reject run state this CLI did not write.
+        _load_ops_module().write_run_state(self.target, run_file, run_data)
         # Now verified should work
         result = run_ops(["update-task-status", "--target", str(self.target),
                           "--task-id", self.first_task_id, "--status", "verified"])
@@ -1310,7 +1339,8 @@ class TaskGraphImmutabilityTest(unittest.TestCase):
                      "--task-id", first_task_id, "--status", status])
         run_data = json.loads(run_file.read_text())
         run_data["approval_gates"]["qa_sign_off"] = True
-        run_file.write_text(json.dumps(run_data, indent=2) + "\n", encoding="utf-8")
+        # Signed, not raw: the gates reject run state this CLI did not write.
+        _load_ops_module().write_run_state(self.target, run_file, run_data)
         run_ops(["update-task-status", "--target", str(self.target),
                  "--task-id", first_task_id, "--status", "verified"])
 
@@ -1370,6 +1400,7 @@ class TaskGraphImmutabilityTest(unittest.TestCase):
             "record-qa-evidence", "--target", str(self.target),
             "--total", "10", "--passed", "10", "--failed", "0",
             "--exit-code", "0", "--evidence-path", "tests/results.xml",
+            "--allow-self-reported",
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -1384,6 +1415,7 @@ class TaskGraphImmutabilityTest(unittest.TestCase):
         result = run_ops([
             "record-qa-evidence", "--target", str(self.target),
             "--total", "10", "--passed", "8", "--failed", "2", "--exit-code", "1",
+            "--allow-self-reported",
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -1409,6 +1441,7 @@ class TaskGraphImmutabilityTest(unittest.TestCase):
         run_ops([
             "record-qa-evidence", "--target", str(self.target),
             "--total", "10", "--passed", "5", "--failed", "5", "--exit-code", "1",
+            "--allow-self-reported",
         ])
         run_ops(["generate-run-report", "--target", str(self.target)])
 
@@ -1442,8 +1475,8 @@ class TaskGraphImmutabilityTest(unittest.TestCase):
 
     def test_backend_utility_complete_human_false_awaiting_human_approval(self):
         """backend_utility all tasks verified + QA passed + human=false → awaiting_human_approval."""
-        report = self.mod.build_run_report(
-            self._completed_backend_utility_run_data(human=False), "RUN-001"
+        report = _verified_report(
+            self.mod, self._completed_backend_utility_run_data(human=False)
         )
         self.assertEqual(report["technical_readiness"], "ready")
         self.assertEqual(report["status"], "awaiting_human_approval")
@@ -1451,8 +1484,8 @@ class TaskGraphImmutabilityTest(unittest.TestCase):
 
     def test_backend_utility_complete_human_true_ready_for_human_merge(self):
         """backend_utility all tasks verified + QA passed + human=true → ready_for_human_merge."""
-        report = self.mod.build_run_report(
-            self._completed_backend_utility_run_data(human=True), "RUN-001"
+        report = _verified_report(
+            self.mod, self._completed_backend_utility_run_data(human=True)
         )
         self.assertEqual(report["technical_readiness"], "ready")
         self.assertEqual(report["status"], "ready_for_human_merge")
@@ -1550,9 +1583,7 @@ class SecurityApplicabilityPolicyTest(unittest.TestCase):
         self.assertEqual(result["security_applicability_reason"], "low_risk_local_utility")
 
     def test_low_risk_run_security_review_status_not_applicable(self):
-        report = self.mod.build_run_report(
-            self._make_run("Parse CSV files", human=False), "RUN-001"
-        )
+        report = _verified_report(self.mod, self._make_run("Parse CSV files", human=False))
         sec = report["security_applicability"]
         self.assertFalse(sec["security_review_required"])
         self.assertEqual(sec["security_review_status"], "not_applicable")
@@ -1560,17 +1591,13 @@ class SecurityApplicabilityPolicyTest(unittest.TestCase):
 
     def test_low_risk_run_awaiting_human_approval_when_human_false(self):
         """Low-risk backend_utility: QA done + human=False → awaiting_human_approval."""
-        report = self.mod.build_run_report(
-            self._make_run("Parse CSV files", human=False), "RUN-001"
-        )
+        report = _verified_report(self.mod, self._make_run("Parse CSV files", human=False))
         self.assertEqual(report["technical_readiness"], "ready")
         self.assertEqual(report["status"], "awaiting_human_approval")
         self.assertEqual(report["merge_recommendation"], "awaiting_human_approval")
 
     def test_low_risk_run_ready_for_human_merge_when_human_true(self):
-        report = self.mod.build_run_report(
-            self._make_run("Parse CSV files", human=True), "RUN-001"
-        )
+        report = _verified_report(self.mod, self._make_run("Parse CSV files", human=True))
         self.assertEqual(report["merge_recommendation"], "ready_for_human_merge")
 
     # --- 2. Risky signals → required=True, pending, gate not satisfied, not_ready ---
@@ -1622,7 +1649,7 @@ class SecurityApplicabilityPolicyTest(unittest.TestCase):
             "Build REST API endpoint for data retrieval",
             human=False, security_evidence=False,
         )
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         sec = report["security_applicability"]
         self.assertTrue(sec["security_review_required"])
         self.assertEqual(sec["security_review_status"], "pending")
@@ -1635,7 +1662,7 @@ class SecurityApplicabilityPolicyTest(unittest.TestCase):
             "Add JWT authentication to service",
             human=False, security_evidence=False,
         )
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertEqual(report["security_applicability"]["security_review_status"], "pending")
         self.assertFalse(report["security_applicability"]["security_gate_satisfied"])
 
@@ -1646,7 +1673,7 @@ class SecurityApplicabilityPolicyTest(unittest.TestCase):
             "Build REST API endpoint for user data",
             human=False, security_evidence=True,
         )
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         sec = report["security_applicability"]
         self.assertTrue(sec["security_review_required"])
         self.assertEqual(sec["security_review_status"], "completed")
@@ -1658,7 +1685,7 @@ class SecurityApplicabilityPolicyTest(unittest.TestCase):
             "Build REST API endpoint for user data",
             human=False, security_evidence=True,
         )
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertEqual(report["technical_readiness"], "ready")
         self.assertEqual(report["merge_recommendation"], "awaiting_human_approval")
 
@@ -1666,13 +1693,13 @@ class SecurityApplicabilityPolicyTest(unittest.TestCase):
 
     def test_low_risk_provenance_security_review_not_applicable(self):
         run_data = self._make_run("Parse CSV files", human=False)
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertEqual(report["evidence_provenance"]["security_review"], "not_applicable")
 
     def test_low_risk_report_no_security_review_complete_claim(self):
         """Low-risk run: approval_gates.security_review_complete stays False; not overridden."""
         run_data = self._make_run("Parse CSV files", human=False, security_evidence=False)
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         # Security gate is satisfied via not_applicable path, NOT via security_review_complete
         self.assertFalse(report["approval_gates"].get("security_review_complete", True))
         self.assertEqual(report["security_applicability"]["security_review_status"], "not_applicable")
@@ -1680,7 +1707,7 @@ class SecurityApplicabilityPolicyTest(unittest.TestCase):
     def test_low_risk_not_applicable_not_completed(self):
         """not_applicable must never equal 'completed'."""
         run_data = self._make_run("Parse CSV files", human=False)
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         sec_status = report["security_applicability"]["security_review_status"]
         self.assertEqual(sec_status, "not_applicable")
         self.assertNotEqual(sec_status, "completed")
@@ -1733,7 +1760,7 @@ class SecurityApplicabilityPolicyTest(unittest.TestCase):
             "security_review_required": False,
             "security_applicability_reason": "low_risk_local_utility",
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertTrue(report["security_applicability"]["security_gate_satisfied"])
 
     def test_security_gate_satisfied_false_when_required_no_evidence(self):
@@ -1745,7 +1772,7 @@ class SecurityApplicabilityPolicyTest(unittest.TestCase):
             "security_review_required": True,
             "security_applicability_reason": "api_or_http_surface",
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertFalse(report["security_applicability"]["security_gate_satisfied"])
 
     def test_security_applicability_field_in_report(self):
@@ -1754,7 +1781,7 @@ class SecurityApplicabilityPolicyTest(unittest.TestCase):
             "execution_mode": "subagents", "agent_teams_requested": False,
             "tasks": [], "approval_gates": {},
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertIn("security_applicability", report)
         sec = report["security_applicability"]
         for key in ["security_review_required", "security_review_status",
@@ -1771,7 +1798,7 @@ class SecurityApplicabilityPolicyTest(unittest.TestCase):
             "tasks": [], "approval_gates": {"security_review_complete": False},
             # no security_review_required key
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertTrue(report["security_applicability"]["security_review_required"])
         self.assertEqual(report["security_applicability"]["security_review_status"], "pending")
         self.assertFalse(report["security_applicability"]["security_gate_satisfied"])
@@ -1783,7 +1810,7 @@ class SecurityApplicabilityPolicyTest(unittest.TestCase):
             "execution_mode": "subagents", "agent_teams_requested": False,
             "tasks": [], "approval_gates": {"security_review_complete": True},
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         self.assertTrue(report["security_applicability"]["security_gate_satisfied"])
         self.assertEqual(report["security_applicability"]["security_review_status"], "completed")
 
@@ -1831,7 +1858,7 @@ class SecurityApplicabilityPolicyTest(unittest.TestCase):
             security_evidence=False,
             delivery_type="backend_utility",
         )
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        report = _verified_report(self.mod, run_data)
         sec = report["security_applicability"]
         self.assertEqual(sec["security_review_status"], "not_applicable")
         self.assertTrue(sec["security_gate_satisfied"])

@@ -411,8 +411,16 @@ class SecurityGateStateMachineTest(unittest.TestCase):
                 "provenance": "generated_in_run",
             },
             "work_product_evidence": _make_wp_evidence(tasks),
+            # Measured QA, so the run is not held back as unverified evidence.
+            "qa_evidence": {"source": "executed", "qa_passed": True, "exit_code": 0},
         }
-        report = self.mod.build_run_report(run_data, "RUN-001")
+        events = [{
+            "hook_event": "SubagentStart",
+            "lifecycle_state": "started",
+            "run_id": "RUN-001",
+            "agent_type": "security-red-team",
+        }]
+        report = self.mod.build_run_report(run_data, "RUN-001", delegation_events=events)
         self.assertEqual(report["technical_readiness"], "ready")
         self.assertEqual(report["status"], "awaiting_human_approval")
         self.assertEqual(report["merge_recommendation"], "awaiting_human_approval")
@@ -846,16 +854,31 @@ class SecurityEvidenceFullScenarioTest(unittest.TestCase):
             t["status"] = "verified"
         _create_wp_stub_files(self.target)
         run_data["work_product_evidence"] = _make_wp_evidence(run_data["tasks"])
-        run_file.write_text(json.dumps(run_data, indent=2) + "\n", encoding="utf-8")
+        # Signed, not raw: the gates reject run state this CLI did not write.
+        _load_ops_module().write_run_state(self.target, run_file, run_data)
 
     def _set_qa_gates(self, run_id: str) -> None:
-        """Set tests_passing and qa_sign_off gates in run state."""
-        run_file = self.target / ".devflow" / "runs" / f"{run_id}.json"
-        run_data = json.loads(run_file.read_text())
-        run_data.setdefault("approval_gates", {})
-        run_data["approval_gates"]["tests_passing"] = True
-        run_data["approval_gates"]["qa_sign_off"] = True
-        run_file.write_text(json.dumps(run_data, indent=2) + "\n", encoding="utf-8")
+        """Set the QA gates the way a real run does: by measuring, not asserting.
+
+        Hand-recorded counts mark the evidence "self_reported" and hold the
+        report at "unverified_evidence", so this runs a real (trivially
+        passing) command through the CLI and records observed delegation.
+        """
+        events_dir = self.target / ".devflow" / "delegation-events"
+        events_dir.mkdir(parents=True, exist_ok=True)
+        (events_dir / "subagent-start-001.json").write_text(
+            json.dumps({
+                "hook_event": "SubagentStart",
+                "lifecycle_state": "started",
+                "run_id": run_id,
+                "agent_type": "backend-engineer",
+            }),
+            encoding="utf-8",
+        )
+        run_ops([
+            "record-qa-evidence", "--target", str(self.target),
+            "--test-command", "python3 -c pass",
+        ])
 
     def test_full_pass_evidence_scenario_awaiting_human_approval(self):
         """Test 10: Full risky + QA + pass evidence + human=False → awaiting_human_approval."""
