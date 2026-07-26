@@ -1647,6 +1647,17 @@ def authorize_work_product_ownership(
         wp for wp in (owner.get("write_paths") or []) if isinstance(wp, str) and wp
     ]
     normalized = evidence_path.replace("\\", "/")
+
+    # Defense in depth: fail closed on traversal or absolute paths. The
+    # work-product path validator already rejects these before this runs, but
+    # the parent-prefix match uses PurePosixPath which does NOT collapse '..',
+    # so 'apps/api/../web/x' would count as under 'apps/api'. This guard keeps
+    # the ownership check sound on its own, independent of its caller.
+    if normalized.startswith("/") or ".." in normalized.split("/"):
+        return False, (
+            f"evidence-path güvenli değil (mutlak yol veya '..' içeriyor): {evidence_path!r}"
+        )
+
     if any(_path_under_write_path(normalized, wp) for wp in write_paths):
         return True, ""
 

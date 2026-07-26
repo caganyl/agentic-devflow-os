@@ -137,6 +137,22 @@ class OwnershipHelperTest(unittest.TestCase):
         ok, _ = self._auth("REQ-007", "backend-engineer", "apps/api/src/deep/nested/x.py")
         self.assertTrue(ok)
 
+    def test_dotdot_traversal_into_another_area_denied(self):
+        # PurePosixPath does not collapse '..', so 'apps/api/../web/x' would
+        # match a parent of 'apps/api' without this guard — letting backend
+        # claim a frontend file. Fail closed independent of the caller.
+        ok, reason = self._auth("REQ-007", "backend-engineer", "apps/api/../web/App.tsx")
+        self.assertFalse(ok)
+        self.assertIn("..", reason)
+
+    def test_deep_dotdot_traversal_denied(self):
+        ok, _ = self._auth("REQ-007", "backend-engineer", "apps/api/src/../../web/App.tsx")
+        self.assertFalse(ok)
+
+    def test_absolute_evidence_path_denied(self):
+        ok, _ = self._auth("REQ-007", "backend-engineer", "/etc/passwd")
+        self.assertFalse(ok)
+
 
 class CreateRunReqIdTest(unittest.TestCase):
 
