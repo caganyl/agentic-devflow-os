@@ -1571,6 +1571,92 @@ def validate_work_product_evidence_path(
     return True, ""
 
 
+# Manifest owner roles that ownership authorization can bind. Mirrors
+# scripts/validate_ownership_manifest.py SUPPORTED_AGENTS.
+OWNERSHIP_BINDABLE_ROLES = frozenset({
+    "frontend-engineer",
+    "backend-engineer",
+    "database-engineer",
+    "qa-automation",
+    "ai-data-engineer",
+})
+
+
+def _path_under_write_path(evidence_path: str, write_path: str) -> bool:
+    """Return whether evidence_path is the write_path or nested beneath it."""
+    from pathlib import PurePosixPath
+
+    target = PurePosixPath(evidence_path.replace("\\", "/"))
+    owned = PurePosixPath(write_path.replace("\\", "/"))
+    return target == owned or owned in target.parents
+
+
+def authorize_work_product_ownership(
+    target: Path,
+    req_id: str,
+    assigned_role: str,
+    evidence_path: str,
+) -> tuple[bool, str]:
+    """Bind work-product evidence to the assigned role's ownership write_paths.
+
+    Opt-in and backward compatible: this only enforces when the run declared a
+    REQ-ID (--req-id at create-run) AND an approved ownership manifest exists at
+    docs/ownership/<REQ-ID>.json.  Otherwise the delivery-run system keeps its
+    existing coarse prefix checks untouched.
+
+    The manifest's role->write_paths map is the same authority the CI diff gate
+    and the runtime role hook use, so a run that opts in gets the "frontend may
+    not record a backend file as its work product" enforcement that the coarse
+    src/ prefix cannot express.  Deliberately does NOT apply the manifest's
+    req-branch check: run branches are devflow/run-*, a separate namespace.
+
+    Returns (ok, reason). ok=True with an empty reason when authorization is not
+    applicable (no req_id, no manifest, unapproved manifest, or a role the
+    manifest does not govern).
+    """
+    if not req_id:
+        return True, ""
+    if assigned_role not in OWNERSHIP_BINDABLE_ROLES:
+        return True, ""
+
+    manifest_path = target / "docs" / "ownership" / f"{req_id}.json"
+    if not manifest_path.exists():
+        return True, ""
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # A malformed manifest is the ownership layer's concern (CI validates
+        # it); the run gate does not invent a denial from an unreadable file.
+        return True, ""
+
+    if not isinstance(manifest, dict) or manifest.get("status") != "approved":
+        return True, ""
+
+    owners = manifest.get("owners") or []
+    owner = next(
+        (o for o in owners if isinstance(o, dict) and o.get("agent") == assigned_role),
+        None,
+    )
+    if owner is None:
+        # The manifest does not grant this role any paths for this REQ; the run
+        # system does not fabricate a restriction the ownership layer did not.
+        return True, ""
+
+    write_paths = [
+        wp for wp in (owner.get("write_paths") or []) if isinstance(wp, str) and wp
+    ]
+    normalized = evidence_path.replace("\\", "/")
+    if any(_path_under_write_path(normalized, wp) for wp in write_paths):
+        return True, ""
+
+    return False, (
+        f"evidence-path '{evidence_path}', '{assigned_role}' rolünün "
+        f"{req_id} manifestindeki write_paths alanı dışında. "
+        f"İzinli: {', '.join(write_paths) or '(yok)'}"
+    )
+
+
 def validate_task_packet_dict(packet: dict) -> None:
     """Exit 10 if the packet contains a forbidden top-level field."""
     for field in FORBIDDEN_PACKET_FIELDS:
@@ -2243,6 +2329,14 @@ def cmd_create_run(args) -> int:
     agent_teams_requested = getattr(args, "agent_teams", False)
     execution_mode = "agent_teams" if agent_teams_requested else "subagents"
 
+    req_id = getattr(args, "req_id", None) or ""
+    if req_id and not re.fullmatch(r"REQ-\d{3,}", req_id):
+        print(
+            f"Hata: --req-id 'REQ-NNN' biçiminde olmalıdır (en az 3 rakam). Verilen: {req_id!r}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     launch_objective = getattr(args, "objective", None) or ""
     _launch_signals = detect_objective_risk_signals(launch_objective)
     _launch_triggering = _launch_signals & SECURITY_TRIGGERING_RISK_SIGNALS
@@ -2259,6 +2353,7 @@ def cmd_create_run(args) -> int:
         "created_at": now,
         "status": "created",
         "branch_name": branch_name,
+        "req_id": req_id,
         "objective": launch_objective,
         "execution_mode": execution_mode,
         "requested_execution_mode": execution_mode,
@@ -2441,6 +2536,7 @@ def cmd_launch(args) -> int:
         target=str(worktree_path),
         objective=objective,
         agent_teams=agent_teams,
+        req_id=getattr(args, "req_id", None),
     )
     create_result = cmd_create_run(create_ns)
     if create_result != 0:
@@ -3300,6 +3396,19 @@ def cmd_record_work_product_evidence(args) -> int:
         )
         sys.exit(WORK_PRODUCT_GATE_EXIT_CODE)
 
+    # Ownership binding (opt-in): when the run declared a REQ-ID and an approved
+    # manifest governs the task's role, the evidence must fall under that role's
+    # write_paths — the file→role check the coarse prefix cannot express.
+    ownership_ok, ownership_reason = authorize_work_product_ownership(
+        target,
+        run_data.get("req_id", ""),
+        task.get("assigned_role", ""),
+        evidence_path,
+    )
+    if not ownership_ok:
+        print(f"Hata: {ownership_reason}", file=sys.stderr)
+        sys.exit(WORK_PRODUCT_GATE_EXIT_CODE)
+
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     run_data.setdefault("work_product_evidence", {})[task_id] = {
@@ -3583,11 +3692,26 @@ def main() -> None:
     p_run = subparsers.add_parser("create-run", help="Yeni delivery run oluştur")
     p_run.add_argument("--target", required=True, help="Target project path")
     p_run.add_argument("--objective", default=None, help="Run hedefi")
+    p_run.add_argument(
+        "--req-id",
+        default=None,
+        dest="req_id",
+        help=(
+            "İlişkili REQ-ID (REQ-NNN). Verilirse ve docs/ownership/<REQ-ID>.json "
+            "onaylı manifesti varsa, work-product kanıtı rolün write_paths alanına bağlanır."
+        ),
+    )
     p_run.set_defaults(func=cmd_create_run)
 
     p_launch = subparsers.add_parser("launch", help="Claude Code supervisor başlat")
     p_launch.add_argument("--target", required=True, help="Target project path")
     p_launch.add_argument("--objective", default=None, help="Run hedefi")
+    p_launch.add_argument(
+        "--req-id",
+        default=None,
+        dest="req_id",
+        help="İlişkili REQ-ID (REQ-NNN); work-product ownership binding için create-run'a iletilir.",
+    )
     p_launch.add_argument("--dry-run", action="store_true", help="Plan göster, hiçbir şey oluşturma")
     p_launch.add_argument(
         "--agent-teams",
