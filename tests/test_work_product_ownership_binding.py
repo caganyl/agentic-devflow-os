@@ -242,6 +242,57 @@ class OwnershipBindingEndToEndTest(unittest.TestCase):
                        "--task-id", backend, "--evidence-path", "apps/api/src/handler.py"])
         self.assertEqual(res.returncode, 0, res.stderr)
 
+    def test_report_surfaces_effective_ownership_binding(self):
+        run_ops(["generate-run-report", "--target", str(self.target)])
+        report = json.loads(
+            (self.target / ".devflow" / "reports" / f"{self.run_id}-report.json").read_text()
+        )
+        self.assertEqual(report["req_id"], "REQ-007")
+        binding = report["ownership_binding"]
+        self.assertTrue(binding["effective"])
+        self.assertEqual(binding["reason"], "approved")
+        self.assertIn("backend-engineer", binding["governed_roles"])
+
+    @property
+    def run_id(self) -> str:
+        return self.run_file.stem
+
+
+class OwnershipBindingReportTest(unittest.TestCase):
+    """Report surfaces the binding status even when it is inert."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.target = self.tmp / "proj"
+        self.target.mkdir()
+        make_git_repo(self.target)
+        run_ops(["init-target", "--target", str(self.target)])
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _report(self) -> dict:
+        run_ops(["generate-run-report", "--target", str(self.target)])
+        run_id = sorted((self.target / ".devflow" / "runs").glob("*.json"))[0].stem
+        return json.loads(
+            (self.target / ".devflow" / "reports" / f"{run_id}-report.json").read_text()
+        )
+
+    def test_no_req_id_binding_declared_false(self):
+        run_ops(["create-run", "--target", str(self.target), "--objective", "x"])
+        report = self._report()
+        self.assertEqual(report["req_id"], "")
+        self.assertFalse(report["ownership_binding"]["declared"])
+        self.assertEqual(report["ownership_binding"]["reason"], "no_req_id")
+
+    def test_req_id_without_manifest_is_ineffective(self):
+        run_ops(["create-run", "--target", str(self.target),
+                 "--objective", "x", "--req-id", "REQ-042"])
+        report = self._report()
+        self.assertEqual(report["req_id"], "REQ-042")
+        self.assertFalse(report["ownership_binding"]["effective"])
+        self.assertEqual(report["ownership_binding"]["reason"], "manifest_missing")
+
 
 if __name__ == "__main__":
     unittest.main()
