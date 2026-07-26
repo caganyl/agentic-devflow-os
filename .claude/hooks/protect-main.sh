@@ -2,6 +2,17 @@
 set -euo pipefail
 
 INPUT="$(cat)"
+if ! command -v jq >/dev/null 2>&1; then
+  printf '%s\n' '{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "Main-branch protection: a required tool (jq) is not on PATH, so branch protection cannot be evaluated. The operation is blocked (fail-closed). Install jq to proceed."
+  }
+}'
+  exit 0
+fi
+
 CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // empty')"
 
 if [ -z "$CWD" ]; then

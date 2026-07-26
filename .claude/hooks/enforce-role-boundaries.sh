@@ -2,6 +2,17 @@
 set -euo pipefail
 
 INPUT="$(cat)"
+if ! command -v jq >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
+  printf '%s\n' '{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "Role-boundary protection: a required tool (jq or python3) is not on PATH, so role boundaries cannot be enforced. The operation is blocked (fail-closed). Install the missing tool to proceed."
+  }
+}'
+  exit 0
+fi
+
 
 TOOL_NAME="$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')"
 AGENT_TYPE="$(printf '%s' "$INPUT" | jq -r '.agent_type // empty')"
