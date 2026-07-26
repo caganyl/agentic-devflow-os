@@ -1943,9 +1943,17 @@ def build_run_report(
     # presented as a separate security-agent session without native evidence.
     # ---------------------------------------------------------------------------
     _sec_evidence_meta = run_data.get("security_evidence")
+    _qa_evidence_meta = run_data.get("qa_evidence", {}) or {}
     evidence_provenance = {
         "acceptance_criteria": "generated_in_run",
-        "qa_result": "test_command" if qa_done else "unavailable",
+        # Reflect how QA was actually established: a measured command run, or
+        # counts the caller reported. Labelling self-reported QA "test_command"
+        # would imply a command ran when none did.
+        "qa_result": (
+            "test_command" if _qa_evidence_meta.get("source") == "executed"
+            else "self_reported" if qa_done
+            else "unavailable"
+        ),
         "security_review": (
             "not_applicable" if not security_review_required
             else "generated_in_run" if security_review_status == "completed"
@@ -1973,7 +1981,6 @@ def build_run_report(
     # recommendation at "unverified_evidence" so the distinction survives into
     # the merge decision instead of living only in a note a human may skim.
     # ---------------------------------------------------------------------------
-    _qa_evidence_meta = run_data.get("qa_evidence", {}) or {}
     unverified_reasons = []
     # Either a native lifecycle event was recorded, or a task was explicitly
     # confirmed as delegated. Neither means no agent was shown to have run.
