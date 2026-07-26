@@ -54,16 +54,24 @@ _BASH_BLOCK_PATTERNS = [
     re.compile(r"\bgit\s+merge(?![-\w])"),
     # git merge via global flags (e.g. git -C /path merge, git -c k=v merge)
     re.compile(r"\bgit\s+(?:-[^\s]+\s+\S+\s+)+merge(?![-\w])"),
+    # Destructive subcommands, tolerating global flags between `git` and the
+    # subcommand. The `git\s+<sub>` form alone let `git -C <path> reset --hard`
+    # through: the pattern needs `reset` to follow `git` immediately, and the
+    # boundary check below passes whenever <path> is inside the run worktree —
+    # so a command that destroys the managed run's own work slipped between the
+    # two checks. The lazy span never crosses | ; & or a newline, so it cannot
+    # bridge two separate commands.
     # git push with any force variant (flag anywhere after 'push')
-    re.compile(r"\bgit\s+push\b[^|;&\n]*(?:--force-with-lease\b|--force\b|\s-f\b)"),
+    re.compile(r"\bgit\b[^|;&\n]*?\bpush\b[^|;&\n]*(?:--force-with-lease\b|--force\b|\s-f\b)"),
     # git branch delete (short: -d/-D; long: --delete)
-    re.compile(r"\bgit\s+branch\b[^|;&\n]*(?:--delete|-[dD])\b"),
+    re.compile(r"\bgit\b[^|;&\n]*?\bbranch\b[^|;&\n]*(?:--delete|-[dD])\b"),
     # git reset
-    re.compile(r"\bgit\s+reset\s+--hard\b"),
-    re.compile(r"\bgit\s+reset\s+--soft\b"),
-    re.compile(r"\bgit\s+reset\s+--mixed\b"),
-    # git clean
-    re.compile(r"\bgit\s+clean\s+-f\b"),
+    re.compile(r"\bgit\b[^|;&\n]*?\breset\s+--(?:hard|soft|mixed)\b"),
+    # git clean with force in any short-flag cluster (-f, -fd, -ffdx) or as a
+    # separate argument (-d -f), plus the long form. `-f\b` matched only a
+    # cluster *ending* in f, so `git clean -fd` — which still deletes untracked
+    # files — was allowed. `-n` (dry run) stays allowed: it carries no f.
+    re.compile(r"\bgit\b[^|;&\n]*?\bclean\b[^|;&\n]*?(?:\s-[a-zA-Z]*f|\s--force\b)"),
     # git checkout -- .
     re.compile(r"\bgit\s+checkout\s+--\s+\."),
     # git restore .
@@ -71,8 +79,11 @@ _BASH_BLOCK_PATTERNS = [
     # rm with combined force+recursive flags, short form (any order)
     re.compile(r"\brm\s+-[a-zA-Z]*[rR][a-zA-Z]*[fF][a-zA-Z]*\b"),  # -rf, -Rf, -rfv …
     re.compile(r"\brm\s+-[a-zA-Z]*[fF][a-zA-Z]*[rR][a-zA-Z]*\b"),  # -fr, -Fr, -frv …
-    # rm with long-form --recursive and --force flags (any order)
-    re.compile(r"\brm\b[^|;&\n]*--(?:recursive|force)\b[^|;&\n]*--(?:force|recursive)\b"),
+    # rm with recursive and force as separate arguments, either order and in
+    # either notation: `rm -r -f x`, `rm --recursive --force x`, `rm -r --force x`.
+    # The previous long-form-only pattern missed every mixed and short-split form.
+    re.compile(r"\brm\b[^|;&\n]*\s-(?:-recursive\b|[a-zA-Z]*[rR])[^|;&\n]*\s-(?:-force\b|[a-zA-Z]*[fF])"),
+    re.compile(r"\brm\b[^|;&\n]*\s-(?:-force\b|[a-zA-Z]*[fF])[^|;&\n]*\s-(?:-recursive\b|[a-zA-Z]*[rR])"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -98,6 +109,10 @@ _PATH_BLOCK_PATTERNS = [
     re.compile(r"(^|[/\\])\.claude[/\\]hooks[/\\]"),
     # Canonical run state — must only be written via devflow_operations.py CLI
     re.compile(r"(^|[/\\])\.devflow[/\\]runs[/\\]"),
+    # Run-state signing key. Run state carries an HMAC that the approval gates
+    # verify; if this key were writable the tool-call surface could re-key a run
+    # and re-sign forged state, making the signature worthless.
+    re.compile(r"(^|[/\\])\.devflow[/\\]cache[/\\]state-signing\.key$"),
     # Canonical scorecard/report — must only be written via devflow_operations.py CLI
     re.compile(r"(^|[/\\])\.devflow[/\\]reports[/\\]"),
 ]
