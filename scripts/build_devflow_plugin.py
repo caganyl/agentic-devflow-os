@@ -38,8 +38,22 @@ INCLUDED_SCRIPTS = frozenset({
     "devflow_operations.py",
     "devflow_target_guard.py",
     "devflow_delegation_recorder.py",
+    # Shipped so enforce-role-boundaries.sh can authorize implementer writes in
+    # a target project (it resolves the validator from the plugin root).
+    "validate_ownership_manifest.py",
 })
 INCLUDED_HOOKS = frozenset({"hooks.json"})
+
+# Runtime enforcement shell hooks. Shipping these makes claude-devflow apply the
+# same role-boundary / main-branch / sensitive-path protection in any target
+# project that the framework repo dogfoods on itself. Registered in hooks.json
+# under ${CLAUDE_PLUGIN_ROOT}/hooks/.
+INCLUDED_SHELL_HOOKS = frozenset({
+    "protect-main.sh",
+    "protect-sensitive-paths.sh",
+    "enforce-role-boundaries.sh",
+    "session-start.sh",
+})
 
 
 def copy_source_tree(sources: dict, output_dir: Path) -> None:
@@ -62,6 +76,17 @@ def copy_source_tree(sources: dict, output_dir: Path) -> None:
                 src_file = src_path / fname
                 if src_file.exists():
                     shutil.copy2(src_file, dest / fname)
+                else:
+                    print(f"  [skip] hooks/{fname}: not found", file=sys.stderr)
+            # Runtime enforcement shell hooks live under .claude/hooks/, not the
+            # hooks/ source dir; copy them into the plugin's hooks/ so hooks.json
+            # can reference ${CLAUDE_PLUGIN_ROOT}/hooks/<name>.sh.
+            for fname in INCLUDED_SHELL_HOOKS:
+                src_file = CLAUDE_DIR / "hooks" / fname
+                if src_file.exists():
+                    dest_file = dest / fname
+                    shutil.copy2(src_file, dest_file)
+                    dest_file.chmod(0o755)
                 else:
                     print(f"  [skip] hooks/{fname}: not found", file=sys.stderr)
         elif src_path.is_dir():

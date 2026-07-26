@@ -143,8 +143,13 @@ authorize_implementer_write() {
     return 1
   fi
 
+  local ownership_validator="$ROOT/scripts/validate_ownership_manifest.py"
+  if [ -n "${DEVFLOW_PLUGIN_ROOT:-}" ] && [ -f "$DEVFLOW_PLUGIN_ROOT/scripts/validate_ownership_manifest.py" ]; then
+    ownership_validator="$DEVFLOW_PLUGIN_ROOT/scripts/validate_ownership_manifest.py"
+  fi
+
   if ! authorization_error="$(
-    python3 "$ROOT/scripts/validate_ownership_manifest.py" \
+    python3 "$ownership_validator" \
       --manifest "$manifest_path" \
       --root "$ROOT" \
       --branch "$branch" \

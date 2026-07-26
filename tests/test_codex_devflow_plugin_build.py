@@ -368,9 +368,13 @@ class CodexPluginBuildTests(unittest.TestCase):
                 self.assertIsNone(re.search(pattern, raw))
 
     def test_claude_builder_and_hook_registration_are_unchanged(self) -> None:
+        # Updated when the Claude plugin build gained the runtime enforcement
+        # shell hooks + ownership validator (claude-devflow now applies the
+        # same protection in target projects). This tripwire still guards the
+        # Claude build from unintended Codex-side edits.
         expected = {
-            REPO_ROOT / "scripts" / "build_devflow_plugin.py": "42ee26a5801c3c32366f7c2548765c1970900489c453a7ba04308458e6da299d",
-            REPO_ROOT / "hooks" / "hooks.json": "a437b5dfc9f726f3250e8b8f890ae98143f0f709f7c7426fd43881b868956379",
+            REPO_ROOT / "scripts" / "build_devflow_plugin.py": "b058b986a838a6fc659144d7ae567b3b22806faed506eb8c738604fa27ba2539",
+            REPO_ROOT / "hooks" / "hooks.json": "baf288402c0c8d3264b47502cca4578f831fcd5f3796a84aeafc227f0827925e",
         }
         for path, digest in expected.items():
             with self.subTest(path=path):
