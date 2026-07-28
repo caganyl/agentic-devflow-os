@@ -47,6 +47,34 @@ yaşar. İş yaptığınız proje ayrı bir repodur ve orada yalnızca `.devflow
 bir çalışma alanı açılır. Operations runner, hedef yolun framework repo olması
 durumunda çıkış kodu 2 ile reddeder.
 
+## Giriş noktası: `claude-devflow`
+
+Sistem `claude-devflow` shell fonksiyonu ile açılır (`~/.zshrc`). Düz `claude`
+plugin'i yüklemez; agent, skill ve hook'lar devreye girmez.
+
+Fonksiyon önce `scripts/devflow_bootstrap.sh` çalıştırır, sonra
+`claude --plugin-dir dist/devflow-plugin` ile oturumu başlatır. Bootstrap
+bulunulan dizini şu hale getirir:
+
+| Adım | Davranış |
+| --- | --- |
+| Framework repo kontrolü | Framework repo içindeyse hiçbir şey yapmadan çıkar |
+| Plugin | `dist/` yoksa veya kaynaklardan eskiyse yeniden build eder |
+| Git | Repo değilse `git init`, `main`/`master` üzerindeyse `req-001-bootstrap` branch'ine geçer |
+| Politika | `CLAUDE.md` yoksa `templates/TARGET_CLAUDE.md`'den koyar, `rules/*.md` dosyalarını `.claude/rules/` altına dağıtır |
+| İskelet | `docs/`, `design/reviews`, `evals`, `backend`, `frontend`, `migrations`, `tests`, `ai` |
+| Ownership | `docs/product/REQ-001.md` + approved `docs/ownership/REQ-001.json` üretir ve validator ile doğrular |
+| Workspace | `.devflow/` başlatır, cache/log yollarını `.gitignore`'a ekler |
+
+Her adım idempotenttir; mevcut dosyanın üzerine yazmaz. Böylece aynı komut hem
+boş klasörde hem devam eden projede güvenle çalışır.
+
+REQ-001 manifesti bilinçli olarak `approved` üretilir: kapsamı yalnızca iskelet
+dizinleridir, ürün davranışı tanımlamaz ve implementer agent'ların ilk anda
+tamamen kilitli kalmasını önler. Feature REQ'leri bu istisnayı paylaşmaz —
+`devflow-manifest <REQ-no>` yalnızca `draft` manifest üretir, `approved`'a
+çevirmek insan adımıdır.
+
 ## Anayasa
 
 Her şeyin dayandığı belge `PROJECT_CONSTITUTION.md`. Dört şey tanımlar:
