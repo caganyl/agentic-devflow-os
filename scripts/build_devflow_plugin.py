@@ -44,6 +44,15 @@ INCLUDED_SCRIPTS = frozenset({
 })
 INCLUDED_HOOKS = frozenset({"hooks.json"})
 
+# Shell scripts shipped under the plugin's scripts/. devflow_bootstrap.sh is the
+# zero-step target provisioner the `claude-devflow` launcher runs before starting
+# a session, so it must travel with the plugin rather than assume a framework
+# repo checkout is present.
+INCLUDED_SHELL_SCRIPTS = frozenset({
+    "devflow_bootstrap.sh",
+    "devflow_new_manifest.sh",
+})
+
 # Runtime enforcement shell hooks. Shipping these makes claude-devflow apply the
 # same role-boundary / main-branch / sensitive-path protection in any target
 # project that the framework repo dogfoods on itself. Registered in hooks.json
@@ -68,6 +77,14 @@ def copy_source_tree(sources: dict, output_dir: Path) -> None:
                 src_file = src_path / fname
                 if src_file.exists():
                     shutil.copy2(src_file, dest / fname)
+                else:
+                    print(f"  [skip] scripts/{fname}: not found", file=sys.stderr)
+            for fname in INCLUDED_SHELL_SCRIPTS:
+                src_file = src_path / fname
+                if src_file.exists():
+                    dest_file = dest / fname
+                    shutil.copy2(src_file, dest_file)
+                    dest_file.chmod(0o755)
                 else:
                     print(f"  [skip] scripts/{fname}: not found", file=sys.stderr)
         elif key == "hooks":
