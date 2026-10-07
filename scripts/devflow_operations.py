@@ -2626,8 +2626,19 @@ def cmd_launch(args) -> int:
         f"- Yazma öncesi konumu doğrula: pwd, git rev-parse --show-toplevel, git branch --show-current\n"
         f"- Kök DEVFLOW_RUN_WORKTREE ve branch DEVFLOW_RUN_BRANCH ile eşleşmeli; uyuşmazlıkta yaz yapma, raporla\n"
         f"- main branch'e doğrudan yazma; insan approval gate'lerini koru\n"
-        f"- DEVFLOW_RUN_WORKTREE dışında dosya oluşturma veya değiştirme"
+        f"- DEVFLOW_RUN_WORKTREE dışında dosya oluşturma veya değiştirme\n"
+        f"- REQ bağı: {getattr(args, 'req_id', None) or 'YOK — implementer ajanlar yazamaz; implementation gerekiyorsa bunu ilk adımda insana bildir'}\n"
+        f"- Tasarım fazı: ADR yalnızca eşik sağlanırsa; adr-reviewer en fazla 2 tur; sonrası insan kararı\n"
+        f"- Implementer ownership/branch reddi tasarım sorunu değildir; tasarım dokümanlarına dönme, blocker'ı raporla"
     )
+
+    if not getattr(args, "req_id", None):
+        print(
+            "Uyarı: --req-id verilmedi. Bu run onaylı bir ownership manifestine bağlı değil; "
+            "implementer ajanların yazma çağrıları hook tarafından reddedilecek. "
+            "Implementation için: launch --req-id REQ-NNN (docs/ownership/REQ-NNN.json approved olmalı).",
+            file=sys.stderr,
+        )
 
     print("Claude Code supervisor başlatılıyor (interaktif)...")
     print(f"  worktree:       {worktree_path}")

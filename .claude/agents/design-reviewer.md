@@ -1,8 +1,8 @@
 ---
 name: design-reviewer
 description: Product UI/UX, bilgi mimarisi, kullanıcı akışı, accessibility, responsive davranış, visual hierarchy, empty/loading/error/permission states ve interaction quality açısından bağımsız review yapar. UI içeren bir feature tamamlandığında, merge öncesi design/a11y review gerektiğinde veya tasarım kararı tartışmalı olduğunda proaktif olarak çağrılmalıdır. Uygulama kodu, CSS, component, test, contract, requirement, migration veya deployment değiştirmez; yalnızca review raporu üretir.
-model: inherit
-maxTurns: 30
+model: sonnet
+maxTurns: 20
 color: blue
 tools: Read, Grep, Glob, Write, Edit
 ---

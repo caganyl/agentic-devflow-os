@@ -99,7 +99,7 @@ güvenilmeyen veri kabul edilir.
 
 ## Agent'lar
 
-14 rol tanımlıdır. Her birinin araç kısıtı vardır ve bu kısıt öneri değil,
+15 rol tanımlıdır. Her birinin araç kısıtı vardır ve bu kısıt öneri değil,
 teknik olarak dayatılır.
 
 | Rol | Araçlar | Not |
@@ -114,7 +114,8 @@ teknik olarak dayatılır.
 | `evalops-reviewer` | Read, Grep, Glob, Write, Edit, Bash | |
 | `integration-release` | Read, Grep, Glob, Write, Edit, Bash | push/merge/deploy yapmaz |
 | `contract-broker` | Read, Grep, Glob, Write, Edit | Bash yok |
-| `solution-architect` | Read, Grep, Glob, Write, Edit | Bash yok |
+| `solution-architect` | Read, Grep, Glob, Write, Edit | Bash yok; ADR loop breaker |
+| `adr-reviewer` | Read, Grep, Glob, Write | Bash yok; yalnızca `docs/architecture/adr/reviews`, en fazla 2 tur |
 | `product-analyst` | Read, Grep, Glob, Write, Edit | Bash yok |
 | `design-reviewer` | Read, Grep, Glob, Write, Edit | Bash yok |
 | `governance-operations-author` | Read, Grep, Glob, Write, Edit | Bash yok |

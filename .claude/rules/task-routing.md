@@ -34,8 +34,12 @@ Task geldiğinde:
      → Hayır: Product Analyst devreye al
   3. Acceptance criteria tanımlı mı?
      → Hayır: Product Analyst devreye al
-  4. Mimari karar gerekiyor mu?
-     → Evet: Solution Architect devreye al
+  4. Mimari karar gerekiyor mu? (yalnızca şu durumlarda evet:
+     yeni dış bağımlılık/servis, context'ler arası veri modeli/migration,
+     auth/güvenlik sınırı, geriye uyumsuz public contract, geri alınması
+     pahalı karar)
+     → Evet: Solution Architect ADR yazar, adr-reviewer en fazla 2 turda karar verir
+     → Hayır: ADR yok; gerekirse docs/decisions/ altına kısa karar notu
   5. Frontend + Backend paralel çalışacak mı?
      → Evet: Contract Broker önce devreye al
   6. AI/ML/LLM bileşen var mı?

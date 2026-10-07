@@ -19,7 +19,8 @@ Sırayla ve minimum set prensibine göre:
 
 1. **Delivery Lead** — plan, task graph, bağımlılık haritası
 2. **Product Analyst** — acceptance criteria netleştirme (gerekirse)
-3. **Solution Architect** — mimari karar (gerekirse)
+3. **Solution Architect** — mimari karar (yalnızca ADR eşiği sağlanırsa)
+   - **ADR Reviewer** — tek turda VERDICT; en fazla 2 tur, sonrası insan kararı
 4. **Contract Broker** — API/event/DB contract (frontend+backend paralel başlamadan önce)
 5. **Frontend Engineer** — UI implementation (contract sonrası)
 6. **Backend Engineer** — API ve service implementation (contract sonrası)
@@ -67,6 +68,9 @@ Sırayla ve minimum set prensibine göre:
 Bkz. `.claude/templates/handoff.md`
 
 ## Failure / Recovery
+
+- ADR ikinci turda hâlâ BLOCK: dur, BLOCKER listesini insana sun; üçüncü tur yok
+- Implementer ownership/branch nedeniyle reddedildi: tasarıma dönme; `launch --req-id` veya manifest onayı için insana raporla
 
 - Contract belirsizliği: Contract Broker'a geri dön
 - Test başarısızlığı: QA Automation ile birlikte root cause analizi

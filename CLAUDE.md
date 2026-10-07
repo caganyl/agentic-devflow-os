@@ -2,13 +2,25 @@
 
 ## Read Before Acting
 
-Kod, plan veya mimari kararı oluşturmadan önce şunları oku:
+Önce görevin context pack'ini veya delegasyon mesajındaki özetleri kullan.
+Belgeleri yalnızca görevin dokunduğu bölüm kadar oku:
 
-1. PROJECT_CONSTITUTION.md
-2. İlgili docs/product/requirements/ dosyası
-3. İlgili docs/architecture/adr/ kaydı
-4. İlgili docs/contracts/ dosyaları
-5. docs/handoffs/ içindeki en güncel ilgili handoff
+1. PROJECT_CONSTITUTION.md (kısa; gerektiğinde)
+2. İlgili REQ ve acceptance criteria: yalnızca bu görevin AC maddeleri
+3. İlgili ADR: yalnızca Status ve Decision bölümleri
+4. İlgili contract: yalnızca dokunulan endpoint/event/tablo
+5. Handoff: yalnızca son "Sonraki Adımlar"/açık konular bölümü
+
+Tüm ADR, requirement veya handoff setini baştan sona okuma. Bir belge
+~12.000 karakterden uzunsa önce başlıkları grep'le, sonra ilgili bölümü oku.
+
+## Design Phase Budget
+
+- ADR yalnızca eşik sağlanırsa yazılır (bkz. `.claude/agents/solution-architect.md`).
+- Bir ADR için en fazla 2 review turu; sonrası insan kararıdır (hook ile zorlanır).
+- Accepted ADR dondurulur; uygulama sırasındaki sapmalar handoff/PR'a yazılır.
+- Ownership/branch blocker'ı tasarım sorunu değildir; tasarım dokümanlarına
+  geri dönme, blocker'ı insana raporla.
 
 ## Source of Truth
 

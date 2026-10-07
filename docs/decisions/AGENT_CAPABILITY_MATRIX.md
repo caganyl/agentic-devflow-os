@@ -6,7 +6,8 @@ Bu dosya, Agentic DevFlow OS içindeki rollerin hangi tür değişiklikleri yapa
 |---|---|---|---|---|---|---|
 | Delivery Lead | Planlama-only | Hook: tüm `Edit`/`Write` ve `Bash` deny | Governance branch path sınırı (agent kimliği değil path denetlenir) | Yok | Hayır | Plan, kod veya komut üretemez |
 | Product Analyst | Yalnızca product doküman alanı | Hook: path allowlist (`docs/product`, `docs/decisions`); Bash deny | Governance branch path sınırı | `docs/product/**`, `docs/decisions/**` | Hayır | Requirement onayı insanda |
-| Solution Architect | Yalnızca architecture doküman alanı | Hook: path allowlist (`docs/architecture`, `docs/decisions`); Bash deny | Governance branch path sınırı | `docs/architecture/**`, `docs/decisions/**` | Hayır | ADR onayı insanda |
+| Solution Architect | Yalnızca architecture doküman alanı | Hook: path allowlist (`docs/architecture`, `docs/decisions`); ADR loop breaker (Accepted ADR dondurulur, 2 review turundan sonra revizyon yok, ~12.000 karakter bütçe, `reviews/` yazılamaz); Bash deny | Governance branch path sınırı | `docs/architecture/**`, `docs/decisions/**` | Hayır | ADR onayı insanda |
+| ADR Reviewer | Review-only, tek turda VERDICT | Hook: path allowlist (`docs/architecture/adr/reviews`); dosya adı `ADR-NNN-review-<tur>.md`, VERDICT satırı zorunlu, en fazla 2 tur, review dosyaları değiştirilemez; Bash deny | Governance branch path sınırı | `docs/architecture/adr/reviews/**` | Hayır | İkinci turdan sonra karar insanda |
 | Contract Broker | Yalnızca contract alanı | Hook: path allowlist (`docs/contracts`); Bash deny | Governance branch path sınırı | `docs/contracts/**` | Hayır | Contract onayı insanda |
 | Frontend Engineer | REQ-ID + approved manifest gerektirir | Hook: `--authorize-agent` ile branch + approved manifest + owner + `write_paths` kontrolü (fail-closed); Bash mutation/deploy/migration blok listesi | CI: base-approved manifestteki owner `write_paths` dışında diff merge olamaz | Manifestte tanımlı `write_paths` | Sınırlı (mutation/deploy/migration komutları blok) | main merge insanda |
 | Backend Engineer | REQ-ID + approved manifest gerektirir | Aynı (yukarıdaki implementer enforcement) | Aynı (CI: base-approved manifest owner `write_paths` kontrolü) | Manifestte tanımlı `write_paths` | Sınırlı | main merge insanda |
@@ -23,7 +24,9 @@ Bu dosya, Agentic DevFlow OS içindeki rollerin hangi tür değişiklikleri yapa
 
 - Implementer agent satırlarındaki ("Aynı" yazan) enforcement,
   `docs/ownership/REQ-XXX.json` manifestini kullanır: branch
-  `req-XXX-kisa-aciklama` desenine uymalı, manifest `approved` durumda
+  `req-XXX-kisa-aciklama` desenine uymalı (veya `launch --req-id` ile REQ'e
+  bağlanmış aktif managed run branch'i `devflow/run-*` olmalı; REQ bağı
+  imzalı run state'ten okunur), manifest `approved` durumda
   olmalı, çağrıyı yapan agent manifestte owner olarak tanımlı olmalı ve
   hedef path o agent'ın `write_paths` alanı altında olmalı. Bkz.
   `docs/architecture/adr/ADR-002-task-ownership-manifest.md` (sözleşme) ve

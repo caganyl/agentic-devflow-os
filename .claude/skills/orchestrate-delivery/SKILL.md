@@ -30,10 +30,15 @@ git branch --show-current
 - Branch `DEVFLOW_RUN_BRANCH` ile eşleşmeli.
 - Uyuşmazlık varsa delivery'yi başlatma; blocker'ı raporla ve dur.
 
-Managed operations CLI her zaman şu şekilde çağrılır:
+Managed operations CLI her zaman şu şekilde ve ana oturum (supervisor)
+tarafından çağrılır; delivery-lead alt ajanının Bash yetkisi yoktur:
 ```bash
 python3 "$DEVFLOW_OPERATIONS_SCRIPT" ... --target "$DEVFLOW_RUN_WORKTREE"
 ```
+
+Implementer yazabilmek için managed run'ın onaylı bir manifeste bağlı olması
+gerekir: `launch --req-id REQ-NNN`. Run REQ'e bağlı değilse implementation
+dispatch etme; bunu ilk adımda insana bildir.
 
 ### 2. Girdileri Doğrula
 
@@ -83,6 +88,26 @@ python3 "$DEVFLOW_OPERATIONS_SCRIPT" ... --target "$DEVFLOW_RUN_WORKTREE"
 - [ ] İnsan: main merge
 ```
 
+### 3b. Tasarım Fazı Protokolü (döngü kesici)
+
+Tasarım fazı şu sırayla ve en fazla bir kez yürür:
+
+1. **Eşik kontrolü:** ADR gerekli mi? (`solution-architect.md` → "ADR Gerekli
+   mi?"). Gerekmiyorsa ADR görevi karar notuna dönüşür veya atlanır.
+2. **Taslak:** solution-architect `.claude/templates/adr.md` ile tek ADR yazar.
+3. **Review turu 1:** adr-reviewer → `VERDICT`.
+   - APPROVE / APPROVE_WITH_NOTES → adım 5.
+   - BLOCK → architect yalnızca BLOCKER'ları kapatır → adım 4.
+4. **Review turu 2 (son):** adr-reviewer yalnızca önceki BLOCKER'lara bakar.
+   - Hâlâ BLOCK → dur, BLOCKER listesini insana sun. Üçüncü tur yok.
+5. **Tek insan kapısı:** ADR + contract + manifest için tek bir onay özeti
+   sun (karar, etkilenen modüller, açık NOTES). Onaydan sonra implementation
+   başlar ve tasarım dokümanlarına geri dönülmez.
+
+Bu sınırlar `.claude/hooks/enforce-role-boundaries.sh` içindeki ADR loop
+breaker ile teknik olarak da zorlanır (tur sınırı, Accepted dondurma, boyut
+bütçesi).
+
 ### 4. Rolleri Dispatch Et
 
 `task-routing` skill'ini kullanarak minimum rol setini belirle.
@@ -97,7 +122,8 @@ Her role şu formatla görev ver:
 
 ### 5. Çıktıları Topla ve İzle
 
-Her rolün çıktısını kısa structured handoff olarak topla:
+Her rolün çıktısını kısa structured handoff olarak topla (en fazla 10 satır;
+tam doküman metnini orkestratör bağlamına geri taşıma, yol ver):
 - Tamamlanan artefakt
 - Açık sorunlar
 - Sonraki adım

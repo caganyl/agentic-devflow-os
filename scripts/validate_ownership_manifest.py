@@ -280,7 +280,19 @@ def validate_manifest(manifest, manifest_path, root):
         raise ManifestError(errors)
 
 
-def authorize(manifest, root, branch, authorize_agent, target):
+MANAGED_RUN_BRANCH_PREFIX = "devflow/run-"
+
+
+def authorize(manifest, root, branch, authorize_agent, target, managed_run=False):
+    """Authorize one implementer write against an approved manifest.
+
+    managed_run=True is used for DevFlow managed runs (``launch``), whose
+    branches live in the ``devflow/run-*`` namespace. The REQ binding then
+    comes from the signed run state (``--req-id`` at create-run/launch), not
+    from the branch name, so the ``req-<digits>-`` branch pattern check is
+    replaced by a ``devflow/run-`` prefix check. Status, owner and
+    write_paths checks are unchanged.
+    """
     errors = []
 
     status = manifest.get("status")
@@ -291,7 +303,12 @@ def authorize(manifest, root, branch, authorize_agent, target):
     req_digits = req_id[len("REQ-"):] if req_id.startswith("REQ-") else ""
 
     branch_match = BRANCH_RE.match(branch or "")
-    if not branch_match:
+    if managed_run:
+        if not (branch or "").startswith(MANAGED_RUN_BRANCH_PREFIX):
+            errors.append(
+                f"managed-run authorization requires a '{MANAGED_RUN_BRANCH_PREFIX}*' branch, got: {branch!r}"
+            )
+    elif not branch_match:
         errors.append(
             f"branch must match 'req-<digits>-<description>', got: {branch!r}"
         )
@@ -339,6 +356,11 @@ def build_parser():
     parser.add_argument("--root", required=True, help="Repository root used to resolve relative references")
     parser.add_argument("--branch", help="Current branch name, required with --authorize-agent")
     parser.add_argument(
+        "--managed-run",
+        action="store_true",
+        help="Branch is a DevFlow managed run branch (devflow/run-*) bound to this REQ via run state",
+    )
+    parser.add_argument(
         "--authorize-agent",
         help="Agent name requesting write authorization, required with --branch and --target",
     )
@@ -365,7 +387,7 @@ def main(argv=None):
         manifest = load_manifest(manifest_path)
         validate_manifest(manifest, manifest_path, root)
         if authorize_requested:
-            authorize(manifest, root, args.branch, args.authorize_agent, args.target)
+            authorize(manifest, root, args.branch, args.authorize_agent, args.target, managed_run=args.managed_run)
     except ManifestError as exc:
         for error in exc.errors:
             print(f"error: {error}", file=sys.stderr)

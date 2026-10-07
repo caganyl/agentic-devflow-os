@@ -52,7 +52,7 @@ is_governed_agent() {
     delivery-lead|product-analyst|solution-architect|contract-broker|\
     frontend-engineer|backend-engineer|database-engineer|qa-automation|\
     security-red-team|integration-release|ai-data-engineer|evalops-reviewer|\
-    design-reviewer|governance-operations-author)
+    design-reviewer|governance-operations-author|adr-reviewer)
       return 0
       ;;
     *)
@@ -124,13 +124,40 @@ authorize_implementer_write() {
   local branch req_digits manifest_path target_path authorization_error
 
   branch="$(git -C "$ROOT" branch --show-current 2>/dev/null || true)"
+  local managed_flag=()
 
-  if [[ ! "$branch" =~ ^req-([0-9]{3,})-.+$ ]]; then
-    deny "Ownership-manifest protection: implementer agents may write only on a branch matching req-XXX-kisa-aciklama. Current branch: ${branch:-detached-or-unknown}"
+  if [[ "$branch" =~ ^req-([0-9]{3,})-.+$ ]]; then
+    req_digits="${BASH_REMATCH[1]}"
+  elif [[ "$branch" == devflow/run-* ]] && [ -n "${DEVFLOW_RUN_BRANCH:-}" ] && [ "$branch" = "$DEVFLOW_RUN_BRANCH" ]; then
+    # Managed run (launch): the branch is devflow/run-*, so the REQ binding
+    # comes from the signed run state written by create-run/launch --req-id.
+    # Agents cannot write .devflow/runs/ (target guard), so this binding is
+    # not agent-controlled.
+    local run_req
+    run_req="$(python3 - "$ROOT" <<'PYREQ'
+import json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+try:
+    project = json.loads((root / ".devflow" / "project.json").read_text(encoding="utf-8"))
+    run_id = project.get("current_run_id") or ""
+    run = json.loads((root / ".devflow" / "runs" / f"{run_id}.json").read_text(encoding="utf-8"))
+    print(run.get("req_id") or "")
+except (OSError, ValueError):
+    print("")
+PYREQ
+)"
+    if [[ ! "$run_req" =~ ^REQ-([0-9]{3,})$ ]]; then
+      deny "Ownership-manifest protection: this managed run ($branch) is not bound to a REQ, so implementer agents cannot write. Restart the run with 'launch --req-id REQ-NNN' after a human approves docs/ownership/REQ-NNN.json. Report this as a blocker to the human; do not loop back to revising ADRs, requirements or contracts."
+      return 1
+    fi
+    req_digits="${BASH_REMATCH[1]}"
+    managed_flag=(--managed-run)
+  else
+    deny "Ownership-manifest protection: implementer agents may write only on a branch matching req-XXX-kisa-aciklama or on the active managed run branch (DEVFLOW_RUN_BRANCH). Current branch: ${branch:-detached-or-unknown}. Report this as a blocker; do not loop back to design documents."
     return 1
   fi
 
-  req_digits="${BASH_REMATCH[1]}"
   manifest_path="$ROOT/docs/ownership/REQ-${req_digits}.json"
 
   if [ ! -f "$manifest_path" ]; then
@@ -153,6 +180,7 @@ authorize_implementer_write() {
       --manifest "$manifest_path" \
       --root "$ROOT" \
       --branch "$branch" \
+      ${managed_flag[@]+"${managed_flag[@]}"} \
       --authorize-agent "$AGENT_TYPE" \
       --target "$target_path" \
       2>&1
@@ -198,7 +226,12 @@ bash_has_blocked_operation() {
     return 0
   fi
 
-  if [[ "$command" == *">"* || "$command" == *"<"* ]]; then
+  # Stream merges and discards (2>&1, >&2, 2>/dev/null, >/dev/null) do not
+  # write files. Strip them before the redirect check so ordinary test
+  # commands such as `dotnet test 2>&1 | tail -50` are not denied and retried.
+  local redirect_probe
+  redirect_probe="$(printf '%s' "$command" | sed -E 's/[0-9]?>&[0-9]//g; s/[0-9]?>[[:space:]]*\/dev\/null//g')"
+  if [[ "$redirect_probe" == *">"* || "$redirect_probe" == *"<"* ]]; then
     return 0
   fi
 
@@ -239,6 +272,122 @@ security_command_is_non_mutating() {
   esac
 }
 
+
+# ---------------------------------------------------------------------------
+# ADR loop breaker (design phase convergence)
+#
+# Deterministic limits so the design phase cannot loop forever:
+#   - An ADR whose Status is Accepted/Superseded/Rejected is frozen.
+#   - After DEVFLOW_ADR_MAX_REVIEW_ROUNDS (default 2) review files exist for an
+#     ADR, solution-architect may no longer revise it; a human decides.
+#   - An ADR may not grow beyond DEVFLOW_ADR_MAX_CHARS (default 12000 chars).
+#   - Only adr-reviewer writes docs/architecture/adr/reviews/, one immutable
+#     file per round: ADR-NNN-review-<round>.md, containing a VERDICT line.
+# Prints a deny reason on stdout when the write must be blocked.
+# ---------------------------------------------------------------------------
+adr_gate_reason() {
+  HOOK_INPUT="$INPUT" python3 - "$ROOT" "$AGENT_TYPE" <<'PYADR'
+import json, os, re, sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+agent = sys.argv[2]
+max_rounds = int(os.environ.get("DEVFLOW_ADR_MAX_REVIEW_ROUNDS", "2"))
+max_chars = int(os.environ.get("DEVFLOW_ADR_MAX_CHARS", "12000"))
+
+data = json.loads(os.environ.get("HOOK_INPUT", "{}"))
+tool = data.get("tool_name", "")
+ti = data.get("tool_input") or {}
+raw = Path(ti.get("file_path", "")).expanduser()
+target = (raw if raw.is_absolute() else root / raw).resolve()
+try:
+    rel = target.relative_to(root).as_posix()
+except ValueError:
+    sys.exit(0)
+
+adr_dir = "docs/architecture/adr/"
+review_dir = adr_dir + "reviews/"
+if not rel.startswith(adr_dir):
+    sys.exit(0)
+
+def reviews_for(adr_id):
+    d = root / review_dir
+    if not d.is_dir():
+        return []
+    return sorted(d.glob(f"{adr_id}-review-*.md"))
+
+# --- review files -----------------------------------------------------------
+if rel.startswith(review_dir):
+    if agent != "adr-reviewer":
+        print(f"ADR loop breaker: only adr-reviewer may write {review_dir}. "
+              f"{agent} cannot review or rewrite reviews.")
+        sys.exit(0)
+    m = re.fullmatch(r"(ADR-\d{3,})-review-(\d+)\.md", Path(rel).name)
+    if not m:
+        print("ADR loop breaker: review file name must be ADR-NNN-review-<round>.md.")
+        sys.exit(0)
+    adr_id, rnd = m.group(1), int(m.group(2))
+    if target.exists():
+        print(f"ADR loop breaker: {rel} already exists; review rounds are immutable.")
+        sys.exit(0)
+    if rnd > max_rounds:
+        print(f"ADR loop breaker: {adr_id} already had {max_rounds} review rounds. "
+              "Stop and hand the decision to the human; do not start another round.")
+        sys.exit(0)
+    if rnd != len(reviews_for(adr_id)) + 1:
+        print(f"ADR loop breaker: next review round for {adr_id} must be "
+              f"{len(reviews_for(adr_id)) + 1}, got {rnd}.")
+        sys.exit(0)
+    if tool == "Write":
+        content = ti.get("content", "")
+        if not re.search(r"^VERDICT:\s*(APPROVE|APPROVE_WITH_NOTES|BLOCK)\s*$", content, re.M):
+            print("ADR loop breaker: review must contain a line "
+                  "'VERDICT: APPROVE | APPROVE_WITH_NOTES | BLOCK'.")
+            sys.exit(0)
+    sys.exit(0)
+
+# --- ADR documents ----------------------------------------------------------
+m = re.fullmatch(r"(ADR-\d{3,})[^/]*\.md", Path(rel).name)
+if not m or "/" in rel[len(adr_dir):]:
+    sys.exit(0)
+adr_id = m.group(1)
+
+if agent != "solution-architect":
+    sys.exit(0)
+
+existing = target.read_text(encoding="utf-8", errors="replace") if target.exists() else ""
+status = re.search(r"^##\s*Status\s*\n+\s*([A-Za-z]+)", existing, re.M)
+if status and status.group(1) in ("Accepted", "Superseded", "Rejected"):
+    print(f"ADR loop breaker: {adr_id} is {status.group(1)} and frozen. Record "
+          "implementation-time deviations in the handoff/PR or propose a new ADR "
+          "that supersedes it; do not edit this one.")
+    sys.exit(0)
+
+done = len(reviews_for(adr_id))
+if done >= max_rounds:
+    print(f"ADR loop breaker: {adr_id} already had {done} review rounds "
+          f"(limit {max_rounds}). Further revision needs a human decision; "
+          "report the open BLOCKERs and stop.")
+    sys.exit(0)
+
+if tool == "Write":
+    new_len = len(ti.get("content", ""))
+elif tool == "Edit":
+    old_s, new_s = ti.get("old_string", ""), ti.get("new_string", "")
+    if ti.get("replace_all"):
+        new_len = len(existing.replace(old_s, new_s))
+    else:
+        new_len = len(existing) - len(old_s) + len(new_s)
+else:
+    new_len = len(existing)
+if new_len > max_chars and new_len > len(existing):
+    print(f"ADR loop breaker: {adr_id} would be {new_len} chars (budget {max_chars}). "
+          "Keep the ADR to the decision; move details to the contract, the "
+          "implementation or a follow-up ADR. Shrinking edits are allowed.")
+    sys.exit(0)
+PYADR
+}
+
 case "$TOOL_NAME" in
   Edit|Write)
     FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty')"
@@ -250,6 +399,12 @@ case "$TOOL_NAME" in
 
     if [ "$AGENT_TYPE" = "delivery-lead" ]; then
       deny "Role-boundary protection: delivery-lead is planning-only and cannot create or edit files."
+      exit 0
+    fi
+
+    ADR_GATE_REASON="$(adr_gate_reason)"
+    if [ -n "$ADR_GATE_REASON" ]; then
+      deny "$ADR_GATE_REASON"
       exit 0
     fi
 
@@ -296,6 +451,9 @@ case "$TOOL_NAME" in
       design-reviewer)
         ALLOWED_PATHS=("design/reviews" "docs/quality/accessibility")
         ;;
+      adr-reviewer)
+        ALLOWED_PATHS=("docs/architecture/adr/reviews")
+        ;;
       *)
         exit 0
         ;;
@@ -318,7 +476,7 @@ case "$TOOL_NAME" in
         deny "Role-boundary protection: delivery-lead is planning-only and cannot run Bash commands."
         exit 0
         ;;
-      product-analyst|solution-architect|contract-broker|design-reviewer|governance-operations-author)
+      product-analyst|solution-architect|contract-broker|design-reviewer|governance-operations-author|adr-reviewer)
         deny "Role-boundary protection: $AGENT_TYPE has no Bash authority. Use documented read/write tools only."
         exit 0
         ;;

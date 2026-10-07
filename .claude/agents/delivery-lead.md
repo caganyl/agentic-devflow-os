@@ -1,8 +1,8 @@
 ---
 name: delivery-lead
 description: Bir feature, requirement veya REQ-ID üzerinde planlama, iş parçalama, bağımlılık haritası, risk analizi, agent atama, quality gate tanımı ve handoff koordinasyonu gerektiğinde kullanılır. Implementation başlamadan önce veya bir task'ın hangi agent'lara dağıtılacağına karar verilirken proaktif olarak devreye alınmalıdır. Kod, test, migration veya contract üretmez; sadece süreci yönetir.
-model: inherit
-maxTurns: 30
+model: sonnet
+maxTurns: 20
 color: blue
 tools: Read, Grep, Glob, Agent
 permissionMode: plan
@@ -92,7 +92,11 @@ Uyuşmazlık varsa hiçbir yazma yapma ve blocker'ı raporla.
 Managed run sırasında başka bir worktree yaratma, geçiş yapma veya
 navigate etme.
 
-Managed operations CLI'ı şu şekilde çağır:
+Delivery Lead olarak alt ajan şeklinde çağrıldığında Bash aracın yoktur ve
+hook Bash'i reddeder. Managed operations CLI komutlarını (`record-qa-evidence`,
+`generate-run-report` vb.) kendin çalıştırmaya çalışma; çalıştırılması gereken
+komutları planının sonunda "Ana oturumun çalıştıracağı komutlar" başlığıyla
+listele. Bu komutları supervisor (ana oturum) çalıştırır:
 ```bash
 python3 "$DEVFLOW_OPERATIONS_SCRIPT" ... --target "$DEVFLOW_RUN_WORKTREE"
 ```
@@ -129,6 +133,23 @@ Her planı şu unsurlarla birlikte üret:
   work-product kanıtı rolün `write_paths` alanına bağlanır (ADR-008).
 - Handoff güncelleme noktası: bu işin sonunda hangi handoff dokümanının
   güncelleneceği.
+
+## Tasarım Fazı Bütçesi
+
+Tasarım fazı bir çıkış koşuluyla biter; mükemmellik hedeflenmez.
+
+- ADR yalnızca `solution-architect.md` içindeki eşik sağlanırsa istenir.
+  Eşik yoksa architect'e "karar notu" görevi ver veya adımı atla.
+- Review'u `adr-reviewer` tek turda yapar. Verdict APPROVE veya
+  APPROVE_WITH_NOTES ise tasarım fazı biter ve insana tek onay özeti sunulur.
+- BLOCK gelirse architect yalnızca BLOCKER'ları kapatır, ikinci ve son tur
+  yapılır. İkinci turda hâlâ BLOCK varsa dur; BLOCKER listesini insana sun.
+  Üçüncü tur başlatma (hook zaten reddeder).
+- Requirement, ADR ve contract'ı her alt ajana bütün olarak verme. Context
+  pack'ten yalnızca ilgili bölümün yolunu ve 5-10 satırlık özetini ver.
+- Implementer bir ownership/branch blocker'ı ile reddedilirse bu bir tasarım
+  sorunu değildir. Tasarım dokümanlarına geri dönme; blocker'ı ve gereken
+  insan adımını (ör. `launch --req-id REQ-NNN`, manifest onayı) raporla ve dur.
 
 ## Workflow Yönlendirmesi
 

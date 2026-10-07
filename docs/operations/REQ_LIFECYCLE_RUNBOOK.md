@@ -93,9 +93,18 @@ oluşturulmadan önce ek değerlendirme gerekir:
   insan onaylı `reason`/`approved_by`/`approved_at` doldurulmalıdır
   (`docs/ownership/README.md` Ön Koşullar).
 
-**Açık Karar:** Bir REQ'nin ADR veya contract gerektirip gerektirmediğine kimin
-karar verdiği (Solution Architect mi, insan maintainer mı) bu runbook'ta
-tanımlanmamıştır; mevcut ADR'ler bu eşiği tanımlamaz.
+**ADR eşiği:** ADR yalnızca şu durumlardan en az biri varsa yazılır: yeni dış
+bağımlılık/servis, bounded context'ler arası veri modeli veya migration
+değişikliği, auth/güvenlik sınırı değişikliği, geriye uyumsuz public
+API/event contract değişikliği, geri alınması pahalı karar. Eşiği Delivery
+Lead uygular; tereddütte insan maintainer karar verir. Eşik yoksa
+`docs/decisions/` altında kısa bir karar notu yeterlidir.
+
+**Review döngüsü:** ADR'yi `adr-reviewer` inceler (VERDICT: APPROVE |
+APPROVE_WITH_NOTES | BLOCK). En fazla 2 tur yapılır; ikinci turdan sonra açık
+BLOCKER kalırsa karar insana geçer. Accepted ADR dondurulur. Bu sınırlar
+`.claude/hooks/enforce-role-boundaries.sh` içindeki ADR loop breaker ile
+zorlanır.
 
 ## 4. Ownership Manifest Ön Koşulları
 
@@ -217,7 +226,7 @@ Bu ön koşullar sağlanmadan registry branch açılması anlamsızdır; çünk�
 ## Açık Kararlar
 
 - REQ-ID numaralandırma sahibi ve mekanizması bu runbook'ta tanımlanmamıştır.
-- ADR/contract gerekliliğine kimin karar verdiği (eşik) açık bir sorudur.
+- Contract gerekliliği eşiği hâlâ açık bir sorudur (ADR eşiği §3'te tanımlandı).
 - Branch protection/rulesets teknik enforcement'ı GitHub Pro/uygun plan
   erişimi sağlanana kadar devreye alınmamıştır (ADR-004); bu süre boyunca
   Human Merge Boundary zorunlu telafi edici kontroldür.

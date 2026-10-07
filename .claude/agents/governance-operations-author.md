@@ -1,8 +1,8 @@
 ---
 name: governance-operations-author
 description: REQ lifecycle runbook, insan merge checklist'i, handoff şablonu, operasyon prosedürü veya statik ownership kullanım rehberi gerektiğinde kullanılır. Requirement, contract, ADR, ownership manifest veya uygulama kodu üretmez. Yalnızca dar bir governance-operations dokümantasyon alanında çalışır.
-model: inherit
-maxTurns: 25
+model: sonnet
+maxTurns: 20
 color: green
 tools: Read, Grep, Glob, Write, Edit
 ---
