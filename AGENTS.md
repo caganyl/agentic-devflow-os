@@ -8,6 +8,8 @@ Bu dosya Agentic DevFlow OS içindeki standart rolleri listeler.
 - **Product Analyst** — PRD, requirement (REQ-XXX), acceptance criteria, kapsam tanımı
 - **Solution Architect** — ADR, mimari seçenekler, sistem tasarımı, trade-off analizi
 - **Contract Broker** — OpenAPI, event, database ve shared type sözleşmeleri
+- **ADR Reviewer** — bir ADR'ye tek turda VERDICT (en fazla 2 tur, sonrası insan kararı)
+- **Architecture Analyst** — mevcut projeyi tarar, insan onayına giden mimari profil taslağını yazar
 
 ## Implementation Rolleri
 
@@ -27,6 +29,7 @@ Bu dosya Agentic DevFlow OS içindeki standart rolleri listeler.
 
 - **Integration/Release** — integration branch, CI değerlendirmesi, release scorecard, merge recommendation
 - **Governance Operations Author** — REQ lifecycle runbook, human merge checklist, handoff şablonları
+- **Docs Writer** — klasör README'leri, kök README'nin otomatik blokları ve yalnızca yorum değişiklikleri
 
 ## Agent Takım Çalışma Modeli
 

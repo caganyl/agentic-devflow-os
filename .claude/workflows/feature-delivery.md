@@ -27,11 +27,18 @@ Sırayla ve minimum set prensibine göre:
 7. **Database Engineer** — schema ve migration (gerekirse)
 8. **QA Automation** — test yazma ve acceptance verification
 9. **Security Red Team** — security review (release öncesi)
-10. **Integration/Release** — release scorecard ve merge recommendation
+10. **Docs Writer** — değişen klasörlerin README'leri, kök README blokları, değişen dosyalara yorum (QA sonrası, tek writer)
+11. **Integration/Release** — release scorecard ve merge recommendation
 
 ## Gerekli Skill'ler
 
 - `orchestrate-delivery` — delivery akışını yönetme
+- `requirement-grilling` — AC belirsizse implementation öncesi, insanla
+- `tdd-vertical-slice` — implementer ve QA test disiplini
+- `stack-verification` — "bitti" öncesi sabit doğrulama sırası
+- `pr-review-triage` — PR açıldıktan sonra review yorumları
+- `documentation-sync` — QA sonrası README ve yorumlar
+- Ön koşul: onaylı mimari profil (`project-onboarding` workflow'u)
 - `task-routing` — minimum rol seti seçimi
 - `api-contract-design` — contract oluşturma
 - `db-migration-safety` — migration güvenliği

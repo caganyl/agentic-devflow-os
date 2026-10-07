@@ -14,6 +14,8 @@ Bu kurallar hangi task türünde hangi agent rollerinin devreye alınacağını 
 | Güvenlik riski        | Security Red Team, Backend Engineer, Delivery Lead, gerekirse Database Engineer            |
 | Release               | QA Automation, Security Red Team, Integration/Release                                      |
 | Maliyet optimizasyonu | Delivery Lead, Solution Architect, AI/Data Engineer, Integration/Release                   |
+| Projeye katılım / yeni proje kurulumu | Architecture Analyst, Docs Writer; greenfield'da Solution Architect, Backend, Frontend |
+| Dokümantasyon (README, yorum) | Docs Writer                                                                     |
 
 ## Minimum Rol Seçimi İlkesi
 
@@ -30,6 +32,9 @@ Her task'te tüm roller çağrılmaz. Delivery Lead şu faktörlere göre minimu
 ```
 Task geldiğinde:
   1. Task türünü belirle (yukarıdaki tablo)
+  1b. Implementation içeriyorsa onaylı mimari profil var mı?
+     → Hayır, proje dolu: Architecture Analyst (project-onboarding workflow)
+     → Hayır, proje boş: ana oturum insanla architecture-intake
   2. Requirement (REQ-ID) var mı?
      → Hayır: Product Analyst devreye al
   3. Acceptance criteria tanımlı mı?

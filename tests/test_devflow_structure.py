@@ -24,6 +24,7 @@ REQUIRED_WORKFLOWS = [
     "security-response",
     "release-readiness",
     "cost-optimization",
+    "project-onboarding",
 ]
 
 REQUIRED_SKILLS = [
@@ -40,6 +41,14 @@ REQUIRED_SKILLS = [
     "visual-design-review",
     "evalops-regression",
     "release-scorecard",
+    "tdd-vertical-slice",
+    "requirement-grilling",
+    "pr-review-triage",
+    "root-cause-investigation",
+    "stack-verification",
+    "architecture-discovery",
+    "architecture-intake",
+    "documentation-sync",
 ]
 
 REQUIRED_RULES = [

@@ -5,9 +5,9 @@ işletim sistemi. Bir AI ajanına "şunu yap" demek yerine **kimin neye dokunabi
 tanımlar ve bu kuralları araç çağrısı seviyesinde hook'larla zorlar.** Bu repo framework'ün
 kendisidir; iş yapılan proje ayrı bir "hedef proje" reposudur.
 
-> Güncel ölçek (2026-10-07): **15** agent rolü · **17** skill · **8** workflow · **5** rule ·
-> **13** şablon · **4** framework hook'u + **2** plugin hook script'i · **11** script ·
-> **8** ADR · **23** test modülü.
+> Güncel ölçek (2026-10-07): **17** agent rolü · **25** skill · **9** workflow · **5** rule ·
+> **16** şablon · **4** framework hook'u + **2** plugin hook script'i · **12** script ·
+> **8** ADR · **24** test modülü.
 > Derinlemesine anlatım: [`docs/SYSTEM_OVERVIEW.md`](docs/SYSTEM_OVERVIEW.md) ·
 > Kuralların tam metni: [`PROJECT_CONSTITUTION.md`](PROJECT_CONSTITUTION.md)
 
@@ -15,18 +15,19 @@ kendisidir; iş yapılan proje ayrı bir "hedef proje" reposudur.
 
 1. [Mimari Konum](#mimari-konum)
 2. [Nasıl Çalışır — Teslimat Akışı](#teslimat-akisi)
-3. [Tasarım Fazı ve Döngü Kesici](#tasarim-fazi)
-4. [Klasör Yapısı](#klasor-yapisi)
-5. [Agent Kataloğu](#agent-katalogu)
-6. [Hook Kataloğu — Kuralların Zorlandığı Yer](#hook-katalogu)
-7. [Skill, Workflow ve Rule Kataloğu](#skill-workflow-rule)
-8. [Operations Runner](#operations-runner)
-9. [Ownership Manifest ve CI Kapısı](#ownership)
-10. [Kurulum ve Hızlı Başlangıç](#kurulum)
-11. [Testler](#testler)
-12. [Bağımlılıklar](#bagimliliklar)
-13. [Kurallar ve Dikkat Edilecekler](#kurallar)
-14. [Bilinen Sınırlar](#bilinen-sinirlar)
+3. [Projeye Katılım ve Mimari Profil](#mimari-profil)
+4. [Tasarım Fazı ve Döngü Kesici](#tasarim-fazi)
+5. [Klasör Yapısı](#klasor-yapisi)
+6. [Agent Kataloğu](#agent-katalogu)
+7. [Hook Kataloğu — Kuralların Zorlandığı Yer](#hook-katalogu)
+8. [Skill, Workflow ve Rule Kataloğu](#skill-workflow-rule)
+9. [Operations Runner](#operations-runner)
+10. [Ownership Manifest ve CI Kapısı](#ownership)
+11. [Kurulum ve Hızlı Başlangıç](#kurulum)
+12. [Testler](#testler)
+13. [Bağımlılıklar](#bagimliliklar)
+14. [Kurallar ve Dikkat Edilecekler](#kurallar)
+15. [Bilinen Sınırlar](#bilinen-sinirlar)
 
 <a id="mimari-konum"></a>
 ## 📐 Mimari Konum
@@ -34,14 +35,14 @@ kendisidir; iş yapılan proje ayrı bir "hedef proje" reposudur.
 ```
  ┌───────────────────────────────────────────────────────────────┐
  │ İnsan maintainer                                              │
- │ onay kapıları: manifest "approved" · ADR "Accepted" · main    │
- │ merge · production · secret · geri döndürülemez işlemler       │
+ │ onay kapıları: manifest "approved" · ADR "Accepted" · profil  │
+ │ "confirmed" · main merge · production · secret · PR yanıtları  │
  └──────────────────────────────┬────────────────────────────────┘
                                 │ claude-devflow / devflow_operations.py launch
  ┌──────────────────────────────▼────────────────────────────────┐
  │ agentic-devflow-os  (framework repo)      ◄── Siz buradasınız │
  │ .claude/  agents · skills · rules · workflows · hooks · şablon │
- │ scripts/  guard · recorder · operations runner · validator'lar │
+ │ scripts/  guard · recorder · operations runner · arch scanner  │
  │ docs/     anayasa · ADR · ownership · runbook                  │
  └──────────────────────────────┬────────────────────────────────┘
                                 │ scripts/build_devflow_plugin.py
@@ -54,7 +55,8 @@ kendisidir; iş yapılan proje ayrı bir "hedef proje" reposudur.
  └──────────────────────────────┬────────────────────────────────┘
                                 │ yazma yalnızca rol izni + ownership manifesti ile
  ┌──────────────────────────────▼────────────────────────────────┐
- │ Hedef proje repo   (.devflow/ durum, docs/, kaynak kod)       │
+ │ Hedef proje repo   (.devflow/ durum, docs/, mimari profil,    │
+ │                     kaynak kod)                                │
  └──────────────────────────────┬────────────────────────────────┘
                                 │ pull request
  ┌──────────────────────────────▼────────────────────────────────┐
@@ -70,12 +72,15 @@ ile reddeder. Ayrıntı: [`.claude/rules/target-project-boundaries.md`](.claude/
 <a id="teslimat-akisi"></a>
 ## 🔄 Nasıl Çalışır — Teslimat Akışı
 
-Yeni bir feature için standart akış ([`.claude/workflows/feature-delivery.md`](.claude/workflows/feature-delivery.md)):
+Yeni bir feature için standart akış ([`.claude/workflows/feature-delivery.md`](.claude/workflows/feature-delivery.md)).
+Ön koşul: hedef projenin onaylı bir mimari profili vardır (bkz. [sonraki bölüm](#mimari-profil)).
 
 ```
  delivery-lead        plan, task graph, minimum rol seti (yazma/Bash yetkisi yok)
       │
- product-analyst      docs/product/…  REQ-NNN + acceptance criteria
+ [AC belirsiz mi?] ── evet ─► ana oturum + insan: requirement-grilling
+      │
+ product-analyst      docs/product/…  REQ-NNN + acceptance criteria + GLOSSARY.md
       │
  [ADR eşiği var mı?] ─ hayır ─► docs/decisions/ altında ≤10 satırlık karar notu
       │ evet
@@ -87,27 +92,49 @@ Yeni bir feature için standart akış ([`.claude/workflows/feature-delivery.md`
  İNSAN                docs/ownership/REQ-NNN.json  status: approved   ◄── tek tasarım onayı
       │
  implementer'lar      backend / frontend / database / ai-data / qa
-                      yalnızca manifestteki write_paths altına yazar
+                      tdd-vertical-slice → stack-verification; yalnızca write_paths altına
       │
  review rolleri       qa-automation · security-red-team · design-reviewer · evalops-reviewer
       │
- integration-release  kanıt toplama, release scorecard, merge tavsiyesi
+ docs-writer          değişen klasörlerin README'leri + yalnızca yorum değişiklikleri
       │
- İNSAN                main merge
+ integration-release  kanıt, release scorecard, pr-review-triage, merge tavsiyesi
+      │
+ İNSAN                PR yanıtları, commit/push, main merge
 ```
 
 Temel ilkeler:
 
 - **Requirement olmadan davranış icat edilmez.** Her ürün davranışı bir `REQ-NNN` kimliği ve
-  acceptance criteria taşır.
+  test edilebilir acceptance criteria taşır.
 - **Contract-first paralellik.** Frontend ve backend, onaylı contract olmadan paralel başlamaz.
 - **Minimum rol seti.** Her task'te tüm roller çağrılmaz; task türüne göre seçim
   [`.claude/rules/task-routing.md`](.claude/rules/task-routing.md) tablosundan yapılır.
+- **Kademeli bağlam.** Alt ajana önce dar bir paket verilir; eksik kalırsa sonucunun başında
+  `CONTEXT_REQUEST:` ile en fazla 3 yol + bölüm ister, en fazla 2 tur.
 - **Kanıt zinciri.** Evidence → requirement → AC → task → test → handoff. Bir ajanın özeti
   kanıt değildir; ancak Git artefaktına dönüşüp doğrulanırsa resmi sayılır.
 - **Gerçeğin kaynağı sıralaması:** Anayasa → onaylı ADR → onaylı contract → requirement →
   kod ve testler → handoff → NotebookLM → Obsidian. Son ikisi kanıt katmanıdır, mimari
   gerçeği değiştiremez ([`.claude/rules/source-of-truth.md`](.claude/rules/source-of-truth.md)).
+
+<a id="mimari-profil"></a>
+## 🧱 Projeye Katılım ve Mimari Profil
+
+Implementer ajanların mevcut mimariyi bozmadan kod yazabilmesi için her hedef projede onaylı
+bir **mimari profil** bulunur: `docs/architecture/profile/ARCHITECTURE_PROFILE.md` (okunur
+özet, konvansiyonlar, referans dosyalar) ve `architecture-profile.json` (tarayıcının kontrol
+ettiği kurallar). Akış [`.claude/workflows/project-onboarding.md`](.claude/workflows/project-onboarding.md):
+
+| Durum | Ne olur |
+|---|---|
+| Dolu proje (brownfield) | `architecture-analyst`, [`scripts/devflow_arch_scan.py`](scripts/devflow_arch_scan.py) ile .NET (.sln/.csproj referans grafiği, katman, paketler, API stili) ve Next.js/React (router, klasör stili, state, veri çekme, alias'lar) yapısını tarar, örnek dosyalardan kalıp çıkarır ve `draft` profil yazar |
+| Boş proje (greenfield) | Ana oturum insanla `architecture-intake` yapar: her soruda öneriyle tek tek karar alınır, aynı profil formatına yazılır |
+| İnsan onayı | Açık sorular (en fazla 7) cevaplanır, insan `Status: confirmed` yazar; onaylı profil ajanlar için dondurulur |
+| Sürekli kontrol | `stack-verification` her görevde `devflow_arch_scan.py --check` çalıştırır; yeni yasak referans veya feature sınırı ihlali görevi bitirmez, `known_deviations` düşürmez |
+
+Profil yoksa veya `draft` ise implementer'lar dolu projede yazmaya başlamaz, blocker raporlar.
+Tarayıcı salt okunurdur, yalnızca standart kütüphane kullanır ve dosya yazmaz.
 
 <a id="tasarim-fazi"></a>
 ## 🧭 Tasarım Fazı ve Döngü Kesici
@@ -136,20 +163,21 @@ döndürülemez risk). Üslup ve "daha iyi olabilir" türü bulgular BLOCK sebeb
 ```
 agentic-devflow-os/
 ├── PROJECT_CONSTITUTION.md     # anayasa: kaynak sıralaması, insan onay kapıları, branch/güvenlik politikası
-├── CLAUDE.md                   # bu repoda çalışan Claude oturumları için talimatlar
+├── CLAUDE.md                   # bu repoda çalışan Claude oturumları için talimatlar + kodlama ilkeleri
 ├── AGENTS.md                   # rol listesi + Codex Phase 1A runtime politikası
 ├── .claude/
-│   ├── agents/                 # 15 rol tanımı (frontmatter: model, maxTurns, tools)
-│   ├── skills/                 # 17 skill — ajanlara iş yapma yöntemini öğretir
-│   ├── workflows/              # 8 teslimat reçetesi (feature, bug, release, security, AI/RAG…)
+│   ├── agents/                 # 17 rol tanımı (frontmatter: model, maxTurns, tools)
+│   ├── skills/                 # 25 skill — ajanlara iş yapma yöntemini öğretir
+│   ├── workflows/              # 9 teslimat reçetesi (feature, bug, release, security, onboarding…)
 │   ├── rules/                  # autonomy gates, context dağıtımı, kaynak hiyerarşisi, routing
-│   ├── templates/              # ADR, requirement, handoff, task packet, hedef proje politikası…
+│   ├── templates/              # ADR, requirement, handoff, mimari profil, terim sözlüğü, hedef proje politikası…
 │   ├── hooks/                  # session-start, protect-main, protect-sensitive-paths, enforce-role-boundaries
 │   └── settings.json           # framework repo'nun kendi hook kaydı ve izin listeleri
 ├── hooks/hooks.json            # plugin hook kaydı (hedef projelerde devreye girer)
 ├── scripts/
 │   ├── build_devflow_plugin.py         # dist/devflow-plugin/ üretir
 │   ├── build_codex_devflow_plugin.py   # dist/codex-devflow-plugin/ üretir
+│   ├── devflow_arch_scan.py            # salt okunur mimari tarayıcı + profil kural kontrolü (--check)
 │   ├── devflow_bootstrap.sh            # claude-devflow girişinde hedef klasörü hazırlar (idempotent)
 │   ├── devflow_new_manifest.sh         # draft ownership manifesti üretir (onay insanda)
 │   ├── devflow_operations.py           # tek izinli mutasyon yolu: run, task graph, kanıt, rapor
@@ -162,7 +190,8 @@ agentic-devflow-os/
 ├── docs/
 │   ├── SYSTEM_OVERVIEW.md      # sistemin ayrıntılı anlatımı
 │   ├── architecture/adr/       # ADR-001…008 + reviews/ (adr-reviewer kayıtları)
-│   ├── decisions/              # capability matrisi, runtime kararları, kısa karar notları
+│   ├── architecture/profile/   # hedef projede onaylı mimari profilin yeri (burada yalnızca README)
+│   ├── decisions/              # capability matrisi, model ataması, runtime kararları, karar notları
 │   ├── ownership/              # schema.json, TEMPLATE.json, REQ manifestleri, registry runbook
 │   ├── operations/             # REQ yaşam döngüsü runbook'u, insan merge checklist'i
 │   ├── product/                # requirements, acceptance-criteria, prd, user-stories
@@ -172,7 +201,7 @@ agentic-devflow-os/
 │   └── ai/, release/, templates/
 ├── .codex/, .agents/           # Codex Phase 1A: 4 ajan, 3 skill, hook kaydı
 ├── src/mcp_audit_runtime/      # deneysel MCP denetim altyapısı (REQ-003, ADR-007 Proposed)
-├── tests/                      # 23 test modülü + mcp alt paketleri (unittest)
+├── tests/                      # 24 test modülü + mcp alt paketleri (unittest)
 ├── evals/, design/             # AI eval veri setleri ve tasarım kanıtları için iskelet
 └── .github/workflows/ownership-governance.yml   # PR kalite + ownership diff kapısı
 ```
@@ -184,27 +213,35 @@ Araç kısıtları frontmatter'da tanımlıdır; yazma yolları
 [`enforce-role-boundaries.sh`](.claude/hooks/enforce-role-boundaries.sh) tarafından zorlanır.
 Tam matris: [`docs/decisions/AGENT_CAPABILITY_MATRIX.md`](docs/decisions/AGENT_CAPABILITY_MATRIX.md).
 
-| Rol | Sorumluluk | Yazabildiği yer | Bash |
-|---|---|---|---|
-| `delivery-lead` | Plan, task graph, rol seçimi, quality gate; tek orkestratör (`Agent` aracı) | Hiçbir yer (plan modu) | Yok |
-| `product-analyst` | REQ, user story, acceptance criteria, kapsam | `docs/product`, `docs/decisions` | Yok |
-| `solution-architect` | Mimari alternatifler, trade-off, ADR (yalnızca eşik sağlanırsa) | `docs/architecture`, `docs/decisions` (ADR loop breaker ile) | Yok |
-| `adr-reviewer` | Bir ADR'ye tek turda VERDICT; ADR'yi yeniden yazmaz | `docs/architecture/adr/reviews` | Yok |
-| `contract-broker` | OpenAPI / event / DB / shared type contract | `docs/contracts` | Yok |
-| `frontend-engineer` | UI, route, state, a11y, frontend testleri | Onaylı manifestteki `write_paths` | Sınırlı |
-| `backend-engineer` | API, auth/authz, domain logic, backend testleri | Onaylı manifestteki `write_paths` | Sınırlı |
-| `database-engineer` | Schema, migration taslağı, rollback; production migration çalıştırmaz | Onaylı manifestteki `write_paths` | Sınırlı |
-| `ai-data-engineer` | LLM/RAG, embedding, retrieval, AI feature testleri | Onaylı manifestteki `write_paths` | Sınırlı |
-| `qa-automation` | Unit/integration/contract/E2E/regression testleri | Onaylı manifestteki `write_paths` | Sınırlı |
-| `security-red-team` | Threat model, adversarial review; yalnızca rapor | `docs/quality/security-reports` | Yalnızca mutasyonsuz tarama |
-| `design-reviewer` | UX, a11y, responsive, durum ekranları review'u | `design/reviews`, `docs/quality/accessibility` | Yok |
-| `evalops-reviewer` | Adversarial/regression eval, scorecard | `evals/…`, `docs/ai/evals`, `docs/ai/model-decisions` | Sınırlı |
-| `integration-release` | Kanıt toplama, release scorecard, merge tavsiyesi; push/merge yapmaz | `docs/release`, `docs/handoffs` | Sınırlı |
-| `governance-operations-author` | Runbook, merge checklist, handoff şablonları | `docs/operations`, `docs/templates`, ownership README/runbook | Yok |
+| Rol | Model | Sorumluluk | Yazabildiği yer | Bash |
+|---|---|---|---|---|
+| `delivery-lead` | sonnet | Plan, task graph, rol seçimi, quality gate; tek orkestratör (`Agent` aracı) | Hiçbir yer (plan modu) | Yok |
+| `product-analyst` | sonnet | REQ, user story, acceptance criteria, terim sözlüğü | `docs/product`, `docs/decisions` | Yok |
+| `solution-architect` | opus | Mimari alternatifler, trade-off, ADR (yalnızca eşik sağlanırsa) | `docs/architecture`, `docs/decisions` (ADR loop breaker ile) | Yok |
+| `adr-reviewer` | sonnet | Bir ADR'ye tek turda VERDICT; ADR'yi yeniden yazmaz | `docs/architecture/adr/reviews` | Yok |
+| `architecture-analyst` | sonnet | Mevcut projeyi tarar, `draft` mimari profil yazar | Yalnızca iki profil dosyası | Yalnızca tarayıcı + mutasyonsuz inceleme |
+| `contract-broker` | sonnet | OpenAPI / event / DB / shared type contract | `docs/contracts` | Yok |
+| `frontend-engineer` | sonnet | UI, route, state, a11y, frontend testleri; profili aynalar | Onaylı manifestteki `write_paths` | Sınırlı |
+| `backend-engineer` | sonnet | API, auth/authz, domain logic, backend testleri; profili aynalar | Onaylı manifestteki `write_paths` | Sınırlı |
+| `database-engineer` | sonnet | Schema, migration taslağı, rollback; production migration çalıştırmaz | Onaylı manifestteki `write_paths` | Sınırlı |
+| `ai-data-engineer` | sonnet | LLM/RAG, embedding, retrieval, AI feature testleri | Onaylı manifestteki `write_paths` | Sınırlı |
+| `qa-automation` | sonnet | Unit/integration/contract/E2E/regression, repro testleri | Onaylı manifestteki `write_paths` | Sınırlı |
+| `docs-writer` | sonnet | Klasör README'leri, kök README'nin `devflow:auto` blokları, yorumlar | `README.md` dosyaları; kaynak dosyada yalnızca yorum | Yalnızca mutasyonsuz inceleme |
+| `security-red-team` | opus | Threat model, adversarial review; yalnızca rapor | `docs/quality/security-reports` | Yalnızca mutasyonsuz tarama |
+| `design-reviewer` | sonnet | UX, a11y, responsive, durum ekranları review'u | `design/reviews`, `docs/quality/accessibility` | Yok |
+| `evalops-reviewer` | sonnet | Adversarial/regression eval, scorecard | `evals/…`, `docs/ai/evals`, `docs/ai/model-decisions` | Sınırlı |
+| `integration-release` | haiku | Kanıt toplama, release scorecard, PR review triage, merge tavsiyesi; push/merge yapmaz | `docs/release`, `docs/handoffs` | Sınırlı |
+| `governance-operations-author` | sonnet | Runbook, merge checklist, handoff şablonları | `docs/operations`, `docs/templates`, ownership README/runbook | Yok |
+
+Model ataması bilinçlidir ve hiçbir rol `inherit` kullanmaz: seyrek çağrılan ve hata maliyeti
+yüksek roller Opus, kod ve yargı gerektiren roller Sonnet, büyük ölçüde CLI verisi derleyen
+`integration-release` Haiku kullanır (gerekçe: capability matrisi, "Model Ataması").
 
 "Sınırlı" Bash: Git mutasyonu, yıkıcı dosya işlemi, bağımlılık kurulumu, merge, deploy,
-migration, izin değişikliği ve dosyaya yönlendirme (`>`, `>>`, `<`) reddedilir. `2>&1`,
-`>&2` ve `/dev/null` yönlendirmeleri dosya yazımı sayılmaz.
+migration, izin değişikliği, dosyaya yönlendirme (`>`, `>>`, `<`), dış sisteme yazma
+(`gh pr|issue comment/review/create/edit…`, yazma amaçlı `gh api`, `agent-reviews
+--reply/--resolve/--watch`) ve aktif saldırı araçları (`strix`) reddedilir. `2>&1`, `>&2` ve
+`/dev/null` yönlendirmeleri dosya yazımı sayılmaz; PR yorumlarını okumak serbesttir.
 
 <a id="hook-katalogu"></a>
 ## 🛡️ Hook Kataloğu — Kuralların Zorlandığı Yer
@@ -219,8 +256,8 @@ Hook'lar iki yerde kayıtlıdır: framework repo'nun kendisi için
 | `devflow_target_guard.py` (yalnızca plugin) | PreToolUse Bash/Write/Edit | `git merge`, force push, branch silme, `git reset`, `git clean -f` ve yıkıcı silme komutlarını, `.env` ve korumalı config yazımını reddeder; `DEVFLOW_RUN_WORKTREE` tanımlıysa worktree dışına çıkışı engeller |
 | `protect-main.sh` | PreToolUse Bash/Write/Edit | Oturum `main` üzerindeyse tüm Bash/Write/Edit çağrılarını reddeder; kullanıcıdan `claude --worktree <ad>` ile izole oturum açmasını ister |
 | `protect-sensitive-paths.sh` | PreToolUse Bash/Write/Edit | `.env*`, `secrets/`, `credentials.json`, `*.pem`/`*.key`/`*.p12`/`*.pfx`, Claude ayarları ve hook script'lerine dokunmayı reddeder |
-| `enforce-role-boundaries.sh` | PreToolUse Bash/Write/Edit | Rol bazlı yazma yolları, implementer'lar için manifest yetkilendirmesi, doküman rollerine Bash yasağı, ADR loop breaker |
-| `session-start.sh` | SessionStart | Repo, branch, çalışma ağacı durumu, main koruması ve en güncel handoff'u bağlama ekler |
+| `enforce-role-boundaries.sh` | PreToolUse Bash/Write/Edit | Rol bazlı yazma yolları; implementer'lar için manifest yetkilendirmesi; doküman rollerine Bash yasağı; ADR loop breaker; mimari profil kapısı (`confirmed` yalnızca insan, onaylı profil dondurulur); docs-writer kapısı (kaynak dosyada yalnızca yorum değiştiren Edit); dış sisteme yazma ve aktif saldırı aracı yasağı |
+| `session-start.sh` | SessionStart | Repo, branch, çalışma ağacı durumu, main koruması, mimari profil durumu ve en güncel handoff'u bağlama ekler; plugin oturumlarında `DEVFLOW_ARCH_SCAN_SCRIPT` yolunu tanımlar |
 | `devflow_delegation_recorder.py` (yalnızca plugin) | SubagentStart/Stop | `.devflow/delegation-events/` altına içeriksiz yaşam döngüsü kaydı yazar; hata alsa bile teslimatı bloklamaz |
 
 Ek olarak `.claude/settings.json` izin katmanı `.env*`, `secrets/**`, `*.pem`, `*.key`
@@ -233,12 +270,14 @@ okumasını reddeder ve `git push`, `gh pr merge`, sert `git reset`, `terraform 
 | Grup | İçerik |
 |---|---|
 | Süreç skill'leri | `orchestrate-delivery`, `autonomous-delivery-run`, `native-team-delivery`, `task-routing` |
-| Üretim skill'leri | `api-contract-design`, `requirement-traceability`, `project-context-synthesis` |
+| Üretim skill'leri | `api-contract-design`, `requirement-traceability`, `project-context-synthesis` (kademeli bağlam dahil) |
+| Mühendislik disiplini | `requirement-grilling` (insanla tek tek soru, AC + sözlük), `tdd-vertical-slice` (contract/AC seam'lerinde kırmızı-yeşil), `stack-verification` (sabit build → format → tip → test → mimari → bağımlılık sırası), `root-cause-investigation` (repro + en fazla 3 hipotez), `pr-review-triage` (FIX / WONT_FIX / FALSE_POSITIVE, yanıtları insan gönderir) |
+| Mimari ve dokümantasyon | `architecture-discovery` (brownfield tarama), `architecture-intake` (greenfield kararları), `documentation-sync` (README'ler ve yorumlar) |
 | Denetim skill'leri | `adversarial-security-review`, `qa-acceptance-verification`, `visual-design-review`, `evalops-regression`, `release-scorecard` |
 | Güvenlik sınırı skill'leri | `managed-delivery-operations`, `db-migration-safety`, `bootstrap-target-project` |
 | Dış kaynak skill'leri | `notebooklm-grounded-retrieval`, `obsidian-project-context` (çıktı güvenilmeyen bağlamdır) |
-| Workflow'lar | `feature-delivery`, `bug-resolution`, `release-readiness`, `security-response`, `ai-rag-delivery`, `data-dashboard-delivery`, `new-product-discovery`, `cost-optimization` |
-| Rule'lar | `autonomy-gates` (otomatik vs. insan onaylı işlemler), `context-distribution` (ajan başına minimum bağlam), `source-of-truth`, `target-project-boundaries`, `task-routing` |
+| Workflow'lar | `feature-delivery`, `bug-resolution`, `release-readiness`, `security-response`, `ai-rag-delivery`, `data-dashboard-delivery`, `new-product-discovery`, `cost-optimization`, `project-onboarding` |
+| Rule'lar | `autonomy-gates` (otomatik vs. insan onaylı işlemler), `context-distribution` (ajan başına minimum bağlam, kademeli bağlam), `source-of-truth`, `target-project-boundaries`, `task-routing` |
 
 <a id="operations-runner"></a>
 ## ⚙️ Operations Runner
@@ -251,7 +290,7 @@ mutasyon yoludur. Delivery-lead alt ajanının Bash yetkisi olmadığı için bu
 |---|---|
 | `init-target` | Hedef projede `.devflow/` başlatır (korumasız branch şartı) |
 | `create-run` | Yeni teslimat run'ı oluşturur (`--req-id REQ-NNN` ile manifeste bağlanabilir) |
-| `launch` | Yönetilen worktree + `devflow/run-*` branch ile Claude Code supervisor başlatır; `--req-id` yoksa implementer yazımının reddedileceği uyarısını verir |
+| `launch` | Yönetilen worktree + `devflow/run-*` branch ile Claude Code supervisor başlatır; `DEVFLOW_OPERATIONS_SCRIPT` ve `DEVFLOW_ARCH_SCAN_SCRIPT` yollarını verir; `--req-id` yoksa implementer yazımının reddedileceği uyarısını verir |
 | `status` | Run durumunu gösterir |
 | `generate-task-graph` | Deterministik task graph üretir |
 | `update-task-status` | Task durumunu geçiş doğrulamasıyla günceller |
@@ -306,10 +345,13 @@ python3 scripts/build_devflow_plugin.py
 #    sonra `claude --plugin-dir dist/devflow-plugin` çalıştırır. Düz `claude` plugin'i yüklemez.
 claude-devflow
 
-# 3. Yeni bir feature REQ'i için draft manifest üret, insan onayıyla "approved" yap
+# 3. Mimari profil yoksa project-onboarding workflow'unu çalıştır; tarayıcıyı elle denemek için:
+python3 scripts/devflow_arch_scan.py --root <hedef-proje> --compact
+
+# 4. Yeni bir feature REQ'i için draft manifest üret, insan onayıyla "approved" yap
 scripts/devflow_new_manifest.sh <REQ-no>
 
-# 4. Onaylı manifeste bağlı managed run başlat
+# 5. Onaylı manifeste bağlı managed run başlat
 python3 scripts/devflow_operations.py launch --target <hedef-proje> --objective "..." --req-id REQ-NNN
 ```
 
@@ -332,10 +374,12 @@ python3 -m unittest discover -s tests -p 'test_*.py' -v   # CI ile aynı komut
 python3 -m unittest tests.test_design_loop_breakers        # tek modül
 ```
 
-Test paketi; agent/skill/workflow yapısını, guard ve hook davranışını, ownership manifest ve
-diff doğrulamasını, operations runner'ı, run state bütünlüğünü, kanıt kapılarını, delegation
-kanıt şemasını ve plugin build çıktısını (Claude ve Codex) kapsar. Testler hook'ları gerçek
-`bash` alt süreciyle çalıştırdığı için `bash`, `jq` ve `python3` PATH'te olmalıdır.
+Test paketi; agent/skill/workflow yapısını, guard ve hook davranışını (ADR loop breaker,
+mimari profil ve docs-writer kapıları, dış sisteme yazma yasağı dahil), mimari tarayıcıyı,
+ownership manifest ve diff doğrulamasını, operations runner'ı, run state bütünlüğünü, kanıt
+kapılarını, delegation kanıt şemasını ve plugin build çıktısını (Claude ve Codex) kapsar.
+Testler hook'ları gerçek `bash` alt süreciyle çalıştırdığı için `bash`, `jq` ve `python3`
+PATH'te olmalıdır.
 
 <a id="bagimliliklar"></a>
 ## 📦 Bağımlılıklar
@@ -347,9 +391,10 @@ kanıt şemasını ve plugin build çıktısını (Claude ve Codex) kapsar. Test
 | jq | 1.6+ | Hook'ların JSON girdi/çıktısı |
 | Git | 2.x | Branch/worktree tespiti, diff doğrulama |
 | Claude Code | `--plugin-dir` ve hook desteği olan sürüm | Çalışma ortamı |
-| GitHub CLI (`gh`) | opsiyonel | PR işlemleri |
+| GitHub CLI (`gh`) | opsiyonel | PR işlemleri (ajanlar için yalnızca okuma) |
 
-Üçüncü parti Python paketi yoktur.
+Üçüncü parti Python paketi yoktur. Hedef projede `agent-reviews` ve `impeccable` gibi araçlar
+yalnızca sabit sürümlü devDependency olarak kuruluysa `npx --no-install` ile kullanılır.
 
 <a id="kurallar"></a>
 ## 📌 Kurallar ve Dikkat Edilecekler
@@ -358,8 +403,13 @@ kanıt şemasını ve plugin build çıktısını (Claude ve Codex) kapsar. Test
   çalıştıramaz, branch veya worktree açamaz. İş için `claude --worktree <görev-adı>` kullanın.
 - **Bir branch'te tek yazıcı ajan.** Paralel iş yalnızca ownership yolları ayrıksa yapılır.
 - **İnsan onay kapıları:** main merge, production deploy/migration, secret/API key değişikliği,
-  cloud kaynağı, ödeme/kullanıcı verisi, dış sistem entegrasyonu, geri döndürülemez işlemler
+  cloud kaynağı, ödeme/kullanıcı verisi, dış sistem entegrasyonu ve dış sisteme yazma (PR
+  yorumu, thread çözümleme), geri döndürülemez işlemler
   ([`.claude/rules/autonomy-gates.md`](.claude/rules/autonomy-gates.md)).
+- **Kodlama ilkeleri** ([`CLAUDE.md`](CLAUDE.md)): önce düşün, sade kal, cerrahi değişiklik,
+  hedefe göre çalış.
+- **Mimari profil kuraldır.** Implementer'lar yeni kodu profildeki referans dosyaları aynalayarak
+  yazar; profilde olmayan kalıp icat edilmez, blocker olarak raporlanır.
 - **Bağlam minimumdur.** Alt ajanlara belge içeriği değil yol ve 5-10 satırlık özet verilir;
   belgeler yalnızca görevin dokunduğu bölüm kadar okunur. Secret, token, kişisel veri, ham
   NotebookLM çıktısı veya tam Obsidian vault'u hiçbir ajana gönderilmez.
@@ -376,6 +426,10 @@ kanıt şemasını ve plugin build çıktısını (Claude ve Codex) kapsar. Test
 - **ADR dondurma yalnızca şablon biçimini tanır.** Loop breaker, Status'u `## Status` başlığının
   altındaki satırdan okur (`.claude/templates/adr.md`). ADR-001…008 `- **Status:** Accepted`
   biçimini kullandığı için mevcut ADR'ler henüz hook tarafından dondurulmuyor.
+- **Mimari tarayıcı sezgiseldir.** Katmanları proje adından, kalıpları paket ve dosya adlarından
+  çıkarır; sonuç "gözlem"dir ve insan onayından önce kural sayılmaz.
+- **docs-writer kapısı metin tabanlıdır.** Yorumları ayıklayıp eski/yeni metni karşılaştırır;
+  regex literal'leri gibi uç durumlar yanlış sınıflanabilir, kapı diff incelemesinin yerini almaz.
 - **Delegation kanıtı içerik değil yaşam döngüsüdür:** bir alt ajanın başladığını ve bittiğini
   kaydeder, ne yaptığını kaydetmez (bilinçli gizlilik tercihi).
 - **`src/mcp_audit_runtime` deneyseldir:** gerçek MCP bağlantısı kurmaz, simüle dispatch kullanır.
@@ -390,8 +444,9 @@ Aşağıdaki değişikliklerden biri olduğunda bu README'yi aynı commit içind
 
 - Agent, skill, workflow, rule veya hook eklendiğinde/kaldırıldığında (giriş satırındaki
   sayılar ve ilgili katalog tablosu)
-- Bir rolün yazma yolu, araç seti veya Bash yetkisi değiştiğinde
-- Ownership kuralları, CI kapısı veya operations runner komutları değiştiğinde
+- Bir rolün modeli, yazma yolu, araç seti veya Bash yetkisi değiştiğinde
+- Ownership kuralları, mimari profil kapısı, CI kapısı veya operations runner komutları
+  değiştiğinde
 - Tasarım fazı sınırları (tur sayısı, boyut bütçesi, ADR eşiği) değiştiğinde
 
 **Senkron tutulacak belgeler:** [`docs/SYSTEM_OVERVIEW.md`](docs/SYSTEM_OVERVIEW.md),

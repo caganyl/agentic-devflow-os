@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "status": "draft",
+  "known_deviations": [
+    "Example.Domain (domain) -> Example.Infrastructure"
+  ],
+  "conventions": {
+    "code_language": "en",
+    "comment_language": "tr"
+  },
+  "rules": {
+    "dotnet": {
+      "layer_by_project": {
+        "Example.Domain": "domain",
+        "Example.Application": "application",
+        "Example.Infrastructure": "infrastructure",
+        "Example.Api": "presentation",
+        "Example.Tests": "tests"
+      },
+      "allowed_references": {
+        "domain": [],
+        "application": ["domain"],
+        "infrastructure": ["application", "domain"],
+        "presentation": ["application", "infrastructure"],
+        "tests": ["*"]
+      }
+    },
+    "frontend": [
+      {
+        "app": "web",
+        "features_dir": "web/src/features",
+        "forbid_cross_feature_imports": true
+      }
+    ]
+  }
+}

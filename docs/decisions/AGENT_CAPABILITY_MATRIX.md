@@ -8,6 +8,8 @@ Bu dosya, Agentic DevFlow OS içindeki rollerin hangi tür değişiklikleri yapa
 | Product Analyst | Yalnızca product doküman alanı | Hook: path allowlist (`docs/product`, `docs/decisions`); Bash deny | Governance branch path sınırı | `docs/product/**`, `docs/decisions/**` | Hayır | Requirement onayı insanda |
 | Solution Architect | Yalnızca architecture doküman alanı | Hook: path allowlist (`docs/architecture`, `docs/decisions`); ADR loop breaker (Accepted ADR dondurulur, 2 review turundan sonra revizyon yok, ~12.000 karakter bütçe, `reviews/` yazılamaz); Bash deny | Governance branch path sınırı | `docs/architecture/**`, `docs/decisions/**` | Hayır | ADR onayı insanda |
 | ADR Reviewer | Review-only, tek turda VERDICT | Hook: path allowlist (`docs/architecture/adr/reviews`); dosya adı `ADR-NNN-review-<tur>.md`, VERDICT satırı zorunlu, en fazla 2 tur, review dosyaları değiştirilemez; Bash deny | Governance branch path sınırı | `docs/architecture/adr/reviews/**` | Hayır | İkinci turdan sonra karar insanda |
+| Architecture Analyst | Analiz ve profil taslağı | Hook: path allowlist (yalnızca `docs/architecture/profile/ARCHITECTURE_PROFILE.md` ve `architecture-profile.json`); `confirmed` yazamaz, onaylı profili değiştiremez; Bash yalnızca gerçek tarayıcı (`python3` sonrası ilk argüman `$DEVFLOW_ARCH_SCAN_SCRIPT` veya `scripts/devflow_arch_scan.py`) ve tek non-mutating inceleme komutu | Governance branch path sınırı | `docs/architecture/profile/**` | Dar (tarayıcı + inceleme) | Profil onayı insanda |
+| Docs Writer | README ve yorum | Hook: `README.md` her yerde (korumalı/üretilmiş alanlar hariç); kaynak dosyada yalnızca Edit ve yalnızca yorum değiştiren düzenleme (yorumlar çıkarılınca eski = yeni); Bash yalnızca non-mutating | Diff incelemesi insanda | `**/README.md`, kaynak dosyalarda yorumlar | Dar (inceleme) | Kod değişikliği yapamaz |
 | Contract Broker | Yalnızca contract alanı | Hook: path allowlist (`docs/contracts`); Bash deny | Governance branch path sınırı | `docs/contracts/**` | Hayır | Contract onayı insanda |
 | Frontend Engineer | REQ-ID + approved manifest gerektirir | Hook: `--authorize-agent` ile branch + approved manifest + owner + `write_paths` kontrolü (fail-closed); Bash mutation/deploy/migration blok listesi | CI: base-approved manifestteki owner `write_paths` dışında diff merge olamaz | Manifestte tanımlı `write_paths` | Sınırlı (mutation/deploy/migration komutları blok) | main merge insanda |
 | Backend Engineer | REQ-ID + approved manifest gerektirir | Aynı (yukarıdaki implementer enforcement) | Aynı (CI: base-approved manifest owner `write_paths` kontrolü) | Manifestte tanımlı `write_paths` | Sınırlı | main merge insanda |
@@ -36,6 +38,13 @@ Bu dosya, Agentic DevFlow OS içindeki rollerin hangi tür değişiklikleri yapa
   kontrol eder. Bash üzerinden yapılan dosya yazımını veya normal
   terminalden yapılan manuel değişiklikleri tam olarak kapsamaz; bu
   boşluğu CI merge gate kapatır.
+
+- Governed ajanlar dış sistemlere yazamaz: `gh pr|issue comment/review/close/edit/create...`,
+  yazma amaçlı `gh api` çağrıları (`-X POST/PUT/PATCH/DELETE`, `-f/-F/--input`) ve
+  `agent-reviews --reply/--resolve/--watch` hook tarafından reddedilir. PR
+  yorumlarını okumak serbesttir (`pr-review-triage`).
+- Aktif saldırı/DAST araçları (ör. `strix`) governed ajanlar için reddedilir;
+  yalnızca insan staging ortamında çalıştırır.
 
 ## CI Merge Gate Notları
 
@@ -87,3 +96,18 @@ Bu dosya, Agentic DevFlow OS içindeki rollerin hangi tür değişiklikleri yapa
 - Integration / Release agent merge yapmaz; release-readiness kanıtını ve handoff'ı hazırlar. Nihai merge insan onayındadır.
 - Hiçbir agent main merge, production deploy, production migration veya secret işlemi yapamaz; bunlar yalnızca insan onayıyla yapılır.
 - Her non-trivial değişiklik REQ-ID, test kanıtı ve handoff ile bağlanır.
+
+## Model Ataması
+
+Ajanlar `inherit` kullanmaz; ana oturum Opus ile açılsa bile her rol kendi
+modeliyle çalışır.
+
+| Model | Ajanlar | Gerekçe |
+|---|---|---|
+| Opus | solution-architect, security-red-team | Seyrek çağrılır (ADR eşiği, risk sinyali), hata maliyeti yüksek |
+| Sonnet | implementer'lar (backend, frontend, database, qa, ai-data), evalops-reviewer, delivery-lead, product-analyst, contract-broker, adr-reviewer, design-reviewer, architecture-analyst, docs-writer, governance-operations-author | Kod yazma ve yargı gerektiren işler; Opus'tan ucuz |
+| Haiku | integration-release | Scorecard ve handoff büyük ölçüde CLI verisini derler |
+
+Haiku bilinçli olarak az kullanılır: zayıf modelin hatası yeniden çalışma
+turu doğurur ve kazanılan token geri gider. Değişiklik ajan frontmatter'ındaki
+`model:` alanından yapılır.

@@ -31,6 +31,9 @@ Severity'ye göre minimum set:
 ## Gerekli Skill'ler
 
 - `task-routing` — ilgili domain engineer seçimi
+- `root-cause-investigation` — repro + en fazla 3 hipotez; kök neden kanıtlanmadan fix yok
+- `tdd-vertical-slice` — repro testi kırmızı, fix sonrası yeşil
+- `stack-verification` — fix sonrası sabit doğrulama sırası
 - `qa-acceptance-verification` — regression test coverage
 - `adversarial-security-review` (güvenlik bug'ı ise)
 

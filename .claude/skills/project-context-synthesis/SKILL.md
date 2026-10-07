@@ -71,6 +71,38 @@ sources:
 - Kaynak referansı içer
 - Kapsam dışı olanları açıkça belirt
 
+### 4b. Kademeli Bağlam (Iterative Retrieval)
+
+Esin kaynağı: affaan-m/everything-claude-code `iterative-retrieval` fikri.
+
+Context pack'i "her şey olsun" diye şişirme. Önce en dar paketi ver; alt ajan
+eksik görürse ister:
+
+1. İlk paket: görev özeti, ilgili AC maddeleri, seam/contract yolları,
+   `docs/product/GLOSSARY.md` terimleri, kapsam dışı. 300-500 kelime.
+2. Alt ajan eksik bağlam görürse işi durdurmadan sonucunun başına şu bloğu
+   koyar (en fazla 3 kalem, her biri yol + bölüm):
+   ```text
+   CONTEXT_REQUEST:
+   - docs/contracts/openapi/orders.yaml#/paths/~1orders/post
+   - src/Orders/Application/CreateOrderHandler.cs (yalnızca Handle metodu)
+   ```
+3. Orkestratör yalnızca istenen bölümleri ekleyip görevi yeniden verir.
+4. En fazla 2 retrieval turu. Üçüncü istek, görev tanımının yanlış
+   bölündüğünün işaretidir; görevi küçült veya insana sor.
+
+### 4c. Yerel Kod Haritası (pilot, opsiyonel)
+
+Büyük repolarda (özellikle .NET çözümleri) keşif için yerel bir kod
+haritası aracı (ör. Graphify) pilot olarak denenebilir. Koşullar:
+
+- Yalnızca yerel AST/kod modu kullanılır; doküman veya kaynak kod içeriği
+  onaysız bir dış LLM sağlayıcısına gönderilmez.
+- Harita çıktısı canonical kaynak değildir; source register'da
+  `confidence: draft` olarak kaydedilir.
+- Context pack'e haritanın tamamı değil, ilgili modülün özeti girer.
+- Pilotun ölçütü: aynı görevde keşif için okunan dosya sayısı ve token.
+
 ### 5. Dağıtım Kararı
 
 `.claude/rules/context-distribution.md` kurallarına göre hangi agent'a

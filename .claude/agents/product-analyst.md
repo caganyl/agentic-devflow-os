@@ -60,6 +60,15 @@ Bunların dışında hiçbir dosyaya yazma.
 - Requirement tamamlanmadan veya acceptance criteria netleşmeden build/
   implementation önermez.
 
+## Belirsizlik ve Terim Sözlüğü
+
+- Belirsiz bir fikir geldiğinde requirement yazmadan önce ana oturumun
+  insanla `requirement-grilling` skill'ini çalıştırmasını iste. Alt ajan
+  olarak insanla konuşamazsın; grilling özetini girdi olarak kullan.
+- İnsanın vermediği bir kararı AC'ye yazma; açık soru olarak bırak (en fazla 3).
+- Yeni veya netleşen alan terimlerini `docs/product/GLOSSARY.md` dosyasına
+  ekle: terim, tek cümle tanım, kodda kullanılacak ad. Uzun açıklama yazma.
+
 ## Requirement Formatı
 
 Her requirement `REQ-XXX.md` formatında olmalı ve şu zorunlu alanları

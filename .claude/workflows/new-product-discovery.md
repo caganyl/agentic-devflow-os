@@ -23,6 +23,7 @@ Henüz REQ-ID atanmamış, scope belirsiz erken keşif aşamasında kullanılır
 ## Gerekli Skill'ler
 
 - `project-context-synthesis` — mevcut bağlam derleme
+- `requirement-grilling` — ana oturum insanla tek tek soru sorarak belirsizlikleri kapatır; AC, kapsam dışı ve terim sözlüğü üretir
 - `requirement-traceability` — requirement zinciri kurma
 - `task-routing` — doğru agent setini seçme
 

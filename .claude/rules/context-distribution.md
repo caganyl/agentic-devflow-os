@@ -89,6 +89,12 @@ context_pack:
 - Erişilebilirlik gereksinimleri
 - Marka ve tasarım sistemi referansları
 
+## Kademeli Bağlam
+
+İlk paket dar tutulur. Alt ajan eksik bağlamı sonucunun başında
+`CONTEXT_REQUEST:` bloğuyla (en fazla 3 yol + bölüm) ister; orkestratör en
+fazla 2 tur ek bağlam verir. Ayrıntı: `project-context-synthesis` skill'i, 4b.
+
 ## Hassas Veri Kuralları
 
 Hiçbir agent'a şunlar gönderilmez:

@@ -14,6 +14,8 @@ Birden fazla rol gerekiyorsa önce `devflow-plugin:delivery-lead`'e sor.
 | Requirement, user story, acceptance criteria | `devflow-plugin:product-analyst` |
 | Mimari karar, trade-off analizi, ADR | `devflow-plugin:solution-architect` |
 | ADR review (tek turda VERDICT) | `devflow-plugin:adr-reviewer` |
+| Mevcut projenin mimarisini çıkarma, profil taslağı | `devflow-plugin:architecture-analyst` |
+| Klasör README'leri, kök README, kod yorumları | `devflow-plugin:docs-writer` |
 | API / event / database contract | `devflow-plugin:contract-broker` |
 | API, auth, servis, domain logic | `devflow-plugin:backend-engineer` |
 | UI, component, frontend state, route | `devflow-plugin:frontend-engineer` |
@@ -23,7 +25,7 @@ Birden fazla rol gerekiyorsa önce `devflow-plugin:delivery-lead`'e sor.
 | Threat model, adversarial güvenlik review | `devflow-plugin:security-red-team` |
 | Eval dataset, model regression review | `devflow-plugin:evalops-reviewer` |
 | UI/UX, accessibility, design review | `devflow-plugin:design-reviewer` |
-| Release readiness, scorecard, handoff | `devflow-plugin:integration-release` |
+| Release readiness, scorecard, handoff, PR review triage | `devflow-plugin:integration-release` |
 
 ## Teslimat Sırası
 
@@ -35,12 +37,36 @@ contract-broker      -> docs/contracts/         (frontend+backend paralel gidece
 insan                -> docs/ownership/REQ-XXX.json  status=approved
 implementer agent'lar-> backend/ frontend/ migrations/ ai/
 qa-automation        -> tests/
+docs-writer          -> README.md'ler ve yalnızca yorum değişiklikleri
 security-red-team    -> docs/quality/security-reports/
 integration-release  -> docs/handoffs/REQ-XXX.md
 insan                -> merge
 ```
 
 Bir adım atlanarak sonrakine geçilmez.
+
+## Kodlama İlkeleri
+
+Esin kaynağı: Andrej Karpathy'nin LLM kodlama hatalarına dair gözlemleri
+(multica-ai/andrej-karpathy-skills). Kendi ifademizle dört ilke:
+
+1. **Önce düşün:** Varsayımlarını açıkça yaz. İki makul yorum varsa sessizce
+   birini seçme; sor veya ikisini de belirt. Daha basit bir yol görüyorsan söyle.
+2. **Sade kal:** İsteneni karşılayan en az kodu yaz. İstenmemiş özellik,
+   tek kullanımlık soyutlama, "ileride lazım olur" esnekliği ekleme.
+3. **Cerrahi değişiklik:** Yalnızca görevin gerektirdiği satırlara dokun.
+   Komşu kodu, yorumları veya biçimlendirmeyi "iyileştirme". Senin değişikliğin
+   yüzünden kullanılmaz kalan şeyi temizle; önceden var olan ölü kodu yalnızca raporla.
+4. **Hedefe göre çalış:** Görevi doğrulanabilir bir başarı ölçütüne çevir
+   (ör. "bu AC için test yazılır ve geçer"), ölçüt sağlanana kadar döngüde kal.
+
+## Mimari Profil
+
+`docs/architecture/profile/` projenin onaylı mimarisidir. Backend ve frontend
+ajanları yeni kodu profildeki referans dosyaları aynalayarak yazar. Profil
+yoksa önce `project-onboarding` workflow'u çalışır: dolu projede
+architecture-analyst tarar, boş projede ana oturum insanla
+`architecture-intake` yapar. `confirmed` durumunu yalnızca insan yazar.
 
 ## Tasarım ve Bağlam Bütçesi
 
