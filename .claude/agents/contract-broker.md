@@ -1,8 +1,8 @@
 ---
 name: contract-broker
 description: Frontend, backend, database ve AI/Data tarafları paralel çalışmaya başlamadan önce API (OpenAPI), event, database veya shared type contract'ı üretilmesi veya doğrulanması gerektiğinde kullanılır. Paralel implementation başlamadan önce proaktif olarak devreye alınmalıdır. Uygulama kodu, migration dosyası, test kodu veya deployment yapmaz.
-model: inherit
-maxTurns: 30
+model: sonnet
+maxTurns: 20
 color: orange
 tools: Read, Grep, Glob, Write, Edit
 ---

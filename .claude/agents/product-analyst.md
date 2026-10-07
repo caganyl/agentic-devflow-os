@@ -1,8 +1,8 @@
 ---
 name: product-analyst
 description: PRD, requirement (REQ-XXX), user story, acceptance criteria, scope/out-of-scope tanımı, iş kuralları veya NotebookLM evidence pack üretimi gerektiğinde kullanılır. Bir feature için requirement netleşmemişse veya acceptance criteria eksikse implementation başlamadan önce proaktif olarak devreye alınmalıdır. Uygulama kodu, test kodu veya API implementation yapmaz.
-model: inherit
-maxTurns: 30
+model: sonnet
+maxTurns: 20
 color: green
 tools: Read, Grep, Glob, Write, Edit
 ---

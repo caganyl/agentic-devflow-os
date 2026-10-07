@@ -13,6 +13,7 @@ Birden fazla rol gerekiyorsa önce `devflow-plugin:delivery-lead`'e sor.
 | Planlama, iş parçalama, rol atama, risk analizi | `devflow-plugin:delivery-lead` |
 | Requirement, user story, acceptance criteria | `devflow-plugin:product-analyst` |
 | Mimari karar, trade-off analizi, ADR | `devflow-plugin:solution-architect` |
+| ADR review (tek turda VERDICT) | `devflow-plugin:adr-reviewer` |
 | API / event / database contract | `devflow-plugin:contract-broker` |
 | API, auth, servis, domain logic | `devflow-plugin:backend-engineer` |
 | UI, component, frontend state, route | `devflow-plugin:frontend-engineer` |
@@ -28,7 +29,8 @@ Birden fazla rol gerekiyorsa önce `devflow-plugin:delivery-lead`'e sor.
 
 ```
 product-analyst      -> docs/product/REQ-XXX.md (requirement + acceptance criteria)
-solution-architect   -> docs/architecture/adr/  (gerekiyorsa)
+solution-architect   -> docs/architecture/adr/  (yalnızca ADR eşiği sağlanırsa)
+adr-reviewer         -> docs/architecture/adr/reviews/ (en fazla 2 tur)
 contract-broker      -> docs/contracts/         (frontend+backend paralel gidecekse zorunlu)
 insan                -> docs/ownership/REQ-XXX.json  status=approved
 implementer agent'lar-> backend/ frontend/ migrations/ ai/
@@ -40,13 +42,27 @@ insan                -> merge
 
 Bir adım atlanarak sonrakine geçilmez.
 
+## Tasarım ve Bağlam Bütçesi
+
+- ADR yalnızca şu durumlarda yazılır: yeni dış bağımlılık/servis, context'ler
+  arası veri modeli/migration, auth/güvenlik sınırı, geriye uyumsuz public
+  contract, geri alınması pahalı karar. Aksi halde kısa karar notu yeterli.
+- Bir ADR için en fazla 2 review turu; sonrası insan kararı. Accepted ADR
+  dondurulur. Bunlar hook ile zorlanır.
+- Alt ajanlara belge içeriği değil yol ve 5-10 satırlık özet ver; alt ajandan
+  dönen sonucu da kısa tut.
+- Implementer ownership/branch nedeniyle reddedilirse tasarıma geri dönme;
+  blocker'ı ve gereken insan adımını raporla. Managed run'larda implementer
+  yazımı için run `launch --req-id REQ-NNN` ile başlatılmış olmalıdır.
+
 ## Ownership Kapısı
 
 Implementer agent'lar (`backend-engineer`, `frontend-engineer`,
 `database-engineer`, `qa-automation`, `ai-data-engineer`) yalnızca şu koşullar
 sağlandığında yazabilir:
 
-1. Branch `req-XXX-kisa-aciklama` biçiminde,
+1. Branch `req-XXX-kisa-aciklama` biçiminde veya `--req-id` ile başlatılmış
+   managed run branch'i (`devflow/run-*`, `DEVFLOW_RUN_BRANCH`),
 2. `docs/ownership/REQ-XXX.json` mevcut ve `status: approved`,
 3. Agent manifestte owner olarak tanımlı,
 4. Hedef path o agent'ın `write_paths` alanı altında.
