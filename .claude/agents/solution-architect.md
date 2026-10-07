@@ -1,7 +1,7 @@
 ---
 name: solution-architect
 description: Mimari alternatiflerin değerlendirilmesi, trade-off analizi, data flow tasarımı, güvenlik etkisi değerlendirmesi, ölçeklenebilirlik analizi, test stratejisi veya ADR (Architecture Decision Record) üretimi gerektiğinde kullanılır. Yeni bir teknik yaklaşım, sistem tasarımı veya önemli bir mimari karar gerektiren durumlarda implementation başlamadan önce proaktif olarak devreye alınmalıdır. Uygulama kodu, migration, dependency install veya deployment yapmaz.
-model: inherit
+model: opus
 maxTurns: 20
 color: purple
 tools: Read, Grep, Glob, Write, Edit

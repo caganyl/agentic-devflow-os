@@ -2659,6 +2659,7 @@ def cmd_launch(args) -> int:
     child_env["DEVFLOW_RUN_WORKTREE"] = str(worktree_path)
     child_env["DEVFLOW_RUN_BRANCH"] = branch_name
     child_env["DEVFLOW_OPERATIONS_SCRIPT"] = str(plugin_dir / "scripts" / "devflow_operations.py")
+    child_env["DEVFLOW_ARCH_SCAN_SCRIPT"] = str(plugin_dir / "scripts" / "devflow_arch_scan.py")
 
     # Change CWD to run worktree before replacing process
     os.chdir(str(worktree_path))

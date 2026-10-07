@@ -41,6 +41,9 @@ INCLUDED_SCRIPTS = frozenset({
     # Shipped so enforce-role-boundaries.sh can authorize implementer writes in
     # a target project (it resolves the validator from the plugin root).
     "validate_ownership_manifest.py",
+    # Read-only architecture scanner used by architecture-analyst and
+    # stack-verification (profile --check).
+    "devflow_arch_scan.py",
 })
 INCLUDED_HOOKS = frozenset({"hooks.json"})
 

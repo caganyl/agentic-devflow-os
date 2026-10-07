@@ -31,6 +31,21 @@ if [ "$BRANCH" = "main" ]; then
   echo "- MAIN PROTECTION ACTIVE: inspect, research and plan only. Create a feature branch or worktree before editing."
 fi
 
+PROFILE_MD="$ROOT/docs/architecture/profile/ARCHITECTURE_PROFILE.md"
+if [ -f "$PROFILE_MD" ]; then
+  PROFILE_STATUS="$(grep -m1 -iE '^[^A-Za-z]*Status[^A-Za-z]*:' "$PROFILE_MD" | sed -E 's/.*:[[:space:]]*\**[[:space:]]*([A-Za-z]+).*/\1/' || true)"
+  echo "- Architecture profile: ${PROFILE_STATUS:-unknown} (docs/architecture/profile/)"
+else
+  echo "- Architecture profile: none (run the project-onboarding workflow before implementation)"
+fi
+
+# Make the read-only architecture scanner path available to Bash commands in
+# plugin sessions that were not started through `launch`.
+if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -z "${DEVFLOW_ARCH_SCAN_SCRIPT:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] \
+   && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/devflow_arch_scan.py" ]; then
+  printf 'export DEVFLOW_ARCH_SCAN_SCRIPT=%q\n' "${CLAUDE_PLUGIN_ROOT}/scripts/devflow_arch_scan.py" >> "$CLAUDE_ENV_FILE" || true
+fi
+
 if [ -n "$LATEST_HANDOFF" ]; then
   echo "- Latest handoff: ${LATEST_HANDOFF#$ROOT/}"
 else

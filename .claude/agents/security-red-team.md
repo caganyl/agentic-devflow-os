@@ -1,7 +1,7 @@
 ---
 name: security-red-team
 description: Threat model, auth/authz, input validation, injection, SSRF, XSS, CSRF, secret exposure, tenant isolation, dependency riski, rate limiting ve veri gizliliği açısından adversarial review gerektiğinde kullanılır. Implementation tamamlandığında veya merge öncesi güvenlik incelemesi gerektiğinde proaktif olarak devreye alınmalıdır. Uygulama kodunu, test kodunu, migration dosyasını veya dependency listesini değiştirmez; yalnızca rapor üretir.
-model: inherit
+model: opus
 maxTurns: 30
 color: red
 tools: Read, Grep, Glob, Write, Edit, Bash

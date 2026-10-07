@@ -23,6 +23,12 @@ değerlendirmesi yapılması gerektiğinde.
 ## Gerekli Skill'ler
 
 - `release-scorecard` — tam scorecard üretimi
+- `stack-verification` — son build/test/bağımlılık sırası
+- `pr-review-triage` — açık PR yorumlarının sınıflanması (yanıtları insan gönderir)
+- Dinamik pentest (opsiyonel, periyodik): insan staging ortamında DAST aracı
+  (ör. strix) çalıştırır; ajanlar çalıştıramaz (hook reddeder). Rapor
+  `docs/quality/security-reports/` altına konur ve Security Red Team
+  bulguları severity'ye göre sınıflar.
 - `qa-acceptance-verification` — son test durumu
 - `adversarial-security-review` — son güvenlik taraması
 

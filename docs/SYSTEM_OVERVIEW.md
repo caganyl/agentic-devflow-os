@@ -99,7 +99,7 @@ güvenilmeyen veri kabul edilir.
 
 ## Agent'lar
 
-15 rol tanımlıdır. Her birinin araç kısıtı vardır ve bu kısıt öneri değil,
+17 rol tanımlıdır. Her birinin araç kısıtı vardır ve bu kısıt öneri değil,
 teknik olarak dayatılır.
 
 | Rol | Araçlar | Not |
@@ -116,6 +116,8 @@ teknik olarak dayatılır.
 | `contract-broker` | Read, Grep, Glob, Write, Edit | Bash yok |
 | `solution-architect` | Read, Grep, Glob, Write, Edit | Bash yok; ADR loop breaker |
 | `adr-reviewer` | Read, Grep, Glob, Write | Bash yok; yalnızca `docs/architecture/adr/reviews`, en fazla 2 tur |
+| `architecture-analyst` | Read, Grep, Glob, Write, Edit, Bash | yalnızca iki profil dosyası; Bash yalnızca mimari tarayıcı ve mutasyonsuz inceleme |
+| `docs-writer` | Read, Grep, Glob, Write, Edit, Bash | `README.md` dosyaları ve kaynak dosyalarda yalnızca yorum; Bash yalnızca inceleme |
 | `product-analyst` | Read, Grep, Glob, Write, Edit | Bash yok |
 | `design-reviewer` | Read, Grep, Glob, Write, Edit | Bash yok |
 | `governance-operations-author` | Read, Grep, Glob, Write, Edit | Bash yok |
@@ -134,7 +136,7 @@ Her rol tanımında ne yapmayacağı açıkça yazılıdır; hepsinde ortak olan
 
 ## Skill'ler
 
-17 skill, ajanlara iş yapma yöntemini öğretir.
+25 skill, ajanlara iş yapma yöntemini öğretir.
 
 | Grup | Skill'ler |
 |---|---|
@@ -143,6 +145,8 @@ Her rol tanımında ne yapmayacağı açıkça yazılıdır; hepsinde ortak olan
 | Denetim | `adversarial-security-review`, `qa-acceptance-verification`, `visual-design-review`, `evalops-regression`, `release-scorecard` |
 | Güvenlik sınırları | `managed-delivery-operations`, `db-migration-safety`, `bootstrap-target-project` |
 | Dış kaynak | `notebooklm-grounded-retrieval`, `obsidian-project-context` |
+| Mühendislik disiplini | `tdd-vertical-slice`, `stack-verification`, `root-cause-investigation`, `requirement-grilling`, `pr-review-triage` |
+| Mimari ve dokümantasyon | `architecture-discovery`, `architecture-intake`, `documentation-sync` |
 
 Son gruptaki iki skill, dış kaynakların nasıl kullanılacağını kısıtlar:
 NotebookLM'den gelen ham çıktı güvenilmeyen bağlamdır; Obsidian'dan tüm vault
@@ -150,11 +154,11 @@ değil yalnızca seçilmiş stratejik notlar kullanılır.
 
 ## Workflow'lar
 
-Hangi işte hangi rollerin hangi sırayla devreye gireceğini tarif eden 8 reçete:
+Hangi işte hangi rollerin hangi sırayla devreye gireceğini tarif eden 9 reçete:
 
 `feature-delivery`, `bug-resolution`, `release-readiness`, `security-response`,
 `ai-rag-delivery`, `data-dashboard-delivery`, `new-product-discovery`,
-`cost-optimization`.
+`cost-optimization`, `project-onboarding`.
 
 ## Hook'lar — kuralların uygulandığı yer
 

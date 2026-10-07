@@ -24,6 +24,9 @@ güvenlik incident tespit edildiğinde. Hız ve gizlilik kritiktir.
 ## Gerekli Skill'ler
 
 - `adversarial-security-review` — threat model ve remediation
+- `root-cause-investigation` — açığın kök nedeni kanıtlanmadan patch yok
+- Dinamik doğrulama: patch sonrası insan, staging'de DAST aracıyla (ör.
+  strix) yeniden test eder; production'a karşı asla çalıştırılmaz.
 - `db-migration-safety` (veri migration gerekiyorsa)
 - `release-scorecard` (emergency release ise)
 

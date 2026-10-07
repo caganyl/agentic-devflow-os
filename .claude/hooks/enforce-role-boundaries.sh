@@ -52,7 +52,8 @@ is_governed_agent() {
     delivery-lead|product-analyst|solution-architect|contract-broker|\
     frontend-engineer|backend-engineer|database-engineer|qa-automation|\
     security-red-team|integration-release|ai-data-engineer|evalops-reviewer|\
-    design-reviewer|governance-operations-author|adr-reviewer)
+    design-reviewer|governance-operations-author|adr-reviewer|\
+    architecture-analyst|docs-writer)
       return 0
       ;;
     *)
@@ -226,6 +227,29 @@ bash_has_blocked_operation() {
     return 0
   fi
 
+  # External-system writes need human approval (autonomy-gates.md). Reading PR
+  # review comments is fine; replying, resolving, reviewing, commenting or
+  # creating issues is not something a governed agent does on its own.
+  if printf '%s' "$command" | grep -Eiq \
+    '(^|[[:space:];|&])gh[[:space:]]+(pr|issue)[[:space:]]+(comment|review|close|reopen|edit|create|ready|lock|delete|transfer)([[:space:];|&]|$)'; then
+    return 0
+  fi
+
+  if printf '%s' "$command" | grep -Eiq '(^|[[:space:];|&])gh[[:space:]]+api([[:space:]]|$)' \
+    && printf '%s' "$command" | grep -Eiq '(-X|--method)[[:space:]=]*(POST|PUT|PATCH|DELETE)|(^|[[:space:]])(-f|-F|--field|--raw-field|--input)([[:space:]=]|$)'; then
+    return 0
+  fi
+
+  if printf '%s' "$command" | grep -Eiq 'agent-reviews' \
+    && printf '%s' "$command" | grep -Eiq -- '--(reply|resolve|watch)([[:space:]=]|$)'; then
+    return 0
+  fi
+
+  # Active attack tooling (DAST/pentest) runs only by a human against staging.
+  if printf '%s' "$command" | grep -Eiq '(^|[[:space:];|&/])strix([[:space:];|&]|$)'; then
+    return 0
+  fi
+
   # Stream merges and discards (2>&1, >&2, 2>/dev/null, >/dev/null) do not
   # write files. Strip them before the redirect check so ordinary test
   # commands such as `dotnet test 2>&1 | tail -50` are not denied and retried.
@@ -388,6 +412,151 @@ if new_len > max_chars and new_len > len(existing):
 PYADR
 }
 
+
+# ---------------------------------------------------------------------------
+# Architecture profile gate
+#
+# docs/architecture/profile/ holds the project's architecture profile. Agents
+# may draft it, but only a human marks it confirmed, and a confirmed profile is
+# frozen for agents (implementers treat it as rules).
+# ---------------------------------------------------------------------------
+profile_gate_reason() {
+  HOOK_INPUT="$INPUT" python3 - "$ROOT" "$AGENT_TYPE" <<'PYPROF'
+import json, os, re, sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+agent = sys.argv[2]
+data = json.loads(os.environ.get("HOOK_INPUT", "{}"))
+ti = data.get("tool_input") or {}
+raw = Path(ti.get("file_path", "")).expanduser()
+target = (raw if raw.is_absolute() else root / raw).resolve()
+try:
+    rel = target.relative_to(root).as_posix()
+except ValueError:
+    sys.exit(0)
+if not rel.startswith("docs/architecture/profile/"):
+    sys.exit(0)
+
+def status_of(text, is_json):
+    if is_json:
+        try:
+            return str((json.loads(text) or {}).get("status", "")).lower()
+        except ValueError:
+            m = re.search(r'"status"\s*:\s*"(\w+)"', text)
+            return m.group(1).lower() if m else ""
+    m = re.search(r"^\W*Status\W*:\s*\**\s*(\w+)", text, re.M | re.I)
+    return m.group(1).lower() if m else ""
+
+is_json = rel.endswith(".json")
+existing = target.read_text(encoding="utf-8", errors="replace") if target.exists() else ""
+if existing and status_of(existing, is_json) == "confirmed":
+    print("Architecture profile gate: the profile is confirmed by a human and frozen "
+          "for agents. Report drift or a proposed change instead of editing it.")
+    sys.exit(0)
+if data.get("tool_name") == "Write":
+    new = ti.get("content", "")
+else:
+    new = existing.replace(ti.get("old_string", ""), ti.get("new_string", ""), 1)
+if status_of(new, is_json) == "confirmed":
+    print("Architecture profile gate: only a human may set status: confirmed. "
+          "Leave the profile as draft and list the open questions.")
+PYPROF
+}
+
+# ---------------------------------------------------------------------------
+# docs-writer gate
+#
+# README.md files may be written anywhere outside generated/protected trees.
+# Source files may only be edited (never rewritten) and the edit must change
+# comments only: with comments and whitespace removed, old and new text must be
+# identical. Everything else is denied.
+# ---------------------------------------------------------------------------
+docs_writer_reason() {
+  HOOK_INPUT="$INPUT" python3 - "$ROOT" <<'PYDOCS'
+import json, os, re, sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+data = json.loads(os.environ.get("HOOK_INPUT", "{}"))
+tool = data.get("tool_name", "")
+ti = data.get("tool_input") or {}
+raw = Path(ti.get("file_path", "")).expanduser()
+target = (raw if raw.is_absolute() else root / raw).resolve()
+try:
+    rel = target.relative_to(root).as_posix()
+except ValueError:
+    print("docs-writer: target is outside the repository."); sys.exit(0)
+
+parts = set(rel.split("/")[:-1])
+blocked_dirs = {"node_modules", "bin", "obj", ".git", ".devflow", ".claude", ".next", "dist", "build"}
+if parts & blocked_dirs or rel.startswith(("docs/ownership/", "docs/architecture/adr/",
+                                           "docs/architecture/profile/", "docs/contracts/")):
+    print(f"docs-writer: {rel} is in a protected or generated area."); sys.exit(0)
+
+if Path(rel).name.lower() == "readme.md":
+    sys.exit(0)
+
+SOURCE = {".cs", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}
+if Path(rel).suffix.lower() not in SOURCE:
+    print("docs-writer may write README.md files and add comments to source files only."); sys.exit(0)
+if tool != "Edit":
+    print("docs-writer: use Edit with a small old_string/new_string for source files; "
+          "rewriting a source file with Write is not allowed."); sys.exit(0)
+
+JSX_COMMENT = re.compile(r"\{\s*/\*.*?\*/\s*\}", re.S)
+
+def strip_comments(text):
+    text = JSX_COMMENT.sub("", text)
+    out, i, n, quote = [], 0, len(text), None
+    while i < n:
+        ch = text[i]
+        if quote:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(text[i + 1]); i += 2; continue
+            if ch == quote:
+                quote = None
+            i += 1; continue
+        if ch in "\"'`":
+            quote = ch; out.append(ch); i += 1; continue
+        if text.startswith("//", i):
+            j = text.find("\n", i); i = n if j == -1 else j; continue
+        if text.startswith("/*", i):
+            j = text.find("*/", i + 2); i = n if j == -1 else j + 2; continue
+        out.append(ch); i += 1
+    return re.sub(r"\s+", "", "".join(out))
+
+old_s, new_s = ti.get("old_string", ""), ti.get("new_string", "")
+if strip_comments(old_s) != strip_comments(new_s):
+    print("docs-writer: this edit changes code, not only comments. docs-writer may add "
+          "or update comments only; report code issues instead of fixing them.")
+PYDOCS
+}
+
+analyst_command_allowed() {
+  local command="$1" sentinel="__DEVFLOW_ARCH_SCAN__" script
+  command="${command//\"\$\{DEVFLOW_ARCH_SCAN_SCRIPT\}\"/$sentinel}"
+  command="${command//\"\$DEVFLOW_ARCH_SCAN_SCRIPT\"/$sentinel}"
+  command="${command//\$\{DEVFLOW_ARCH_SCAN_SCRIPT\}/$sentinel}"
+  command="${command//\$DEVFLOW_ARCH_SCAN_SCRIPT/$sentinel}"
+  # The script must be the first argument to python3 and must be the real
+  # scanner: otherwise `python3 -c "<code>" devflow_arch_scan.py` or a planted
+  # look-alike file would give the analyst arbitrary code execution.
+  if [[ "$command" =~ ^python3[[:space:]]+([^[:space:]]+)([[:space:]]+[^\;\&\|\<\>\`\$]*)?$ ]]; then
+    script="${BASH_REMATCH[1]}"
+    case "$script" in
+      "$sentinel"|scripts/devflow_arch_scan.py|./scripts/devflow_arch_scan.py)
+        return 0
+        ;;
+    esac
+    if [ -n "${DEVFLOW_ARCH_SCAN_SCRIPT:-}" ] && [ "$script" = "$DEVFLOW_ARCH_SCAN_SCRIPT" ]; then
+      return 0
+    fi
+  fi
+  security_command_is_non_mutating "$1"
+}
+
 case "$TOOL_NAME" in
   Edit|Write)
     FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty')"
@@ -405,6 +574,20 @@ case "$TOOL_NAME" in
     ADR_GATE_REASON="$(adr_gate_reason)"
     if [ -n "$ADR_GATE_REASON" ]; then
       deny "$ADR_GATE_REASON"
+      exit 0
+    fi
+
+    PROFILE_GATE_REASON="$(profile_gate_reason)"
+    if [ -n "$PROFILE_GATE_REASON" ]; then
+      deny "$PROFILE_GATE_REASON"
+      exit 0
+    fi
+
+    if [ "$AGENT_TYPE" = "docs-writer" ]; then
+      DOCS_REASON="$(docs_writer_reason)"
+      if [ -n "$DOCS_REASON" ]; then
+        deny "Role-boundary protection: $DOCS_REASON"
+      fi
       exit 0
     fi
 
@@ -454,6 +637,12 @@ case "$TOOL_NAME" in
       adr-reviewer)
         ALLOWED_PATHS=("docs/architecture/adr/reviews")
         ;;
+      architecture-analyst)
+        ALLOWED_PATHS=(
+          "docs/architecture/profile/ARCHITECTURE_PROFILE.md"
+          "docs/architecture/profile/architecture-profile.json"
+        )
+        ;;
       *)
         exit 0
         ;;
@@ -480,6 +669,18 @@ case "$TOOL_NAME" in
         deny "Role-boundary protection: $AGENT_TYPE has no Bash authority. Use documented read/write tools only."
         exit 0
         ;;
+      architecture-analyst)
+        if ! analyst_command_allowed "$COMMAND"; then
+          deny "Role-boundary protection: architecture-analyst may run only the DevFlow architecture scanner (python3 .../devflow_arch_scan.py ...) or single non-mutating inspection commands."
+        fi
+        exit 0
+        ;;
+      docs-writer)
+        if ! security_command_is_non_mutating "$COMMAND"; then
+          deny "Role-boundary protection: docs-writer may run only single, non-mutating inspection commands (git diff/log/show, ls, grep, cat...)."
+        fi
+        exit 0
+        ;;
       security-red-team)
         if ! security_command_is_non_mutating "$COMMAND"; then
           deny "Role-boundary protection: security-red-team may run only single, non-mutating inspection or scanning commands. Use Read/Grep/Glob for other inspection."
@@ -489,7 +690,7 @@ case "$TOOL_NAME" in
     esac
 
     if bash_has_blocked_operation "$COMMAND"; then
-      deny "Role-boundary protection: governed agents cannot run Git mutation, destructive filesystem, dependency-install, merge, deployment, migration, permission or redirected-write Bash commands."
+      deny "Role-boundary protection: governed agents cannot run Git mutation, destructive filesystem, dependency-install, merge, deployment, migration, permission, redirected-write, external-system write (PR/issue comments, replies, resolves) or active attack tooling Bash commands. Prepare the change and hand it to the human."
       exit 0
     fi
     ;;

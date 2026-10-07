@@ -72,6 +72,7 @@ doğrulanması gerekiyor" şeklinde işaretle.
 | Güvenlik riski        | Security Red Team, Backend Engineer, Delivery Lead, gerekirse Database Engineer           |
 | Release               | QA Automation, Security Red Team, Integration/Release                                     |
 | Maliyet optimizasyonu | Delivery Lead, Solution Architect, AI/Data Engineer, Integration/Release                  |
+| Projeye katılım       | Architecture Analyst, Docs Writer (greenfield: + Solution Architect, Backend, Frontend)   |
 
 Tam routing kuralları: `.claude/rules/task-routing.md`
 
@@ -163,6 +164,7 @@ Göreve göre doğru workflow dosyasını kullan:
 - Güvenlik: `.claude/workflows/security-response.md`
 - Release: `.claude/workflows/release-readiness.md`
 - Maliyet: `.claude/workflows/cost-optimization.md`
+- Projeye katılım / yeni proje: `.claude/workflows/project-onboarding.md`
 
 ## İnsan Onay Kapıları
 

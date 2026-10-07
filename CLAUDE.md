@@ -22,6 +22,21 @@ Tüm ADR, requirement veya handoff setini baştan sona okuma. Bir belge
 - Ownership/branch blocker'ı tasarım sorunu değildir; tasarım dokümanlarına
   geri dönme, blocker'ı insana raporla.
 
+## Kodlama İlkeleri
+
+Esin kaynağı: Andrej Karpathy'nin LLM kodlama hatalarına dair gözlemleri
+(multica-ai/andrej-karpathy-skills). Kendi ifademizle dört ilke:
+
+1. **Önce düşün:** Varsayımlarını açıkça yaz. İki makul yorum varsa sessizce
+   birini seçme; sor veya ikisini de belirt. Daha basit bir yol görüyorsan söyle.
+2. **Sade kal:** İsteneni karşılayan en az kodu yaz. İstenmemiş özellik,
+   tek kullanımlık soyutlama, "ileride lazım olur" esnekliği ekleme.
+3. **Cerrahi değişiklik:** Yalnızca görevin gerektirdiği satırlara dokun.
+   Komşu kodu, yorumları veya biçimlendirmeyi "iyileştirme". Senin değişikliğin
+   yüzünden kullanılmaz kalan şeyi temizle; önceden var olan ölü kodu yalnızca raporla.
+4. **Hedefe göre çalış:** Görevi doğrulanabilir bir başarı ölçütüne çevir
+   (ör. "bu AC için test yazılır ve geçer"), ölçüt sağlanana kadar döngüde kal.
+
 ## Source of Truth
 
 - Git-tracked dokümanlar canonical source of truth'tür.

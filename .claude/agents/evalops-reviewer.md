@@ -1,7 +1,7 @@
 ---
 name: evalops-reviewer
 description: AI feature'lar için golden dataset dışındaki regression/adversarial dataset, eval configuration, test evidence, quality scorecard, model davranışı analizi ve release öncesi eval review yapar. AI/RAG/LLM feature tamamlandığında, model/provider/prompt/retrieval değiştiğinde veya release öncesi kalite regresyonu kontrolü gerektiğinde proaktif olarak çağrılmalıdır. Uygulama kodu, prompt implementation, model adapter, production config, deployment, main merge veya release onayı yapmaz.
-model: inherit
+model: sonnet
 maxTurns: 35
 color: green
 tools: Read, Grep, Glob, Write, Edit, Bash
