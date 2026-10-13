@@ -376,7 +376,7 @@ class CodexPluginBuildTests(unittest.TestCase):
         # guards the Claude build from unintended Codex-side edits.
         expected = {
             REPO_ROOT / "scripts" / "build_devflow_plugin.py": "0457cad55caa833fc20828ecac8bb71fa3caec9e1d6d80fe0c6640de3c47e543",
-            REPO_ROOT / "hooks" / "hooks.json": "baf288402c0c8d3264b47502cca4578f831fcd5f3796a84aeafc227f0827925e",
+            REPO_ROOT / "hooks" / "hooks.json": "cfbc054948bc03eeae26bcb21caeff9b858a9c0d99aa93e0304bbe7780c2b78e",
         }
         for path, digest in expected.items():
             with self.subTest(path=path):

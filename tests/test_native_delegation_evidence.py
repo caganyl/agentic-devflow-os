@@ -1479,8 +1479,8 @@ class DirectWriteBypassGuardTest(unittest.TestCase):
 
     def test_write_to_delegation_events_allowed(self):
         result = _run_guard(_write_payload(".devflow/delegation-events/evt-001.json"))
-        self.assertEqual(result.returncode, 0,
-                         "Write to .devflow/delegation-events/ must be allowed (recorder)")
+        self.assertEqual(result.returncode, 2,
+                         "Tool-call writes to .devflow/delegation-events/ are blocked; only the recorder hook writes there")
 
     def test_write_to_context_allowed(self):
         result = _run_guard(_write_payload(".devflow/context/context-pack.md"))
