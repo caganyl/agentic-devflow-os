@@ -8,7 +8,7 @@ evidence-driven yazılım geliştirme deneyimi oluşturmak için tasarlanmışt�
 ## 2. Source of Truth Hierarchy
 
 1. PROJECT_CONSTITUTION.md
-2. Approved ADR documents
+2. Approved ADR documents (bkz. §5a)
 3. Approved API, event and database contracts
 4. Requirements and acceptance criteria
 5. Code and automated tests
@@ -39,10 +39,25 @@ Aşağıdaki işlemler insan onayı olmadan yapılmaz:
 ## 5. Documentation Policy
 
 - Her requirement bir ID taşır: REQ-XXX.
-- Her mimari karar ADR ile kayıt altına alınır.
+- Mimari karar, yalnızca solution-architect eşiğini (yeni dış bağımlılık,
+  context'ler arası veri modeli/migration, auth/güvenlik sınırı, geriye
+  uyumsuz public contract, geri alınması pahalı karar) sağlıyorsa ADR ile
+  kayıt altına alınır; diğer kararlar için kısa karar notu yeterlidir.
+- Proposed ADR veya karar notu implementasyonu bloklamaz (bkz. §5a).
 - API değişikliği contract güncellemesi gerektirir.
 - Database değişikliği migration ve rollback notu gerektirir.
 - Non-trivial her iş handoff güncellemesi gerektirir.
+
+## 5a. Run İçi Onay Tanımı
+
+Run içinde "onaylı" şu anlama gelir:
+
+- **ADR:** `adr-reviewer`'dan APPROVE veya APPROVE_WITH_NOTES almış
+  `Proposed` ADR. Contract ve implementasyon bununla başlar. `Accepted`
+  statüsü insanın merge sırasındaki kararıdır, implementasyon ön koşulu değildir.
+- **Contract:** `record-contract-evidence` ile run'a kaydedilmiş `Proposed`
+  contract. `Accepted` statüsü yine insan onayıyla, merge öncesi verilir.
+- **ADR eşiği sağlanmıyorsa** ADR yokluğu blokaj değildir; kısa karar notu yeterlidir.
 
 ## 6. Security Policy
 

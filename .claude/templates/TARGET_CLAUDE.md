@@ -80,6 +80,10 @@ architecture-analyst tarar, boş projede ana oturum insanla
 - Implementer ownership/branch nedeniyle reddedilirse tasarıma geri dönme;
   blocker'ı ve gereken insan adımını raporla. Managed run'larda implementer
   yazımı için run `launch --req-id REQ-NNN` ile başlatılmış olmalıdır.
+- Run içinde "onaylı ADR" = adr-reviewer'dan APPROVE/APPROVE_WITH_NOTES almış
+  `Proposed` ADR; "onaylı contract" = `record-contract-evidence` ile kaydedilmiş
+  `Proposed` contract. `Accepted` statüsü insanın merge kararıdır,
+  implementasyon ön koşulu değildir. ADR eşiği yoksa ADR yokluğu blokaj değildir.
 
 ## Ownership Kapısı
 

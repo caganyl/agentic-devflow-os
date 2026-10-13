@@ -139,6 +139,11 @@ python3 scripts/devflow_operations.py create-run --target . --objective "..."
 python3 scripts/devflow_operations.py generate-task-graph --target . --delivery-type ...
 ```
 
+`new_feature` task graph'ı varsayılan olarak Architecture Decision task'ı
+içermez. `--needs-adr` yalnızca `solution-architect.md`'deki ADR eşiği
+sağlanıyorsa verilir; eşik yoksa ADR task'ı eklemek için run'ı yeniden
+oluşturma, kısa karar notu yeterlidir.
+
 ### 5. Dispatch Modu Seç
 
 #### Agent Team Kullanma Koşulları (tümü sağlanmalı)

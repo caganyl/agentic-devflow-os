@@ -254,5 +254,60 @@ class EnforceRoleBoundariesOwnershipTestCase(unittest.TestCase):
         self._assert_allowed(result)
 
 
+class ContractPathAlignmentTestCase(unittest.TestCase):
+    """The contract-broker write boundary (hook), the agent prompt and the
+    CLI contract-evidence gate must name the same directory. A mismatch here
+    left new_feature runs unable to satisfy contract_gate_satisfied, so
+    implementation never started and runs fell back into design work."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmpdir.name)
+        subprocess.run(["git", "-C", str(self.root), "init", "-q"], check=True)
+        subprocess.run(
+            ["git", "-C", str(self.root), "checkout", "-q", "-b", "feature-x"],
+            check=True,
+        )
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
+
+    def _run_hook(self, file_path):
+        payload = {
+            "cwd": str(self.root),
+            "agent_type": "contract-broker",
+            "tool_name": "Write",
+            "tool_input": {"file_path": file_path, "content": "openapi: 3.1.0\n"},
+        }
+        return subprocess.run(
+            ["bash", str(HOOK_PATH)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+        )
+
+    def _cli_prefix(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "devflow_operations", REPO_ROOT / "scripts" / "devflow_operations.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.CONTRACT_EVIDENCE_PATH_PREFIX
+
+    def test_contract_broker_can_write_cli_evidence_path(self):
+        prefix = self._cli_prefix()
+        result = self._run_hook(f"{prefix}openapi/REQ-001.yaml")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "", result.stdout)
+
+    def test_contract_broker_prompt_names_cli_evidence_path(self):
+        prompt = (REPO_ROOT / ".claude" / "agents" / "contract-broker.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(f"`{self._cli_prefix()}`", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

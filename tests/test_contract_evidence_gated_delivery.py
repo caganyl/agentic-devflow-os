@@ -5,7 +5,7 @@ Covers 10 scenarios:
  1. new_feature graph has contract_definition task; implementation depends on it
  2. backend_utility graph has no contract task; state = not_applicable
  3. Contract evidence absent → implementation state transition rejected (exit 15)
- 4. Valid docs/quality/contracts/... path accepted
+ 4. Valid docs/contracts/... path accepted
  5. Absolute, traversal, .devflow, .claude, secret/credential, nonexistent paths rejected
  6. After recording evidence: contract_status=completed, gate=True
  7. Without contract evidence → finalization not_ready
@@ -115,13 +115,13 @@ def _setup_backend_utility_run(target: Path, objective: str = "Parse CSV files")
 
 def _create_contract_file(target: Path, filename: str = "api-contract.md") -> str:
     """Create a dummy contract evidence file and return its relative path."""
-    contract_dir = target / "docs" / "quality" / "contracts"
+    contract_dir = target / "docs" / "contracts"
     contract_dir.mkdir(parents=True, exist_ok=True)
     contract_file = contract_dir / filename
     contract_file.write_text(
         "# API Contract\n\nEndpoint definitions for REQ-001.\n", encoding="utf-8"
     )
-    return f"docs/quality/contracts/{filename}"
+    return f"docs/contracts/{filename}"
 
 
 def _verified_new_feature_tasks(mod) -> list:
@@ -189,10 +189,10 @@ class ContractTaskGraphTest(unittest.TestCase):
         self.assertEqual(contract_tasks[0]["assigned_role"], "contract-broker")
 
     def test_new_feature_contract_definition_output_path(self):
-        """Contract Definition task output_path points to docs/quality/contracts/."""
+        """Contract Definition task output_path points to docs/contracts/."""
         tasks = self.mod.generate_task_graph_nodes("RUN-001", "new_feature", "Add user onboarding")
         contract_task = next(t for t in tasks if t["task_type"] == "contract_definition")
-        self.assertIn("docs/quality/contracts", contract_task.get("output_path", ""))
+        self.assertIn("docs/contracts", contract_task.get("output_path", ""))
 
     def test_new_feature_implementation_depends_on_contract_definition(self):
         """Test 1b: Implementation tasks depend on the contract_definition task."""
@@ -368,13 +368,13 @@ class ContractEvidencePathValidationTest(unittest.TestCase):
         cls.tmpdir_obj.cleanup()
 
     def _create_contract(self, filename: str = "contract.md") -> str:
-        contract_dir = cls = self.target / "docs" / "quality" / "contracts"
+        contract_dir = cls = self.target / "docs" / "contracts"
         contract_dir.mkdir(parents=True, exist_ok=True)
         (contract_dir / filename).write_text("# Contract\n", encoding="utf-8")
-        return f"docs/quality/contracts/{filename}"
+        return f"docs/contracts/{filename}"
 
     def test_valid_path_accepted(self):
-        """Test 4: Valid docs/quality/contracts/... path is accepted."""
+        """Test 4: Valid docs/contracts/... path is accepted."""
         rel_path = self._create_contract("valid-contract.md")
         ok, err = self.mod.validate_contract_evidence_path(self.target, rel_path)
         self.assertTrue(ok, f"Expected valid path to be accepted. Error: {err}")
@@ -382,7 +382,7 @@ class ContractEvidencePathValidationTest(unittest.TestCase):
 
     def test_absolute_path_rejected(self):
         """Test 5a: Absolute path is rejected."""
-        abs_path = str(self.target / "docs" / "quality" / "contracts" / "contract.md")
+        abs_path = str(self.target / "docs" / "contracts" / "contract.md")
         ok, err = self.mod.validate_contract_evidence_path(self.target, abs_path)
         self.assertFalse(ok, "Absolute path must be rejected")
         self.assertIn("mutlak", err.lower())
@@ -390,7 +390,7 @@ class ContractEvidencePathValidationTest(unittest.TestCase):
     def test_traversal_rejected(self):
         """Test 5b: Path traversal (..) is rejected."""
         ok, err = self.mod.validate_contract_evidence_path(
-            self.target, "docs/quality/contracts/../../etc/passwd"
+            self.target, "docs/contracts/../../etc/passwd"
         )
         self.assertFalse(ok, "Traversal path must be rejected")
         self.assertIn("..", err)
@@ -398,7 +398,7 @@ class ContractEvidencePathValidationTest(unittest.TestCase):
     def test_wildcard_rejected(self):
         """Test 5c: Wildcard in path is rejected."""
         ok, err = self.mod.validate_contract_evidence_path(
-            self.target, "docs/quality/contracts/*.md"
+            self.target, "docs/contracts/*.md"
         )
         self.assertFalse(ok, "Wildcard path must be rejected")
         self.assertIn("wildcard", err.lower())
@@ -409,7 +409,7 @@ class ContractEvidencePathValidationTest(unittest.TestCase):
             self.target, ".devflow/runs/RUN-001.json"
         )
         self.assertFalse(ok, ".devflow/ path must be rejected")
-        self.assertIn("docs/quality/contracts", err)
+        self.assertIn("docs/contracts", err)
 
     def test_claude_path_rejected(self):
         """Test 5e: .claude/ path is rejected."""
@@ -417,20 +417,20 @@ class ContractEvidencePathValidationTest(unittest.TestCase):
             self.target, ".claude/settings.json"
         )
         self.assertFalse(ok, ".claude/ path must be rejected")
-        self.assertIn("docs/quality/contracts", err)
+        self.assertIn("docs/contracts", err)
 
     def test_wrong_prefix_rejected(self):
-        """Test 5f: Path not under docs/quality/contracts/ is rejected."""
+        """Test 5f: Path not under docs/contracts/ is rejected."""
         ok, err = self.mod.validate_contract_evidence_path(
             self.target, "docs/contracts/openapi/REQ-001.yaml"
         )
         self.assertFalse(ok, "Wrong prefix path must be rejected")
-        self.assertIn("docs/quality/contracts", err)
+        self.assertIn("docs/contracts", err)
 
     def test_nonexistent_file_rejected(self):
         """Test 5g: Non-existent file path is rejected."""
         ok, err = self.mod.validate_contract_evidence_path(
-            self.target, "docs/quality/contracts/nonexistent-file.md"
+            self.target, "docs/contracts/nonexistent-file.md"
         )
         self.assertFalse(ok, "Non-existent file must be rejected")
         self.assertIn("bulunamadı", err)
@@ -441,12 +441,12 @@ class ContractEvidencePathValidationTest(unittest.TestCase):
         self.assertFalse(ok, "Empty path must be rejected")
 
     def test_secret_path_rejected(self):
-        """Test 5h: Credential/secret-like path is rejected (not under docs/quality/contracts/)."""
+        """Test 5h: Credential/secret-like path is rejected (not under docs/contracts/)."""
         ok, err = self.mod.validate_contract_evidence_path(
             self.target, "secrets/api-key.txt"
         )
         self.assertFalse(ok, "Secret path must be rejected")
-        self.assertIn("docs/quality/contracts", err)
+        self.assertIn("docs/contracts", err)
 
 
 # ---------------------------------------------------------------------------
@@ -918,7 +918,7 @@ class ContractGateHumanApprovalTest(unittest.TestCase):
             "contract_status": "completed",
             "contract_gate_satisfied": True,
             "contract_evidence": {
-                "evidence_path": "docs/quality/contracts/api-contract.md",
+                "evidence_path": "docs/contracts/api-contract.md",
                 "recorded_at": "2026-06-28T12:00:00Z",
                 "provenance": "generated_in_run",
             },
@@ -951,7 +951,7 @@ class ContractGateHumanApprovalTest(unittest.TestCase):
             "contract_status": "completed",
             "contract_gate_satisfied": True,
             "contract_evidence": {
-                "evidence_path": "docs/quality/contracts/api-contract.md",
+                "evidence_path": "docs/contracts/api-contract.md",
                 "recorded_at": "2026-06-28T12:00:00Z",
                 "provenance": "generated_in_run",
             },
@@ -1142,10 +1142,10 @@ class ContractGateRegressionTest(unittest.TestCase):
         )
 
     def test_contract_evidence_path_prefix_correct(self):
-        """Contract evidence path prefix is docs/quality/contracts/."""
+        """Contract evidence path prefix is docs/contracts/."""
         self.assertEqual(
             self.mod.CONTRACT_EVIDENCE_PATH_PREFIX,
-            "docs/quality/contracts/",
+            "docs/contracts/",
         )
 
     def test_delivery_types_with_contract_gate(self):
@@ -1267,11 +1267,18 @@ class ContractGateRegressionTest(unittest.TestCase):
         # technical_readiness must not be not_ready due to contract alone
         self.assertEqual(report["technical_readiness"], "ready")
 
-    def test_new_feature_task_graph_has_nine_tasks(self):
-        """new_feature task graph still has 9 tasks after contract_definition rename."""
+    def test_new_feature_task_graph_has_eight_tasks_without_adr(self):
+        """new_feature omits the opt-in Architecture Decision task by default."""
         tasks = self.mod.generate_task_graph_nodes("RUN-001", "new_feature", "Add user onboarding")
+        self.assertEqual(len(tasks), 8,
+                         f"new_feature must have 8 tasks without --needs-adr. Got: {len(tasks)}")
+
+    def test_new_feature_task_graph_has_nine_tasks_with_adr(self):
+        tasks = self.mod.generate_task_graph_nodes(
+            "RUN-001", "new_feature", "Add user onboarding", needs_adr=True
+        )
         self.assertEqual(len(tasks), 9,
-                         f"new_feature must have 9 tasks. Got: {len(tasks)}")
+                         f"new_feature must have 9 tasks with needs_adr. Got: {len(tasks)}")
 
 
 if __name__ == "__main__":

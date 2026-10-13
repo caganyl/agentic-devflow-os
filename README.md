@@ -292,7 +292,7 @@ mutasyon yoludur. Delivery-lead alt ajanının Bash yetkisi olmadığı için bu
 | `create-run` | Yeni teslimat run'ı oluşturur (`--req-id REQ-NNN` ile manifeste bağlanabilir) |
 | `launch` | Yönetilen worktree + `devflow/run-*` branch ile Claude Code supervisor başlatır; `DEVFLOW_OPERATIONS_SCRIPT` ve `DEVFLOW_ARCH_SCAN_SCRIPT` yollarını verir; `--req-id` yoksa implementer yazımının reddedileceği uyarısını verir |
 | `status` | Run durumunu gösterir |
-| `generate-task-graph` | Deterministik task graph üretir |
+| `generate-task-graph` | Deterministik task graph üretir (`new_feature` için ADR task'ı yalnızca `--needs-adr` ile eklenir) |
 | `update-task-status` | Task durumunu geçiş doğrulamasıyla günceller |
 | `record-qa-evidence` / `record-security-evidence` / `record-contract-evidence` / `record-work-product-evidence` | Kanıt kaydeder ve approval gate'leri günceller |
 | `prepare-delivery` | Teslimat doğrulama raporu (gerçek Git mutasyonu yapmaz) |

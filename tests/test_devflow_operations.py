@@ -1585,6 +1585,28 @@ class PrepareDeliveryHonestyTest(unittest.TestCase):
         result = run_ops(["prepare-delivery", "--target", str(self.target), "--confirm-delivery"])
         self.assertEqual(result.returncode, 9)
 
+    def _set_gates(self, security_required, security_done):
+        devflow = self.target / ".devflow"
+        run_file = devflow / "runs" / "RUN-001.json"
+        run_data = json.loads(run_file.read_text())
+        run_data["approval_gates"]["tests_passing"] = True
+        run_data["approval_gates"]["qa_sign_off"] = True
+        run_data["approval_gates"]["security_review_complete"] = security_done
+        run_data["security_review_required"] = security_required
+        _load_ops_module().write_run_state(self.target, run_file, run_data)
+
+    def test_confirm_passes_when_security_not_required(self):
+        """Low-risk runs (security_review_required=False) are not blocked
+        on security_review_complete, matching build_run_report."""
+        self._set_gates(security_required=False, security_done=False)
+        result = run_ops(["prepare-delivery", "--target", str(self.target), "--confirm-delivery"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_confirm_still_blocks_when_security_required_and_missing(self):
+        self._set_gates(security_required=True, security_done=False)
+        result = run_ops(["prepare-delivery", "--target", str(self.target), "--confirm-delivery"])
+        self.assertEqual(result.returncode, 9)
+
 
 # ---------------------------------------------------------------------------
 # Launch env propagation and supervisor prompt non-disclosure

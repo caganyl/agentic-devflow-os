@@ -521,5 +521,46 @@ class DocsWriterGateTest(_HookFixture):
         self.assertEqual(decision, "deny")
 
 
+class TaskGraphDoesNotForceDesignTest(unittest.TestCase):
+    """The deterministic new_feature graph must not require ADR work unless
+    the caller opts in, and the contract task must not wait on an ADR."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+
+        path = Path(__file__).resolve().parent.parent / "scripts" / "devflow_operations.py"
+        spec = importlib.util.spec_from_file_location("devflow_operations_loop", path)
+        cls.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.mod)
+
+    def _graph(self, **kw):
+        return self.mod.generate_task_graph_nodes("RUN-001", "new_feature", "Add login", **kw)
+
+    def test_default_graph_has_no_architect_task(self):
+        roles = [t["assigned_role"] for t in self._graph()]
+        self.assertNotIn("solution-architect", roles)
+
+    def test_contract_task_does_not_depend_on_missing_adr_task(self):
+        tasks = self._graph()
+        ids = {t["id"] for t in tasks}
+        for t in tasks:
+            for dep in t["dependency_ids"]:
+                self.assertIn(dep, ids, f"{t['id']} depends on absent task {dep}")
+        contract = next(t for t in tasks if t["task_type"] == "contract_definition")
+        self.assertEqual(contract["dependency_ids"], ["RUN-001-TASK-002"])
+
+    def test_opt_in_graph_keeps_adr_before_contract(self):
+        tasks = self._graph(needs_adr=True)
+        contract = next(t for t in tasks if t["task_type"] == "contract_definition")
+        self.assertIn("RUN-001-TASK-003", contract["dependency_ids"])
+
+    def test_task_ids_are_stable_when_adr_is_omitted(self):
+        ids = [t["id"].rsplit("-", 1)[1] for t in self._graph()]
+        self.assertNotIn("003", ids)
+        self.assertIn("004", ids)
+        self.assertIn("009", ids)
+
+
 if __name__ == "__main__":
     unittest.main()

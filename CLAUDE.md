@@ -22,6 +22,15 @@ Tüm ADR, requirement veya handoff setini baştan sona okuma. Bir belge
 - Ownership/branch blocker'ı tasarım sorunu değildir; tasarım dokümanlarına
   geri dönme, blocker'ı insana raporla.
 
+Run içinde "onaylı" şu anlama gelir:
+
+- **ADR:** `adr-reviewer`'dan APPROVE veya APPROVE_WITH_NOTES almış
+  `Proposed` ADR. Contract ve implementasyon bununla başlar. `Accepted`
+  statüsü insanın merge sırasındaki kararıdır, implementasyon ön koşulu değildir.
+- **Contract:** `record-contract-evidence` ile run'a kaydedilmiş `Proposed`
+  contract. `Accepted` statüsü yine insan onayıyla, merge öncesi verilir.
+- **ADR eşiği sağlanmıyorsa** ADR yokluğu blokaj değildir; kısa karar notu yeterlidir.
+
 ## Kodlama İlkeleri
 
 Esin kaynağı: Andrej Karpathy'nin LLM kodlama hatalarına dair gözlemleri
