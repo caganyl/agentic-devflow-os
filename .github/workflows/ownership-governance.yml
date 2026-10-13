@@ -134,6 +134,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python-version: ["3.9", "3.12"]
+        # Python 3.9 is not reliably provisioned on current macOS runners;
+        # ubuntu keeps the 3.9 floor covered.
+        exclude:
+          - os: macos-latest
+            python-version: "3.9"
 
     steps:
       - name: Checkout merged pull request result
