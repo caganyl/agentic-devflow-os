@@ -59,6 +59,23 @@ FORBIDDEN_WRITE_EXACT_PATHS = frozenset(
 )
 
 
+# Repository areas an implementer write must never land in, checked against
+# the *target* path itself (not only against the manifest's write_paths
+# strings). A write_path that is an ancestor of one of these (e.g. "docs" or
+# "src/..") must not smuggle authority over the control plane: authorize()
+# and the CI diff gate re-check every target against this list.
+PROTECTED_TARGET_PREFIXES = (
+    ".claude/",
+    ".github/",
+    ".codex/",
+    "hooks/",
+    "scripts/",
+    "docs/ownership/",
+    ".git/",
+    ".devflow/",
+)
+
+
 class ManifestError(Exception):
     """Raised with all accumulated validation errors."""
 
@@ -90,7 +107,31 @@ def is_relative_safe_path(raw_path):
         return False
     if ".." in p.parts:
         return False
+    # "", ".", "./" and similar normalize to the repository root itself,
+    # which would make every file in the repo "under" the path.
+    if not p.parts or p.as_posix() == ".":
+        return False
     return True
+
+
+def _under_prefix(normalized, prefix):
+    return normalized == prefix.rstrip("/") or normalized.startswith(prefix)
+
+
+def protected_target_reason(raw_path):
+    """Return why a repository-relative target is never implementer-writable.
+
+    None means the target is not protected. The check runs on the normalized
+    target path so that broad write_paths (ancestors of protected areas)
+    cannot grant authority over governance/enforcement files.
+    """
+    normalized = PurePosixPath(raw_path).as_posix()
+    if normalized in FORBIDDEN_WRITE_EXACT_PATHS:
+        return f"protected governance/enforcement file {normalized!r}"
+    for prefix in PROTECTED_TARGET_PREFIXES + FORBIDDEN_WRITE_PREFIXES:
+        if _under_prefix(normalized, prefix):
+            return f"protected area {prefix!r}"
+    return None
 
 
 def resolve_under_root(root, raw_path):
@@ -240,15 +281,15 @@ def validate_manifest(manifest, manifest_path, root):
             forbidden = next(
                 (
                     prefix
-                    for prefix in FORBIDDEN_WRITE_PREFIXES
-                    if normalized == prefix.rstrip("/") or normalized.startswith(prefix)
+                    for prefix in FORBIDDEN_WRITE_PREFIXES + PROTECTED_TARGET_PREFIXES
+                    if _under_prefix(normalized, prefix)
                 ),
                 None,
             )
             if forbidden is not None:
                 errors.append(
                     f"owners[{index}] ({agent!r}) write_paths entry {write_path!r} falls under "
-                    f"a reserved documentation/evaluation path: {forbidden!r}"
+                    f"a reserved governance/documentation path: {forbidden!r}"
                 )
                 continue
 
@@ -328,6 +369,12 @@ def authorize(manifest, root, branch, authorize_agent, target, managed_run=False
             errors.append(f"target is not a safe repository-relative path: {target!r}")
         else:
             target_normalized = PurePosixPath(target).as_posix()
+            protected = protected_target_reason(target_normalized)
+            if protected is not None:
+                errors.append(
+                    f"target {target!r} is in a {protected} and is never writable "
+                    f"through an ownership manifest"
+                )
             write_paths = owner.get("write_paths") or []
             authorized = False
             for write_path in write_paths:
