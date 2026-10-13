@@ -151,6 +151,13 @@ def _make_wp_evidence(tasks: list) -> dict:
                 "recorded_at": "2026-06-29T00:00:00Z",
                 "git_change_verified_at_record_time": True,
             }
+        elif tt == "documentation":
+            ev[t["id"]] = {
+                "task_type": "documentation",
+                "evidence_path": "docs/handoffs/feature.md",
+                "recorded_at": "2026-06-29T00:00:00Z",
+                "git_change_verified_at_record_time": True,
+            }
     return ev
 
 
@@ -160,6 +167,8 @@ def _create_wp_stub_files(target: Path) -> None:
     (target / "src" / "feature.py").write_text("# stub\n", encoding="utf-8")
     (target / "tests").mkdir(exist_ok=True)
     (target / "tests" / "test_feature.py").write_text("# stub\n", encoding="utf-8")
+    (target / "docs" / "handoffs").mkdir(parents=True, exist_ok=True)
+    (target / "docs" / "handoffs" / "feature.md").write_text("# handoff\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -765,6 +774,7 @@ class ContractEvidenceTaskStatusTest(unittest.TestCase):
             run_ops([
                 "record-qa-evidence", "--target", str(target),
                 "--test-command", "python3 -c pass",
+                "--total", "1", "--passed", "1", "--failed", "0",
             ])
 
             res_report = run_ops(["generate-run-report", "--target", str(target)])
@@ -1267,18 +1277,18 @@ class ContractGateRegressionTest(unittest.TestCase):
         # technical_readiness must not be not_ready due to contract alone
         self.assertEqual(report["technical_readiness"], "ready")
 
-    def test_new_feature_task_graph_has_eight_tasks_without_adr(self):
+    def test_new_feature_task_graph_has_nine_tasks_without_adr(self):
         """new_feature omits the opt-in Architecture Decision task by default."""
         tasks = self.mod.generate_task_graph_nodes("RUN-001", "new_feature", "Add user onboarding")
-        self.assertEqual(len(tasks), 8,
-                         f"new_feature must have 8 tasks without --needs-adr. Got: {len(tasks)}")
+        self.assertEqual(len(tasks), 9,
+                         f"new_feature must have 9 tasks without --needs-adr. Got: {len(tasks)}")
 
-    def test_new_feature_task_graph_has_nine_tasks_with_adr(self):
+    def test_new_feature_task_graph_has_ten_tasks_with_adr(self):
         tasks = self.mod.generate_task_graph_nodes(
             "RUN-001", "new_feature", "Add user onboarding", needs_adr=True
         )
-        self.assertEqual(len(tasks), 9,
-                         f"new_feature must have 9 tasks with needs_adr. Got: {len(tasks)}")
+        self.assertEqual(len(tasks), 10,
+                         f"new_feature must have 10 tasks with needs_adr. Got: {len(tasks)}")
 
 
 if __name__ == "__main__":

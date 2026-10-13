@@ -77,6 +77,18 @@ def _get_tasks_of_type(target: Path, run_id: str, task_type: str) -> list:
     return [t for t in run_data.get("tasks", []) if t.get("task_type") == task_type]
 
 
+def _finish_dependencies(target: Path, run_id: str, task_id: str) -> None:
+    """Complete a task's (planning) dependencies: implementation tasks may
+    only enter in_progress once every dependency is completed/verified."""
+    devflow = target / ".devflow"
+    run_data = json.loads((devflow / "runs" / f"{run_id}.json").read_text())
+    task = next(t for t in run_data["tasks"] if t["id"] == task_id)
+    for dep in task.get("dependency_ids", []):
+        for status in ("ready", "in_progress", "completed"):
+            run_ops(["update-task-status", "--target", str(target),
+                     "--task-id", dep, "--status", status])
+
+
 def _make_src_file(target: Path, name: str = "feature.py") -> str:
     src_dir = target / "src"
     src_dir.mkdir(exist_ok=True)
@@ -110,6 +122,7 @@ class CompletionBlockedWithoutEvidenceTest(unittest.TestCase):
             impl_task_id = impl_tasks[0]["id"]
 
             # Advance to in_progress (not blocked by work-product gate)
+            _finish_dependencies(target, run_id, impl_task_id)
             run_ops(["update-task-status", "--target", str(target),
                      "--task-id", impl_task_id, "--status", "ready"])
             run_ops(["update-task-status", "--target", str(target),
@@ -174,6 +187,7 @@ class CompletionBlockedWithoutEvidenceTest(unittest.TestCase):
             impl_tasks = _get_tasks_of_type(target, run_id, "implementation")
             impl_task_id = impl_tasks[0]["id"]
 
+            _finish_dependencies(target, run_id, impl_task_id)
             run_ops(["update-task-status", "--target", str(target),
                      "--task-id", impl_task_id, "--status", "ready"])
             res = run_ops(["update-task-status", "--target", str(target),
@@ -425,6 +439,7 @@ class ImplementationEvidenceRecordedTest(unittest.TestCase):
                      "--task-id", impl_task_id, "--evidence-path", src_path])
 
             # Advance to in_progress
+            _finish_dependencies(target, run_id, impl_task_id)
             run_ops(["update-task-status", "--target", str(target),
                      "--task-id", impl_task_id, "--status", "ready"])
             run_ops(["update-task-status", "--target", str(target),
@@ -689,13 +704,18 @@ class ReportNotReadyWithoutEvidenceTest(unittest.TestCase):
             run_ops(["record-work-product-evidence", "--target", str(target),
                      "--task-id", impl_task_id, "--evidence-path", "src/stale.py"])
 
-            # Now commit the file → no longer a worktree change
+            # Committing run work keeps it a change vs. the run's base commit...
             subprocess.run(["git", "add", "src/stale.py"], cwd=str(target), check=True, capture_output=True)
             subprocess.run(["git", "commit", "-m", "commit stale"], cwd=str(target), check=True, capture_output=True)
+            devflow = target / ".devflow"
+            base = json.loads((devflow / "runs" / f"{run_id}.json").read_text())["base_commit"]
+            self.assertTrue(self.mod.is_path_changed_since_base(target, "src/stale.py", base))
 
-            # Verify staleness via direct function call
-            is_change = self.mod.is_path_git_worktree_change(target, "src/stale.py")
-            self.assertFalse(is_change, "File after commit must not be a worktree change")
+            # ...but removing it again makes the recorded evidence stale.
+            subprocess.run(["git", "rm", "-q", "src/stale.py"], cwd=str(target), check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "drop stale"], cwd=str(target), check=True, capture_output=True)
+            is_change = self.mod.is_path_changed_since_base(target, "src/stale.py", base)
+            self.assertFalse(is_change, "File back at base state must not count as a change")
 
             # build_run_report with target should detect stale evidence
             devflow = target / ".devflow"

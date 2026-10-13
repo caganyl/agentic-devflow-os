@@ -970,13 +970,13 @@ class GenerateTaskGraphSubcommandTest(unittest.TestCase):
         run_data = json.loads(run_file.read_text())
         self.assertEqual(run_data["delivery_type"], "new_feature")
 
-    def test_new_feature_graph_has_eight_tasks_without_adr(self):
+    def test_new_feature_graph_has_nine_tasks_without_adr(self):
         run_id = self._init_run()
         run_ops(["generate-task-graph", "--target", str(self.target),
                  "--delivery-type", "new_feature"])
         run_file = self.target / ".devflow" / "runs" / f"{run_id}.json"
         run_data = json.loads(run_file.read_text())
-        self.assertEqual(len(run_data["tasks"]), 8)
+        self.assertEqual(len(run_data["tasks"]), 9)
         self.assertFalse(run_data["adr_required"])
 
     def test_new_feature_graph_needs_adr_flag_adds_adr_task(self):
@@ -986,7 +986,7 @@ class GenerateTaskGraphSubcommandTest(unittest.TestCase):
         self.assertEqual(res.returncode, 0, res.stderr)
         run_file = self.target / ".devflow" / "runs" / f"{run_id}.json"
         run_data = json.loads(run_file.read_text())
-        self.assertEqual(len(run_data["tasks"]), 9)
+        self.assertEqual(len(run_data["tasks"]), 10)
         self.assertTrue(run_data["adr_required"])
         roles = [t["assigned_role"] for t in run_data["tasks"]]
         self.assertIn("solution-architect", roles)

@@ -360,6 +360,9 @@ CONTRACT_REVIEW_STATUS_ENUM = frozenset({
 # Task states that are blocked for implementation tasks when contract gate is unsatisfied.
 CONTRACT_GATE_BLOCKED_STATUSES = frozenset({"in_progress", "completed", "verified"})
 
+# Dependency states that let an implementation task enter in_progress.
+TASK_DEPENDENCY_DONE_STATUSES = frozenset({"completed", "verified"})
+
 # ---------------------------------------------------------------------------
 # Work product evidence gate
 #
@@ -374,7 +377,12 @@ WORK_PRODUCT_GATE_EXIT_CODE = 19
 QA_EVIDENCE_EXIT_CODE = 21
 
 # Task types that require verifiable work-product evidence before completion.
-WORK_PRODUCT_REQUIRED_TASK_TYPES = frozenset({"implementation", "qa"})
+WORK_PRODUCT_REQUIRED_TASK_TYPES = frozenset({"implementation", "qa", "documentation"})
+
+# Documentation (docs-writer) evidence: a README.md anywhere outside the
+# forbidden state areas, or a handoff note.
+DOCUMENTATION_EVIDENCE_FILENAME = "README.md"
+DOCUMENTATION_EVIDENCE_PREFIXES = ("docs/handoffs/",)
 
 # Statuses blocked for impl/QA tasks without recorded work-product evidence.
 WORK_PRODUCT_GATE_BLOCKED_STATUSES = frozenset({"completed", "verified"})
@@ -535,8 +543,14 @@ DELIVERY_TYPE_TASK_TEMPLATES: dict[str, list[dict]] = {
          "assigned_role": "security-red-team", "dep_suffixes": ["005", "006"],
          "qa_expectation": "Güvenlik raporu üretildi; blocker bulgu yok",
          "output_path": "docs/quality/security-reports/"},
+        # Listed before 009 (which depends on it); suffix 010 keeps the
+        # existing task ids stable.
+        {"id_suffix": "010", "title": "Documentation", "task_type": "documentation",
+         "assigned_role": "docs-writer", "dep_suffixes": ["007", "008"],
+         "qa_expectation": "Değişen klasörlerin README'leri, gerekli yorumlar ve handoff güncellendi",
+         "output_path": "README.md"},
         {"id_suffix": "009", "title": "Integration and Release Scorecard", "task_type": "release",
-         "assigned_role": "integration-release", "dep_suffixes": ["007", "008"],
+         "assigned_role": "integration-release", "dep_suffixes": ["010"],
          "qa_expectation": "Scorecard 'merge ready' veya 'awaiting human approval'",
          "output_path": ".devflow/reports/"},
     ],
@@ -721,15 +735,145 @@ DELIVERY_TYPE_TASK_TEMPLATES: dict[str, list[dict]] = {
 # Atomic I/O helpers
 # ---------------------------------------------------------------------------
 
-def atomic_write_json(path: Path, data: dict) -> None:
-    content = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+def atomic_write_text(path: Path, content: str) -> None:
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     tmp_path.write_text(content, encoding="utf-8")
     tmp_path.replace(path)
 
 
+def atomic_write_json(path: Path, data: dict) -> None:
+    atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+
+
 def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# Run state lock
+#
+# Every mutating subcommand is a read-modify-write of .devflow/ state
+# (project.json + runs/<run-id>.json).  Atomic replace keeps each file intact,
+# but two concurrent recorders still lose an update: both read state N, both
+# write N+1, the second replace wins.  An exclusive lock on a sidecar file in
+# .devflow/cache/ (gitignored) serializes those sections.  Stdlib only:
+# fcntl.flock on POSIX, msvcrt.locking on Windows.
+# ---------------------------------------------------------------------------
+
+STATE_LOCK_EXIT_CODE = 22
+STATE_LOCK_TIMEOUT_ENV = "DEVFLOW_STATE_LOCK_TIMEOUT"
+STATE_LOCK_DEFAULT_TIMEOUT_SECONDS = 120.0
+_held_state_locks: dict[str, int] = {}
+
+
+def _try_lock_file(handle) -> bool:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+
+    import fcntl
+
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, PermissionError):
+        return False
+    return True
+
+
+def _unlock_file(handle) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        return
+
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+class run_state_lock:
+    """Exclusive, re-entrant (per process) lock over a target's .devflow state.
+
+    A target without .devflow/ has no state to protect, so the lock is a no-op
+    there (and never creates .devflow/ as a side effect).
+    """
+
+    def __init__(self, target: Path):
+        self.lock_path = get_devflow_dir(target) / "cache" / "run-state.lock"
+        self.key = str(self.lock_path)
+        self.handle = None
+        self.active = False
+
+    def __enter__(self):
+        if not self.lock_path.parent.parent.is_dir():
+            return self
+        self.active = True
+        if _held_state_locks.get(self.key):
+            _held_state_locks[self.key] += 1
+            return self
+
+        import time
+
+        try:
+            timeout = float(os.environ.get(STATE_LOCK_TIMEOUT_ENV, ""))
+        except ValueError:
+            timeout = STATE_LOCK_DEFAULT_TIMEOUT_SECONDS
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(self.lock_path, "a+")
+        deadline = time.monotonic() + timeout
+        while not _try_lock_file(handle):
+            if time.monotonic() >= deadline:
+                handle.close()
+                print(
+                    f"Hata: Run state kilidi {timeout:.0f} sn içinde alınamadı: "
+                    f"{self.lock_path}. Başka bir devflow_operations komutu çalışıyor olabilir.",
+                    file=sys.stderr,
+                )
+                sys.exit(STATE_LOCK_EXIT_CODE)
+            time.sleep(0.05)
+        self.handle = handle
+        _held_state_locks[self.key] = 1
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if not self.active:
+            return False
+        _held_state_locks[self.key] -= 1
+        if _held_state_locks[self.key] == 0:
+            del _held_state_locks[self.key]
+            if self.handle is not None:
+                try:
+                    _unlock_file(self.handle)
+                finally:
+                    self.handle.close()
+                    self.handle = None
+        return False
+
+
+def with_run_state_lock(func):
+    """Run a cmd_* handler while holding the target's run state lock."""
+    import functools
+
+    @functools.wraps(func)
+    def wrapper(args):
+        raw_target = getattr(args, "target", None)
+        if not raw_target:
+            return func(args)
+        with run_state_lock(Path(raw_target).resolve()):
+            return func(args)
+
+    return wrapper
 
 
 # ---------------------------------------------------------------------------
@@ -1073,6 +1217,46 @@ def is_path_git_worktree_change(target: Path, evidence_path: str) -> bool:
     return bool(result.stdout.strip())
 
 
+def get_head_commit(repo_path: Path) -> str:
+    """Return HEAD's commit SHA, or "" when it cannot be resolved (no commits yet)."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+        cwd=str(repo_path),
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def is_path_changed_since_base(target: Path, evidence_path: str, base_commit: str) -> bool:
+    """Return True if evidence_path is untracked or differs from the run's base commit.
+
+    Comparing against the base commit (recorded at create-run) instead of only
+    `git status` means committed run work still counts, while a file that
+    merely exists unchanged since the run started does not.  Runs created
+    before base_commit was recorded fall back to the `git status` check.
+    """
+    if not base_commit:
+        return is_path_git_worktree_change(target, evidence_path)
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--", evidence_path],
+        cwd=str(target),
+        capture_output=True,
+        text=True,
+    )
+    if status.returncode != 0:
+        return False
+    if status.stdout.startswith("??"):
+        return True
+    diff = subprocess.run(
+        ["git", "diff", "--quiet", base_commit, "--", evidence_path],
+        cwd=str(target),
+        capture_output=True,
+        text=True,
+    )
+    return diff.returncode == 1
+
+
 def get_existing_run_count(target: Path) -> int:
     """Return the highest run number among existing devflow/run-run-NNN branches."""
     result = subprocess.run(
@@ -1090,6 +1274,18 @@ def get_existing_run_count(target: Path) -> int:
         if m:
             max_num = max(max_num, int(m.group(1)))
     return max_num
+
+
+def next_run_counter(target: Path) -> int:
+    """Return the next run number: one past max(run branches, project.json counter)."""
+    counter = get_existing_run_count(target)
+    project_file = get_devflow_dir(target) / "project.json"
+    if project_file.exists():
+        try:
+            counter = max(counter, int(read_json(project_file).get("run_counter", 0)))
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+    return counter + 1
 
 
 def is_branch_exists(target: Path, branch: str) -> bool:
@@ -1517,7 +1713,14 @@ def validate_work_product_evidence_path(
     except ValueError:
         return False, f"evidence-path target dizini dışına çıkıyor: {evidence_path!r}"
 
+    is_documentation_evidence = task_type == "documentation" and (
+        Path(normalized).name == DOCUMENTATION_EVIDENCE_FILENAME
+        or any(normalized.startswith(p) for p in DOCUMENTATION_EVIDENCE_PREFIXES)
+    )
+
     for forbidden_prefix in _WORK_PRODUCT_FORBIDDEN_DOC_PREFIXES:
+        if forbidden_prefix == "docs/" and is_documentation_evidence:
+            continue
         if normalized.startswith(forbidden_prefix):
             return False, (
                 f"evidence-path '{forbidden_prefix}' altındaki yollar work-product kanıtı "
@@ -1575,6 +1778,13 @@ def validate_work_product_evidence_path(
             return False, (
                 f"QA work-product kanıtı şu prefixlerden birinde olmalıdır: "
                 f"{qa_list}. Verilen: {evidence_path!r}"
+            )
+    elif task_type == "documentation":
+        if not is_documentation_evidence:
+            return False, (
+                f"Documentation work-product kanıtı bir {DOCUMENTATION_EVIDENCE_FILENAME} "
+                f"dosyası veya {', '.join(DOCUMENTATION_EVIDENCE_PREFIXES)} altında bir "
+                f"handoff olmalıdır. Verilen: {evidence_path!r}"
             )
 
     if not full_path.exists():
@@ -1698,8 +1908,13 @@ def authorize_work_product_ownership(
         # system does not fabricate a restriction the ownership layer did not.
         return True, ""
 
+    from pathlib import PurePosixPath
+
+    # A write_path that normalizes to the repo root ("", ".", "./") grants
+    # nothing: the manifest validator rejects it, and so does this binding.
     write_paths = [
-        wp for wp in (owner.get("write_paths") or []) if isinstance(wp, str) and wp
+        wp for wp in (owner.get("write_paths") or [])
+        if isinstance(wp, str) and PurePosixPath(wp.replace("\\", "/")).parts
     ]
     normalized = evidence_path.replace("\\", "/")
 
@@ -1766,6 +1981,10 @@ def generate_task_packet_dict(task: dict, run_id: str, objective: str) -> dict:
     if task_type in WORK_PRODUCT_REQUIRED_TASK_TYPES:
         if task_type == "implementation":
             allowed_prefixes = ", ".join(sorted(IMPLEMENTATION_EVIDENCE_PREFIXES))
+        elif task_type == "documentation":
+            allowed_prefixes = ", ".join(
+                [f"**/{DOCUMENTATION_EVIDENCE_FILENAME}", *DOCUMENTATION_EVIDENCE_PREFIXES]
+            )
         else:
             allowed_prefixes = ", ".join(sorted(QA_EVIDENCE_PREFIXES))
         packet["work_product_requirements"] = {
@@ -1780,7 +1999,13 @@ def generate_task_packet_dict(task: dict, run_id: str, objective: str) -> dict:
                     f"--target <TARGET> --task-id {task['id']} --evidence-path <RELATIVE_PATH>"
                 ),
                 "Self-reported completion yeterli değildir. Kanıt kaydedilmeden task completed/verified yapılamaz.",
-                "Kanıt yolu: docs/, .devflow/, lockfile, credential veya config dosyaları kabul edilmez.",
+                (
+                    "Kanıt yolu: .devflow/, lockfile, credential veya config dosyaları kabul "
+                    "edilmez; docs/ altında yalnızca README.md ve docs/handoffs/."
+                    if task_type == "documentation"
+                    else "Kanıt yolu: docs/, .devflow/, lockfile, credential veya config "
+                    "dosyaları kabul edilmez."
+                ),
             ],
             "gate": "record-work-product-evidence CLI çalıştırılmadan completed/verified durumuna geçilemez.",
         }
@@ -1952,7 +2177,9 @@ def build_run_report(
             _ep = _ev.get("evidence_path", "")
             _git_active: "bool | None" = None
             if target is not None and _ep:
-                _git_active = is_path_git_worktree_change(target, _ep)
+                _git_active = is_path_changed_since_base(
+                    target, _ep, run_data.get("base_commit", "")
+                )
             _wp_task_statuses.append({
                 "task_id": _wpt_id,
                 "task_type": _wpt.get("task_type"),
@@ -2288,6 +2515,7 @@ def find_claude_binary() -> str | None:
 # Subcommands
 # ---------------------------------------------------------------------------
 
+@with_run_state_lock
 def cmd_init_target(args) -> int:
     target = Path(args.target).resolve()
     validate_target_path(target)
@@ -2377,6 +2605,7 @@ def cmd_init_target(args) -> int:
     return 0
 
 
+@with_run_state_lock
 def cmd_create_run(args) -> int:
     target = Path(args.target).resolve()
     validate_target_path(target)
@@ -2391,7 +2620,10 @@ def cmd_create_run(args) -> int:
         sys.exit(4)
 
     project_data = read_json(devflow / "project.json")
-    run_counter = project_data.get("run_counter", 0) + 1
+    # launch passes the run number it already used for the branch/worktree so
+    # the state's run_id and branch_name match them; otherwise derive it the
+    # same way launch does.
+    run_counter = getattr(args, "run_counter", None) or next_run_counter(target)
     run_id = make_run_id(run_counter)
     branch_name = make_branch_name(run_id)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -2424,6 +2656,9 @@ def cmd_create_run(args) -> int:
         "status": "created",
         "branch_name": branch_name,
         "req_id": req_id,
+        # Work-product evidence must differ from this commit (see
+        # is_path_changed_since_base).
+        "base_commit": get_head_commit(target),
         "objective": launch_objective,
         "execution_mode": execution_mode,
         "requested_execution_mode": execution_mode,
@@ -2481,9 +2716,9 @@ def cmd_launch(args) -> int:
         )
         sys.exit(11)
 
-    # Derive next run number from existing branches (clash-free)
-    existing_max = get_existing_run_count(target)
-    run_counter = existing_max + 1
+    # Derive next run number from existing branches and project.json
+    # (clash-free); the same number is handed to create-run below.
+    run_counter = next_run_counter(target)
     run_id = make_run_id(run_counter)
     branch_name = make_branch_name(run_id)
     objective = getattr(args, "objective", None) or "DevFlow delivery run"
@@ -2607,6 +2842,7 @@ def cmd_launch(args) -> int:
         objective=objective,
         agent_teams=agent_teams,
         req_id=getattr(args, "req_id", None),
+        run_counter=run_counter,
     )
     create_result = cmd_create_run(create_ns)
     if create_result != 0:
@@ -2798,6 +3034,7 @@ def cmd_prepare_delivery(args) -> int:
     return 0
 
 
+@with_run_state_lock
 def cmd_generate_task_graph(args) -> int:
     target = Path(args.target).resolve()
     validate_target_path(target)
@@ -2922,6 +3159,7 @@ def cmd_generate_task_graph(args) -> int:
     return 0
 
 
+@with_run_state_lock
 def cmd_update_task_status(args) -> int:
     target = Path(args.target).resolve()
     validate_target_path(target)
@@ -2986,6 +3224,23 @@ def cmd_update_task_status(args) -> int:
                     )
                     sys.exit(15)
 
+    # Dependency ordering: an implementation task starts only after every task
+    # it depends on is completed or verified.  Unknown dependency ids count as
+    # unfinished (fail closed).
+    if new_status == "in_progress" and task.get("task_type") == "implementation":
+        _by_id = {t["id"]: t for t in tasks}
+        _unfinished = [
+            dep for dep in task.get("dependency_ids", [])
+            if _by_id.get(dep, {}).get("status") not in TASK_DEPENDENCY_DONE_STATUSES
+        ]
+        if _unfinished:
+            print(
+                f"Hata: '{task_id}' bağımlılıkları tamamlanmadan 'in_progress' durumuna "
+                f"geçirilemiyor. Bekleyen: {', '.join(_unfinished)}",
+                file=sys.stderr,
+            )
+            sys.exit(15)
+
     # Work product gate enforcement: implementation and QA tasks cannot reach
     # completed/verified without a recorded work-product evidence entry.
     if new_status in WORK_PRODUCT_GATE_BLOCKED_STATUSES:
@@ -3006,6 +3261,42 @@ def cmd_update_task_status(args) -> int:
     print(f"Task durumu güncellendi: {task_id}")
     print(f"  {from_status} → {new_status}")
     return 0
+
+
+# Commands that succeed without running anything. Accepting them as an
+# "executed" test run let `--test-command true` open tests_passing/qa_sign_off.
+_TRIVIAL_TEST_COMMANDS = frozenset({"true", ":", "exit", "echo"})
+_SHELL_WRAPPERS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+
+
+def is_trivial_test_command(argv: list) -> bool:
+    """Return whether argv is a no-op that always succeeds (true, :, exit 0, echo ...)."""
+    if not argv:
+        return True
+    head = os.path.basename(argv[0])
+    if head in _TRIVIAL_TEST_COMMANDS:
+        return True
+    if head in _SHELL_WRAPPERS and len(argv) >= 3 and argv[1] == "-c":
+        try:
+            inner = shlex.split(argv[2])
+        except ValueError:
+            return False
+        return is_trivial_test_command(inner)
+    return False
+
+
+def qa_counts_error(total: int, passed: int, failed: int) -> str:
+    """Return an error message if QA counts cannot describe a real test run."""
+    if total <= 0:
+        return f"--total sıfırdan büyük olmalıdır (verilen: {total})."
+    if passed < 0 or failed < 0:
+        return "--passed ve --failed negatif olamaz."
+    if passed + failed != total:
+        return (
+            f"Test sayıları tutarsız: passed ({passed}) + failed ({failed}) "
+            f"!= total ({total})."
+        )
+    return ""
 
 
 def cmd_record_qa_evidence(args) -> int:
@@ -3055,6 +3346,29 @@ def cmd_record_qa_evidence(args) -> int:
         )
         sys.exit(QA_EVIDENCE_EXIT_CODE)
 
+    # Gates are only as good as the numbers behind them: an executed command
+    # without counts (or with counts that cannot add up) proves nothing about
+    # which tests ran.
+    if None in (total, passed, failed):
+        print(
+            "Hata: QA kanıtı için --total, --passed ve --failed zorunludur.",
+            file=sys.stderr,
+        )
+        sys.exit(QA_EVIDENCE_EXIT_CODE)
+
+    counts_error = qa_counts_error(total, passed, failed)
+    if counts_error:
+        print(f"Hata: {counts_error}", file=sys.stderr)
+        sys.exit(QA_EVIDENCE_EXIT_CODE)
+
+    if allow_self_reported and (exit_code_val == 0) != (failed == 0):
+        print(
+            "Hata: --exit-code ve --failed tutarsız: exit code 0 yalnızca "
+            "failed=0 ile, failed>0 yalnızca sıfırdan farklı exit code ile geçerlidir.",
+            file=sys.stderr,
+        )
+        sys.exit(QA_EVIDENCE_EXIT_CODE)
+
     if evidence_path:
         ep = Path(evidence_path)
         if ep.is_absolute() or ".." in ep.parts:
@@ -3077,9 +3391,11 @@ def cmd_record_qa_evidence(args) -> int:
         sys.exit(4)
 
     run_file = devflow / "runs" / f"{run_id}.json"
-    run_data = read_run_state(target, run_file)
+    # Verify state integrity before spending time on the test run.
+    read_run_state(target, run_file)
 
     command_output_tail = ""
+    counts_consistent = True
     if test_command:
         try:
             argv = shlex.split(test_command)
@@ -3089,9 +3405,18 @@ def cmd_record_qa_evidence(args) -> int:
         if not argv:
             print("Hata: --test-command boş olamaz.", file=sys.stderr)
             sys.exit(QA_EVIDENCE_EXIT_CODE)
+        if is_trivial_test_command(argv):
+            print(
+                f"Hata: --test-command bir test runner değil, her zaman başarılı dönen "
+                f"bir komut: {test_command!r}. Gerçek test komutunu verin "
+                "(örn. 'pytest -q', 'npm test', 'dotnet test').",
+                file=sys.stderr,
+            )
+            sys.exit(QA_EVIDENCE_EXIT_CODE)
 
         print(f"Test komutu çalıştırılıyor: {test_command}")
         # No shell: the command is a test runner invocation, not shell script.
+        # Runs outside the state lock so a long suite does not block recorders.
         try:
             completed = subprocess.run(
                 argv, cwd=str(target), capture_output=True, text=True
@@ -3104,29 +3429,49 @@ def cmd_record_qa_evidence(args) -> int:
         combined = (completed.stdout or "") + (completed.stderr or "")
         command_output_tail = "\n".join(combined.strip().splitlines()[-20:])
         qa_evidence_source = "executed"
-        qa_passed = exit_code_val == 0
+        counts_consistent = (exit_code_val == 0) == (failed == 0)
+        qa_passed = exit_code_val == 0 and failed == 0 and counts_consistent
     else:
         qa_evidence_source = "self_reported"
         qa_passed = (exit_code_val == 0 and failed == 0)
 
-    run_data.setdefault("approval_gates", {})
-    run_data["approval_gates"]["tests_passing"] = qa_passed
-    run_data["approval_gates"]["qa_sign_off"] = qa_passed
+    with run_state_lock(target):
+        project_now = read_json(devflow / "project.json")
+        if project_now.get("current_run_id") != run_id:
+            print(
+                "Hata: Test çalışırken aktif run değişti; QA kanıtı kaydedilmedi.",
+                file=sys.stderr,
+            )
+            sys.exit(QA_EVIDENCE_EXIT_CODE)
+        run_data = read_run_state(target, run_file)
 
-    run_data["qa_evidence"] = {
-        "recorded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "source": qa_evidence_source,
-        "test_command": test_command or "",
-        "total": total,
-        "passed": passed,
-        "failed": failed,
-        "exit_code": exit_code_val,
-        "evidence_path": evidence_path,
-        "qa_passed": qa_passed,
-        "command_output_tail": command_output_tail,
-    }
+        run_data.setdefault("approval_gates", {})
+        run_data["approval_gates"]["tests_passing"] = qa_passed
+        run_data["approval_gates"]["qa_sign_off"] = qa_passed
 
-    write_run_state(target, run_file, run_data)
+        run_data["qa_evidence"] = {
+            "recorded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "source": qa_evidence_source,
+            "test_command": test_command or "",
+            "total": total,
+            "passed": passed,
+            "failed": failed,
+            "exit_code": exit_code_val,
+            "evidence_path": evidence_path,
+            "qa_passed": qa_passed,
+            "counts_consistent": counts_consistent,
+            "command_output_tail": command_output_tail,
+        }
+
+        write_run_state(target, run_file, run_data)
+
+    if not counts_consistent:
+        print(
+            f"Hata: Ölçülen exit code ({exit_code_val}) bildirilen failed={failed} ile "
+            "tutarsız. QA kanıtı BAŞARISIZ olarak kaydedildi; gate'ler kapalı.",
+            file=sys.stderr,
+        )
+        return QA_EVIDENCE_EXIT_CODE
 
     status_str = "GEÇTİ" if qa_passed else "BAŞARISIZ"
     print(f"QA kanıtı kaydedildi: {run_id} [{status_str}]")
@@ -3147,6 +3492,7 @@ def cmd_record_qa_evidence(args) -> int:
     return 0
 
 
+@with_run_state_lock
 def cmd_record_security_evidence(args) -> int:
     target = Path(args.target).resolve()
     validate_target_path(target)
@@ -3269,6 +3615,7 @@ def cmd_record_security_evidence(args) -> int:
     return 0
 
 
+@with_run_state_lock
 def cmd_record_contract_evidence(args) -> int:
     """
     Record contract evidence for a new_feature delivery run.
@@ -3384,6 +3731,7 @@ def cmd_record_contract_evidence(args) -> int:
     return 0
 
 
+@with_run_state_lock
 def cmd_record_work_product_evidence(args) -> int:
     """
     Record verifiable work-product evidence for an implementation or QA task.
@@ -3458,11 +3806,23 @@ def cmd_record_work_product_evidence(args) -> int:
         print(f"Hata: {path_err}", file=sys.stderr)
         sys.exit(WORK_PRODUCT_GATE_EXIT_CODE)
 
-    if not is_path_git_worktree_change(target, evidence_path):
+    try:
+        evidence_has_content = bool((target / evidence_path).read_bytes().strip())
+    except OSError:
+        evidence_has_content = False
+    if not evidence_has_content:
         print(
-            f"Hata: '{evidence_path}' dosyası target worktree'de aktif Git değişikliği olarak "
-            "görünmüyor (modified, staged veya untracked olmalıdır). "
-            "'git status' çıktısında bu dosya bulunmuyor.",
+            f"Hata: '{evidence_path}' boş. Boş veya yalnızca boşluk içeren dosya "
+            "work-product kanıtı sayılamaz.",
+            file=sys.stderr,
+        )
+        sys.exit(WORK_PRODUCT_GATE_EXIT_CODE)
+
+    if not is_path_changed_since_base(target, evidence_path, run_data.get("base_commit", "")):
+        print(
+            f"Hata: '{evidence_path}' dosyası run başlangıcından (base commit) bu yana "
+            "değişmemiş. Kanıt bu run içinde eklenmiş veya değiştirilmiş olmalıdır "
+            "(untracked, modified, staged veya run branch'ine commit edilmiş).",
             file=sys.stderr,
         )
         sys.exit(WORK_PRODUCT_GATE_EXIT_CODE)
@@ -3529,6 +3889,7 @@ def cmd_record_work_product_evidence(args) -> int:
     return 0
 
 
+@with_run_state_lock
 def cmd_generate_run_report(args) -> int:
     target = Path(args.target).resolve()
 
@@ -3718,7 +4079,7 @@ def cmd_generate_run_report(args) -> int:
         "",
         f"*generated_at: {report.get('report_generated_at', '')}*",
     ]
-    scorecard_path.write_text("\n".join(scorecard_lines) + "\n", encoding="utf-8")
+    atomic_write_text(scorecard_path, "\n".join(scorecard_lines) + "\n")
 
     # Authoritative state writeback — all derived fields from single projection, atomically.
     # security_review_required and security_applicability_reason are written at
@@ -4013,9 +4374,12 @@ def main() -> None:
         help=(
             "Target içinde kaynak kodu veya test dosyasına repository-relative göreli yol. "
             f"Implementation için: {', '.join(sorted(IMPLEMENTATION_EVIDENCE_PREFIXES))} — "
-            f"QA için: {', '.join(sorted(QA_EVIDENCE_PREFIXES))}. "
-            "Aktif Git worktree değişikliği olmalıdır (modified, staged veya untracked). "
-            ".devflow/, docs/, lockfile, credential, migration kabul edilmez."
+            f"QA için: {', '.join(sorted(QA_EVIDENCE_PREFIXES))} — "
+            f"Documentation için: **/{DOCUMENTATION_EVIDENCE_FILENAME}, "
+            f"{', '.join(DOCUMENTATION_EVIDENCE_PREFIXES)}. "
+            "Boş olmamalı ve run base commit'inden farklı olmalıdır (untracked, modified, "
+            "staged veya run branch'ine commit edilmiş). "
+            ".devflow/, docs/ (documentation istisnası hariç), lockfile, credential, migration kabul edilmez."
         ),
     )
     p_wp_ev.set_defaults(func=cmd_record_work_product_evidence)
