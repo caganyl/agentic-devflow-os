@@ -94,8 +94,8 @@ class CodexPluginBuildTests(unittest.TestCase):
         env = os.environ.copy()
         env.pop("DEVFLOW_CODEX_GUARD_REQUIRED", None)
         env.pop("PLUGIN_ROOT", None)
-        if active:
-            env["DEVFLOW_CODEX_GUARD_REQUIRED"] = "1"
+        if not active:
+            env["DEVFLOW_CODEX_GUARD_REQUIRED"] = "0"
         if plugin_root is not None:
             env["PLUGIN_ROOT"] = str(plugin_root)
         return subprocess.run(
@@ -199,6 +199,13 @@ class CodexPluginBuildTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "")
+
+    def test_guard_is_on_by_default(self) -> None:
+        # Unset DEVFLOW_CODEX_GUARD_REQUIRED means required: with no plugin
+        # root the bootstrap denies instead of silently allowing.
+        result = self.run_hook()
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stderr, f"{BOOTSTRAP_DENIAL}\n")
 
     def test_missing_plugin_root_fails_closed(self) -> None:
         result = self.run_hook()
