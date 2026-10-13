@@ -40,6 +40,8 @@ GOVERNANCE_ALLOWED_PREFIXES = (
     ".github/",
     "docs/",
     "scripts/",
+    "src/",
+    "bin/",
     "tests/",
     "design/",
     "evals/",
@@ -55,6 +57,7 @@ GOVERNANCE_ALLOWED_EXACT_PATHS = frozenset(
         "CLAUDE.md",
         "AGENTS.md",
         "hooks/hooks.json",
+        "pyproject.toml",
     }
 )
 
