@@ -72,11 +72,16 @@ class ManifestValidationTests(unittest.TestCase):
         vom.validate_manifest(_manifest("REQ-999", write_paths), str(self.manifest_path), self.root)
 
     def test_root_and_control_plane_write_paths_rejected(self):
-        for wp in (".", "./", "scripts", "scripts/tool.py", ".github", ".github/workflows",
+        for wp in (".", "./", ".github", ".github/workflows",
                    ".codex", "hooks", ".devflow/state", ".git", ".claude"):
             with self.subTest(write_path=wp):
                 with self.assertRaises(vom.ManifestError):
                     self._validate([wp])
+
+    def test_target_project_scripts_dir_is_ownable(self):
+        """Target projects commonly keep their own scripts/ folder; only the
+        framework's enforcement scripts are protected, by exact path."""
+        self._validate(["scripts/db"])
 
     def test_feature_write_path_accepted(self):
         self._validate(["apps/api/src/features/req-999"])
@@ -114,6 +119,14 @@ class AuthorizeTargetRecheckTests(unittest.TestCase):
         self.assertIn("protected", str(ctx.exception))
         with self.assertRaises(vom.ManifestError):
             self._authorize(["docs"], "docs/product/requirements/REQ-999.md")
+
+    def test_framework_enforcement_scripts_protected_by_exact_path(self):
+        for target in ("scripts/devflow_operations.py", "scripts/devflow_target_guard.py",
+                       "scripts/validate_ownership_diff.py"):
+            with self.subTest(target=target):
+                with self.assertRaises(vom.ManifestError):
+                    self._authorize(["scripts"], target)
+        self._authorize(["scripts/db"], "scripts/db/seed.py")
 
     def test_owned_target_still_authorized(self):
         self._authorize(["apps/api/src"], "apps/api/src/service.py")
