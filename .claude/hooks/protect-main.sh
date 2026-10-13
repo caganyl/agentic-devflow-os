@@ -111,7 +111,11 @@ case "$TOOL_NAME" in
     # git -C <repo> / --git-dir / --work-tree, or cd <repo> before git, can
     # mutate a checkout on a protected branch from a session that is not on it.
     COMMAND="$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty')"
-    PROTECTED_TARGET="$(python3 - "$CWD" "$COMMAND" <<'PYMAIN'
+    # The heredoc lives in a function, not directly inside $( ): bash 3.2
+    # (macOS /bin/bash) mis-parses quoted heredocs within command
+    # substitution when the body contains backticks.
+    protected_git_target() {
+      python3 - "$1" "$2" <<'PYMAIN'
 import os, re, shlex, subprocess, sys
 
 cwd, command = sys.argv[1], sys.argv[2]
@@ -203,7 +207,8 @@ for seg in segments:
         print(branch)
         break
 PYMAIN
-)"
+    }
+    PROTECTED_TARGET="$(protected_git_target "$CWD" "$COMMAND")"
     if [ -n "$PROTECTED_TARGET" ]; then
       deny "Main branch read-only protection: this command runs a mutating git operation in a checkout on protected branch $PROTECTED_TARGET. Work from an isolated feature worktree instead."
       exit 0

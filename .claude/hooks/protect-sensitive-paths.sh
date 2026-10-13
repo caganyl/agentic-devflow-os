@@ -50,7 +50,11 @@ deny() {
 # per path token after quotes are removed, and dot-globs that can expand to an
 # env file (.e*v, .en?) count as the env file. `.env` must be a whole path
 # segment, so `process.env` or `jq .keywords` do not match.
-REASON="$(HOOK_INPUT="$INPUT" python3 - <<'PYSENS'
+# The heredoc lives in a function, not directly inside $( ): bash 3.2
+# (macOS /bin/bash) mis-parses quoted heredocs within command substitution
+# when the body contains backticks.
+sensitive_reason() {
+  HOOK_INPUT="$INPUT" python3 - <<'PYSENS'
 import fnmatch, json, os, posixpath, re, subprocess, sys
 
 data = json.loads(os.environ["HOOK_INPUT"])
@@ -159,7 +163,8 @@ elif tool == "Bash":
         print("Sensitive-path protection: command references a protected credential, "
               "environment or Claude guardrail path.")
 PYSENS
-)"
+}
+REASON="$(sensitive_reason)"
 
 if [ -n "$REASON" ]; then
   deny "$REASON"
