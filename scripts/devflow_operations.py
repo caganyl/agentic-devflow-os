@@ -54,6 +54,7 @@ Exit codes:
     17  Security evidence recording rejected (review not required, invalid verdict/severity, or invalid path)
     18  Contract evidence recording rejected (not required for this delivery type, or invalid path)
     19  Work product evidence recording rejected (invalid path, not a git change, task type mismatch, or task not in run)
+    22  Run state lock could not be acquired within DEVFLOW_STATE_LOCK_TIMEOUT seconds (default 120)
 
 IMPORTANT — validate_forbidden_git_operation:
     This function validates planned operation *strings* passed to it by callers.
