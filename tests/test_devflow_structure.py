@@ -6,7 +6,6 @@ Tests for DevFlow OS file structure:
 """
 
 import ast
-import re
 import unittest
 from pathlib import Path
 

@@ -2,7 +2,7 @@
 # Agentic DevFlow OS — draft ownership manifest generator.
 #
 # Creates docs/ownership/REQ-<NNN>.json in DRAFT status for a requirement that
-# already exists at docs/product/REQ-<NNN>.md. Implementer agents stay blocked
+# already exists at docs/product/requirements/REQ-<NNN>.md. Implementer agents stay blocked
 # until a human flips status to "approved" — the approval gate is deliberate and
 # this script never crosses it.
 #
@@ -32,7 +32,7 @@ ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 cd "$ROOT"
 
 REQ_ID="REQ-${REQ_NUM}"
-REQ_DOC="docs/product/${REQ_ID}.md"
+REQ_DOC="docs/product/requirements/${REQ_ID}.md"
 MANIFEST_FILE="docs/ownership/${REQ_ID}.json"
 
 [ -f "$REQ_DOC" ] || die "$REQ_DOC yok. Önce product-analyst'e requirement + acceptance criteria yazdır."

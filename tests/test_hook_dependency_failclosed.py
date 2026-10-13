@@ -14,7 +14,6 @@ These tests run each hook with a PATH that omits jq and assert it still denies.
 import json
 import os
 import shutil
-import stat
 import subprocess
 import tempfile
 import unittest
