@@ -134,8 +134,9 @@ fi
 # requirement file actually exists. Without this pair a fresh project cannot
 # accept any implementer write at all.
 # ---------------------------------------------------------------------------
-REQ_DOC="docs/product/REQ-${BOOTSTRAP_REQ}.md"
+REQ_DOC="docs/product/requirements/REQ-${BOOTSTRAP_REQ}.md"
 if [ ! -f "$REQ_DOC" ]; then
+  mkdir -p "$(dirname "$REQ_DOC")"
   cat > "$REQ_DOC" <<'REQMD'
 # REQ-001: Proje İskeleti ve Teslimat Altyapısı
 

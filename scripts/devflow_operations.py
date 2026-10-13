@@ -2872,16 +2872,18 @@ def cmd_launch(args) -> int:
         f"DEVFLOW_RUN_WORKTREE is the sole writable repository root for this managed run.\n"
         f"Do not write to or modify any path outside DEVFLOW_RUN_WORKTREE.\n"
         f"\n"
-        f"Sen bu run'ın Delivery Lead'isin. Sorumlulukların:\n"
-        f"- /orchestrate-delivery skill'ini kullanarak delivery döngüsünü yönet\n"
+        f"Bu run'ın orkestratörü sensin (ana oturum). Sorumlulukların:\n"
+        f"- /orchestrate-delivery skill'ini kullanarak delivery döngüsünü yönet; "
+        f"plan için delivery-lead alt ajanını çağır, dispatch'i sen yap\n"
         f'- Managed operations için: python3 "$DEVFLOW_OPERATIONS_SCRIPT" ... --target "$DEVFLOW_RUN_WORKTREE"\n'
-        f"- Yazma öncesi konumu doğrula: pwd, git rev-parse --show-toplevel, git branch --show-current\n"
+        f"- Yazma öncesi konumu doğrula: pwd, git rev-parse --show-toplevel, git rev-parse --abbrev-ref HEAD\n"
         f"- Kök DEVFLOW_RUN_WORKTREE ve branch DEVFLOW_RUN_BRANCH ile eşleşmeli; uyuşmazlıkta yaz yapma, raporla\n"
         f"- main branch'e doğrudan yazma; insan approval gate'lerini koru\n"
         f"- DEVFLOW_RUN_WORKTREE dışında dosya oluşturma veya değiştirme\n"
         f"- REQ bağı: {getattr(args, 'req_id', None) or 'YOK — implementer ajanlar yazamaz; implementation gerekiyorsa bunu ilk adımda insana bildir'}\n"
         f"- Tasarım fazı: ADR yalnızca eşik sağlanırsa; adr-reviewer en fazla 2 tur; sonrası insan kararı\n"
-        f"- Implementer ownership/branch reddi tasarım sorunu değildir; tasarım dokümanlarına dönme, blocker'ı raporla"
+        f"- Implementer ownership/branch reddi tasarım sorunu değildir; tasarım dokümanlarına dönme, blocker'ı raporla\n"
+        f"- İnsan kapısı veya ownership blokajında architect'i yeniden çağırma; tek bir özetle dur"
     )
 
     if not getattr(args, "req_id", None):

@@ -914,16 +914,18 @@ class NewSkillFilesTest(unittest.TestCase):
         path = self._skill_path("bootstrap-target-project")
         self.assertTrue(path.exists(), f"Missing skill: {path}")
 
-    def test_autonomous_delivery_run_exists(self):
-        path = self._skill_path("autonomous-delivery-run")
+    def test_orchestrate_delivery_exists(self):
+        path = self._skill_path("orchestrate-delivery")
         self.assertTrue(path.exists(), f"Missing skill: {path}")
+
+    def test_merged_orchestration_skills_removed(self):
+        """autonomous-delivery-run and native-team-delivery were merged into
+        orchestrate-delivery; a second copy would drift from it."""
+        for name in ("autonomous-delivery-run", "native-team-delivery"):
+            self.assertFalse(self._skill_path(name).exists(), name)
 
     def test_managed_delivery_operations_exists(self):
         path = self._skill_path("managed-delivery-operations")
-        self.assertTrue(path.exists(), f"Missing skill: {path}")
-
-    def test_native_team_delivery_exists(self):
-        path = self._skill_path("native-team-delivery")
         self.assertTrue(path.exists(), f"Missing skill: {path}")
 
     def _has_yaml_frontmatter(self, path: Path) -> bool:
@@ -933,9 +935,7 @@ class NewSkillFilesTest(unittest.TestCase):
     def test_all_new_skills_have_frontmatter(self):
         for name in [
             "bootstrap-target-project",
-            "autonomous-delivery-run",
             "managed-delivery-operations",
-            "native-team-delivery",
         ]:
             path = self._skill_path(name)
             if path.exists():
@@ -944,9 +944,7 @@ class NewSkillFilesTest(unittest.TestCase):
     def test_all_new_skills_have_amaç(self):
         for name in [
             "bootstrap-target-project",
-            "autonomous-delivery-run",
             "managed-delivery-operations",
-            "native-team-delivery",
         ]:
             path = self._skill_path(name)
             if path.exists():
@@ -956,24 +954,20 @@ class NewSkillFilesTest(unittest.TestCase):
     def test_all_new_skills_have_prosedür(self):
         for name in [
             "bootstrap-target-project",
-            "autonomous-delivery-run",
             "managed-delivery-operations",
-            "native-team-delivery",
         ]:
             path = self._skill_path(name)
             if path.exists():
                 content = path.read_text(encoding="utf-8")
                 self.assertIn("## Prosedür", content, f"{name} missing '## Prosedür' section")
 
-    def test_native_team_delivery_has_api_disclaimer(self):
-        path = self._skill_path("native-team-delivery")
-        if path.exists():
-            content = path.read_text(encoding="utf-8")
-            self.assertIn(
-                "API",
-                content,
-                "native-team-delivery must clarify it is not an API/SDK dispatcher",
-            )
+    def test_orchestrate_delivery_has_api_disclaimer(self):
+        content = self._skill_path("orchestrate-delivery").read_text(encoding="utf-8")
+        self.assertIn(
+            "API",
+            content,
+            "orchestrate-delivery must clarify it is not an API/SDK dispatcher",
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -145,20 +145,36 @@ Operations CLI komutları: `init-target`, `create-run`, `launch`, `status`,
 `record-work-product-evidence`, `generate-run-report`, `prepare-delivery`.
 `prepare-delivery` yalnızca doğrulama raporu üretir; gerçek Git mutasyonu
 yapmaz. Çıkış kodları script docstring'indedir (ör. 2 framework repo, 7
-korumalı branch, 9 gate geçilmedi, 16 aktif run'da `--force`).
+korumalı branch, 9 gate geçilmedi, 16 aktif run'da `--force`, 21 ölçülen exit
+kodu ile bildirilen test sayıları çelişiyor, 22 run state kilidi alınamadı).
+
+Kanıt kuralları (CLI zorlar):
+
+- **Görev sırası:** bir implementation task'ı, bağımlılıkları `completed`
+  veya `verified` olmadan `in_progress`'e geçemez.
+- **Work product:** kanıt dosyası boş olamaz ve run'ın `base_commit`'ine göre
+  değişmiş (veya yeni) olmalıdır; commit edilmiş run işi de sayılır.
+- **QA:** `--total/--passed/--failed` tutarlı olmalı (total>0,
+  passed+failed=total, exit 0 yalnızca failed=0); `true`, `:`, `exit 0`,
+  `echo …` gibi boş komutlar reddedilir.
+- **Documentation task'ı (010, docs-writer):** kanıtı bir `README.md` veya
+  `docs/handoffs/` altındaki dosyadır; release task'ı ona bağlıdır.
+- Run state'e her yazım dosya kilidiyle yapılır (`DEVFLOW_STATE_LOCK_TIMEOUT`).
 
 ## 8. Hook'lar ve sınırlar
 
 Framework repo'da `.claude/settings.json`, hedef projede plugin'in
-`hooks/hooks.json` dosyası kaydeder. Guard'lar fail-closed çalışır (`jq` veya
-`python3` yoksa reddeder).
+`hooks/hooks.json` dosyası kaydeder. Guard'lar fail-closed çalışır: `jq` veya
+`python3` yoksa, girdi bozuksa veya hook beklenmedik bir hatayla biterse çağrı
+exit 2 ile reddedilir. Bash komut filtreleri "best effort"tur; asıl sınır izin
+kuralları ve worktree izolasyonudur.
 
 | Hook | Ne yapar |
 |---|---|
 | `devflow_target_guard.py` (plugin) | `git merge`, force push, branch silme, `git reset`, `git clean -f`, `git checkout -- .`, `git restore .`, `rm -rf`; `.env*`, secret/credential, MCP config, Claude ayarları ve hook dosyalarına yazma; `DEVFLOW_RUN_WORKTREE` dışına çıkma; `.devflow/runs|reports` yazımı |
-| `protect-main.sh` | Oturum `main` üzerindeyse Bash/Write/Edit'i reddeder |
+| `protect-main.sh` | Oturum veya hedef dosyanın checkout'u `main`/`master` (ya da `DEVFLOW_PROTECTED_BRANCHES`) üzerindeyse yazımı; `git -C`/`--git-dir`/`cd` ile korumalı checkout'a giden Git mutasyonunu reddeder |
 | `protect-sensitive-paths.sh` | `.env*`, `secrets/`, anahtar dosyaları, Claude ayarları ve hook script'lerine dokunmayı reddeder |
-| `enforce-role-boundaries.sh` | Rol bazlı yazma yolları; implementer'lar için branch + onaylı manifest + `write_paths`; doküman rollerinde Bash yok; governed ajanlarda Git mutasyonu (`git add/commit/push/branch/...`), paket kurulumu, dosyaya yönlendirme, dış sisteme yazma ve saldırı aracı yasağı; ADR loop breaker; mimari profil ve docs-writer kapıları |
+| `enforce-role-boundaries.sh` | Rol bazlı yazma yolları; implementer'lar için branch + onaylı manifest + `write_paths`; doküman rollerinde Bash yok; governed ajanlarda Git mutasyonu (`git add/commit/push/branch/...`), paket kurulumu, dosyaya yönlendirme, dış sisteme yazma ve saldırı aracı yasağı; ADR loop breaker (ana oturum dahil; branch başına en fazla 1 yeni ADR, dondurulmuş ADR yalnızca statüsüyle emekliye ayrılır); handoff/requirement 8000 karakter büyüme bütçesi; mimari profil ve docs-writer kapıları |
 | `session-start.sh` | Repo, branch, main koruması, profil durumu ve son handoff'u bağlama ekler |
 | `devflow_delegation_recorder.py` (plugin) | SubagentStart/Stop için içeriksiz kayıt; hata alsa da teslimatı bloklamaz |
 

@@ -293,7 +293,7 @@ okumasını reddeder ve `git push`, `gh pr merge`, sert `git reset`, `terraform 
 
 | Grup | İçerik |
 |---|---|
-| Süreç skill'leri | `orchestrate-delivery` (ana oturumun tek orkestrasyon protokolü; eski `autonomous-delivery-run` ve `native-team-delivery` adları buna yönlendirir), `task-routing` |
+| Süreç skill'leri | `orchestrate-delivery` (ana oturumun tek orkestrasyon protokolü), `task-routing` |
 | Üretim skill'leri | `api-contract-design`, `requirement-traceability`, `project-context-synthesis` (kademeli bağlam dahil) |
 | Mühendislik disiplini | `requirement-grilling` (insanla tek tek soru, AC + sözlük), `tdd-vertical-slice` (contract/AC seam'lerinde kırmızı-yeşil), `stack-verification` (sabit build → format → tip → test → mimari → bağımlılık sırası), `root-cause-investigation` (repro + en fazla 3 hipotez), `pr-review-triage` (FIX / WONT_FIX / FALSE_POSITIVE, yanıtları insan gönderir) |
 | Mimari ve dokümantasyon | `architecture-discovery` (brownfield tarama), `architecture-intake` (greenfield kararları), `documentation-sync` (README'ler ve yorumlar) |
