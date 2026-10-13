@@ -1,7 +1,7 @@
 # ADR-005 — MCP Tooling Control Plane and External Tool Access Model
 
 - **ADR-ID:** ADR-005
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-06-25
 - **Acceptance date:** 2026-06-25
 - **Owner:** Human maintainer

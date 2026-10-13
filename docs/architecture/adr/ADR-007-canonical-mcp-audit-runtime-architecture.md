@@ -1,7 +1,7 @@
 # ADR-007 — Canonical MCP Audit Runtime Architecture
 
 - **ADR-ID:** ADR-007
-- **Status:** Proposed
+- **Status:** Withdrawn
 - **Date:** 2026-06-26
 - **Owner:** Human maintainer (pending approval)
 - **Related controls:** PROJECT_CONSTITUTION.md, CLAUDE.md, AGENTS.md,

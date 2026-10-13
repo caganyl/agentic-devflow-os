@@ -1,7 +1,7 @@
 # ADR-006 — MCP Audit Logging and Runtime Enforcement Model
 
 - **ADR-ID:** ADR-006
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-06-25
 - **Acceptance date:** 2026-06-25
 - **Owner:** Human maintainer
