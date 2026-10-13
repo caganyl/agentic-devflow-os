@@ -10,14 +10,14 @@ Requirement ve acceptance criteria mevcut olmalı; yoksa önce `new-product-disc
 - REQ-ID ve requirement dosyası
 - Acceptance criteria listesi
 - İlgili ADR'lar
-- Onaylı veya taslak contract (yoksa Contract Broker devreye girer)
+- Run'a kayıtlı veya taslak contract (yoksa Contract Broker devreye girer)
 - Context pack
 
 ## Kullanılacak Roller
 
 Sırayla ve minimum set prensibine göre:
 
-1. **Delivery Lead** — plan, task graph, bağımlılık haritası
+1. **Delivery Lead** — plan, task graph, bağımlılık haritası (dağıtımı ana oturum yapar)
 2. **Product Analyst** — acceptance criteria netleştirme (gerekirse)
 3. **Solution Architect** — mimari karar (yalnızca ADR eşiği sağlanırsa)
    - **ADR Reviewer** — tek turda VERDICT; en fazla 2 tur, sonrası insan kararı
@@ -26,13 +26,13 @@ Sırayla ve minimum set prensibine göre:
 6. **Backend Engineer** — API ve service implementation (contract sonrası)
 7. **Database Engineer** — schema ve migration (gerekirse)
 8. **QA Automation** — test yazma ve acceptance verification
-9. **Security Red Team** — security review (release öncesi)
-10. **Docs Writer** — değişen klasörlerin README'leri, kök README blokları, değişen dosyalara yorum (QA sonrası, tek writer)
+9. **Security Red Team** — security review (release öncesi; fix sonrası en fazla bir yeniden inceleme)
+10. **Docs Writer** — değişen klasörlerin README'leri, kök README blokları, değişen dosyalara yorum, handoff (QA ve Security sonrası, tek writer)
 11. **Integration/Release** — release scorecard ve merge recommendation
 
 ## Gerekli Skill'ler
 
-- `orchestrate-delivery` — delivery akışını yönetme
+- `orchestrate-delivery` — ana oturumun delivery akışını yönetmesi
 - `requirement-grilling` — AC belirsizse implementation öncesi, insanla
 - `tdd-vertical-slice` — implementer ve QA test disiplini
 - `stack-verification` — "bitti" öncesi sabit doğrulama sırası
@@ -48,7 +48,7 @@ Sırayla ve minimum set prensibine göre:
 
 ## Approval Gate'ler
 
-- [ ] Contract onaylanmış (frontend+backend paralel başlamadan önce)
+- [ ] Contract `record-contract-evidence` ile kaydedilmiş (frontend+backend paralel başlamadan önce)
 - [ ] Tüm acceptance criteria testleri geçiyor
 - [ ] Security review tamamlanmış
 - [ ] QA sign-off verilmiş
@@ -77,9 +77,8 @@ Bkz. `.claude/templates/handoff.md`
 ## Failure / Recovery
 
 - ADR ikinci turda hâlâ BLOCK: dur, BLOCKER listesini insana sun; üçüncü tur yok
-- Implementer ownership/branch nedeniyle reddedildi: tasarıma dönme; `launch --req-id` veya manifest onayı için insana raporla
-
+- Implementer ownership/branch nedeniyle reddedildi: architect'i yeniden çağırma, tasarıma dönme; `launch --req-id` veya manifest onayı için insana tek özetle raporla
 - Contract belirsizliği: Contract Broker'a geri dön
 - Test başarısızlığı: QA Automation ile birlikte root cause analizi
-- Security bulgu: Security Red Team severity'ye göre blocker/non-blocker belirler
+- Security bulgu: Security Red Team severity'ye göre blocker/non-blocker belirler; fix sonrası tek yeniden inceleme, sonrası insan kararı
 - Session kesilmesi: run summary ve açık task listesi üzerinden devam

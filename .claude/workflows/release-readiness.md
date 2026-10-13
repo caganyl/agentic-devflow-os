@@ -8,7 +8,7 @@ değerlendirmesi yapılması gerektiğinde.
 ## Girdiler
 
 - Kapsama girecek REQ-ID listesi
-- Integration branch durumu
+- Run/feature branch durumu ve açık PR
 - CI sonuçları
 - Açık bilinen sorunlar veya riskler
 - Oncall ve rollback planı
@@ -18,7 +18,7 @@ değerlendirmesi yapılması gerektiğinde.
 1. **Integration/Release** — scorecard üretimi, CI değerlendirmesi
 2. **QA Automation** — test coverage son kontrolü, regression
 3. **Security Red Team** — son güvenlik taraması
-4. **Delivery Lead** — merge recommendation kararı
+4. **İnsan** — merge kararı (Integration/Release yalnızca tavsiye üretir)
 
 ## Gerekli Skill'ler
 

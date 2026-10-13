@@ -15,10 +15,10 @@ Henüz REQ-ID atanmamış, scope belirsiz erken keşif aşamasında kullanılır
 
 ## Kullanılacak Roller
 
-1. **Delivery Lead** — süreci yönetir, bağımlılıkları belirler
+1. **Delivery Lead** — plan ve bağımlılıklar (dağıtımı ana oturum yapar)
 2. **Product Analyst** — PRD, kullanıcı hikayeleri, acceptance criteria taslağı
 3. **Design Reviewer** — kullanıcı akışı, bilgi mimarisi, erken UX değerlendirmesi
-4. **Solution Architect** — teknik feasibility, sistem entegrasyonu, ADR taslağı
+4. **Solution Architect** — teknik fizibilite notu ve sistem entegrasyonu; ADR yalnızca eşik sağlanırsa
 
 ## Gerekli Skill'ler
 
@@ -37,7 +37,7 @@ Henüz REQ-ID atanmamış, scope belirsiz erken keşif aşamasında kullanılır
 ## Üretilecek Artefaktlar
 
 - `docs/product/requirements/REQ-XXX.md` — requirement dosyası
-- `docs/architecture/adr/ADRNNN-*.md` — ilgili mimari kararlar (varsa)
+- Teknik fizibilite notu (`docs/decisions/`); ADR (`docs/architecture/adr/ADR-NNN-*.md`) yalnızca eşik sağlanırsa
 - Handoff güncellemesi
 
 ## Completion Kriteri
@@ -60,5 +60,5 @@ Henüz REQ-ID atanmamış, scope belirsiz erken keşif aşamasında kullanılır
 ## Failure / Recovery
 
 - Scope creep: Product Analyst ile yeniden scope sınırı çiz
-- Teknik belirsizlik: Solution Architect'e ADR çalışması ver
+- Teknik belirsizlik: kısa bir spike veya fizibilite notu iste; ADR yalnızca eşik sağlanırsa
 - Stakeholder anlaşmazlığı: insan approval gate'e taşı

@@ -21,6 +21,10 @@ Tüm ADR, requirement veya handoff setini baştan sona okuma. Bir belge
 - Accepted ADR dondurulur; uygulama sırasındaki sapmalar handoff/PR'a yazılır.
 - Ownership/branch blocker'ı tasarım sorunu değildir; tasarım dokümanlarına
   geri dönme, blocker'ı insana raporla.
+- Bir insan kapısı veya ownership blokajında: architect'i yeniden çağırma,
+  tek bir özetle dur.
+- Diğer review döngüleri (security, eval, design, PR triage) en fazla bir
+  yeniden inceleme turu alır; sonrası insan kararıdır.
 
 Run içinde "onaylı" şu anlama gelir:
 
@@ -44,7 +48,8 @@ Esin kaynağı: Andrej Karpathy'nin LLM kodlama hatalarına dair gözlemleri
    Komşu kodu, yorumları veya biçimlendirmeyi "iyileştirme". Senin değişikliğin
    yüzünden kullanılmaz kalan şeyi temizle; önceden var olan ölü kodu yalnızca raporla.
 4. **Hedefe göre çalış:** Görevi doğrulanabilir bir başarı ölçütüne çevir
-   (ör. "bu AC için test yazılır ve geçer"), ölçüt sağlanana kadar döngüde kal.
+   (ör. "bu AC için test yazılır ve geçer"), ölçüt sağlanana kadar döngüde kal;
+   en fazla 3 deneme, sonra blokajı raporla.
 
 ## Source of Truth
 
@@ -54,6 +59,9 @@ Esin kaynağı: Andrej Karpathy'nin LLM kodlama hatalarına dair gözlemleri
 - Requirement ID olmadan yeni ürün davranışı icat etme.
 
 ## Delivery Rules
+
+- Çok rollü işte orkestratör ana oturumdur (`orchestrate-delivery` skill'i).
+  `delivery-lead` yalnızca plan döner; alt ajan başlatmaz, dosya yazmaz.
 
 - Acceptance criteria olmadan implementation başlatma.
 - Contract olmadan frontend/backend paralel geliştirme başlatma.

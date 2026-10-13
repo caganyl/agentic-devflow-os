@@ -1,117 +1,52 @@
-# REQ Handoff Template
+# REQ-XXX — Handoff
 
-Bu şablon, `docs/handoffs/REQ-XXX.md` dosyası oluşturulurken kullanılır
-(bkz. `docs/handoffs/README.md`). Her alan placeholder içerir; hiçbir alan
-otomatik olarak "approved", "passed" veya "Go" varsayımıyla doldurulmamıştır.
-Bu şablonu kullanan rol, her alanı gerçek kanıtla doldurmalı; kanıt yoksa
-"Bilinmiyor" veya "Eksik" olarak işaretlemelidir.
+<!-- Bütçe ~8.000 karakter (hook zorlar). Kanıtı olmayan alan "Eksik" yazılır;
+     hiçbir alan "approved/passed/Go" varsayımıyla doldurulmaz. Ayrıntı yerine
+     yol ver. Aynı içerik: .claude/templates/handoff.md (plugin ile hedefe gider). -->
 
----
+## Kimlik
 
-## Requirement Kimliği ve Başlık
+- REQ: `docs/product/requirements/REQ-XXX.md` · AC: `<yol veya "REQ içinde">`
+- Branch / run: `<req-XXX-... | devflow/run-...>` · PR: `<#no | yok>`
+- Durum: `<in-progress | ready-for-review | merged | blocked>`
 
-- **REQ-ID:** `<REQ-XXX>`
-- **Başlık:** `<requirement başlığı>`
-- **Requirement dosyası:** `<docs/product/requirements/REQ-XXX.md veya yol>`
-- **Acceptance criteria dosyası:** `<yol>`
+## Kapsam
 
-## Kaynak Branch / PR / Commit Bilgileri
+- Yapılan: `<1-3 madde>`
+- Kapsam dışı: `<1-3 madde>`
 
-- **Implementation branch:** `<req-XXX-kisa-aciklama>`
-- **Ownership registry branch (varsa):** `<ownership-REQ-XXX-kisa-aciklama>`
-- **PR numarası/linki:** `<#PR>`
-- **Base SHA:** `<sha>`
-- **Head SHA:** `<sha>`
-- **Worktree:** `<worktree yolu veya "Bilinmiyor">`
+## Kararlar ve Contract'lar
 
-## Kapsam Özeti
+- ADR / karar notu: `<yol | yok>` (status: `<Proposed/Accepted>`)
+- Contract: `<docs/contracts/... | exception>` · değişti mi: `<evet/hayır>`
+- Karar sapmaları: `<uygulamada ADR'den sapma | yok>`
 
-- **Bu PR'da yapılan:** `<özet>`
-- **Bu PR'da yapılmayan / out-of-scope:** `<özet>`
+## AC Kapsamı
 
-## Acceptance Criteria Coverage
-
-| Kriter | Karşılandı mı | Kanıt |
+| AC | Karşılandı | Kanıt (test/rapor yolu) |
 | --- | --- | --- |
-| `<kriter 1>` | `<Evet/Hayır/Kısmen>` | `<test/log/ekran görüntüsü referansı>` |
-| `<kriter 2>` | `<Evet/Hayır/Kısmen>` | `<...>` |
+| AC-1 | `<evet/hayır/kısmen>` | `<yol>` |
 
-## Contract ve Mimari Etkiler
+## Kanıt
 
-- **Etkilenen contract'lar:** `<docs/contracts/... veya "Yok">`
-- **Contract değişikliği var mı:** `<Evet/Hayır>`
-- **İlgili ADR'ler:** `<docs/architecture/adr/ADR-XXX veya "Yok">`
-- **Yeni mimari karar gerekiyor mu:** `<Evet/Hayır — gerekiyorsa ayrı ADR sürecine yönlendirin>`
+- Test komutu ve sonucu: `<komut — geçen/toplam>` (`record-qa-evidence` kaydı: `<var/yok>`)
+- Lint / typecheck / build: `<özet>`
+- Security: `<rapor yolu, en yüksek severity | uygulanamaz>`
+- UI durumları / design review: `<özet | uygulanamaz>`
+- Eval (AI): `<scorecard yolu | uygulanamaz>`
+- Migration ve rollback: `<migration yolu, rollback SQL yolu | yok>`
 
-## Database / Migration Etkisi
+## Riskler ve Açık İşler
 
-- **Migration var mı:** `<Evet/Hayır>`
-- **Migration dosyası/yolu:** `<yol veya "Yok">`
-- **Rollback notu:** `<rollback adımı veya "Yok — migration yok">`
-- **Production migration onayı:** `<Bekliyor / İnsan onayı alındı: kim, ne zaman>`
+- `<risk veya açık iş>`
 
-## Test Evidence
+## İnsan Kararları
 
-- **Çalıştırılan testler:** `<komut(lar)>`
-- **Sonuç:** `<pass/fail özeti>`
-- **Lint sonucu:** `<özet>`
-- **Typecheck sonucu:** `<özet>`
-- **UI state kontrolü (varsa):** loading / empty / error / permission /
-  mobile → `<her biri için durum>`
-- **AI/eval regression kontrolü (varsa):** `<özet veya "Uygulanamaz">`
+- [ ] Ownership manifest onayı
+- [ ] Main merge
+- [ ] Production deploy / migration / secret (uygulanabilirse)
+- Release önerisi (insan kararı değildir): `<Go | Conditional Go: koşul | No-Go: gerekçe>`
 
-## Security Bulguları
+## Sonraki Adım
 
-- **Security Red Team incelemesi yapıldı mı:** `<Evet/Hayır>`
-- **Bulgular:** `<liste veya "Yok">`
-- **Açık/kapalı durumları:** `<liste>`
-
-## Accessibility / UI Review
-
-- **Design Reviewer incelemesi yapıldı mı:** `<Evet/Hayır/Uygulanamaz>`
-- **Bulgular:** `<liste veya "Yok">`
-
-## AI / Model / Eval Etkisi
-
-- **Bu REQ bir AI/model değişikliği içeriyor mu:** `<Evet/Hayır>`
-- **Golden dataset / eval güncellemesi:** `<özet veya "Uygulanamaz">`
-- **Latency/cost etkisi:** `<özet veya "Uygulanamaz">`
-
-## Bilinen Riskler ve Açık İşler
-
-- `<risk 1>`
-- `<açık iş 1>`
-
-## Rollback veya Recovery Notları
-
-- **Rollback adımı:** `<adım veya "Tanımlanmadı">`
-- **Recovery sorumlusu:** `<rol/insan>`
-
-## İnsan Onay Gereksinimleri
-
-- [ ] Ownership manifest approval (insan maintainer)
-- [ ] Main merge (insan maintainer)
-- [ ] Production deploy onayı (insan maintainer) — uygulanabilirse
-- [ ] Production migration onayı (insan maintainer) — uygulanabilirse
-- [ ] Secret/API key/cloud değişikliği onayı (insan maintainer) — uygulanabilirse
-
-## Release Readiness Önerisi
-
-> Aşağıdaki seçeneklerden birini işaretleyin. Bu öneri bir insan kararı
-> değildir; nihai kararı insan maintainer verir.
-
-- [ ] Go
-- [ ] Conditional Go — koşul: `<koşulu yazın>`
-- [ ] No-Go — gerekçe: `<gerekçeyi yazın>`
-
-## Human Maintainer Kararı
-
-- **Karar:** `<Bekliyor / Onaylandı / Reddedildi>`
-- **Karar veren:** `<isim>`
-- **Tarih:** `<tarih>`
-- **Not:** `<varsa ek not>`
-
-## Sonraki Adım / Owner
-
-- **Sonraki adım:** `<özet>`
-- **Owner:** `<rol veya isim>`
+- `<adım>` — owner: `<rol/insan>`

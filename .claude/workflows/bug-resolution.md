@@ -18,7 +18,7 @@ Hız kritiktir; ancak scope kontrolü ve test garantisi şarttır.
 Severity'ye göre minimum set:
 
 **P0/P1 (Production critical):**
-1. **Delivery Lead** — kriz koordinasyonu, rol ataması
+1. **Delivery Lead** — plan ve rol önerisi (dağıtımı ana oturum yapar)
 2. **QA Automation** — bug reproduksiyon ve test yazma
 3. İlgili domain engineer (Frontend/Backend/Database/AI)
 4. **Security Red Team** (güvenlik açığı ise)
@@ -72,6 +72,6 @@ Severity'ye göre minimum set:
 
 ## Failure / Recovery
 
-- Fix başka şeyi kırıyor: rollback, daha küçük fix
-- Root cause belirsiz: daha fazla log ve investigation
+- Fix başka şeyi kırıyor: fix'i geri al, daha küçük fix (aynı 3 hipotez bütçesi içinde)
+- Root cause belirsiz: `root-cause-investigation` sınırı — en fazla 3 hipotez; üçü de çürürse dur, hipotez günlüğünü insana sun
 - Güvenlik açığı: Security Red Team → CVE değerlendirmesi → insan onayı

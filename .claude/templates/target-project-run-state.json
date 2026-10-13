@@ -28,7 +28,7 @@
     "human_approval": "İnsan main merge onayı verdiğinde true yapılır. Agent değiştiremez."
   },
   "_execution_mode_notes": {
-    "subagents": "Varsayılan. Delivery Lead custom subagent'ları sıralı veya bağımsız olarak kullanır.",
+    "subagents": "Varsayılan. Ana oturum custom subagent'ları sıralı veya bağımsız olarak kullanır.",
     "agent_teams": "Deneysel. launch --agent-teams ile aktif edilir. Yalnızca bağımsız paralel işler için. Token maliyetlidir."
   }
 }

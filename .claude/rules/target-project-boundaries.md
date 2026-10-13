@@ -1,58 +1,40 @@
+---
+paths:
+  - ".devflow/**"
+  - "dist/**"
+  - "scripts/build_devflow_plugin.py"
+  - "scripts/devflow_bootstrap.sh"
+  - "scripts/devflow_operations.py"
+---
+
 # Target Project Boundaries
 
-Bu kurallar framework repo ile target project repo arasındaki sınırları tanımlar.
+Framework repo (bu repo, `DEVFLOW_HOME`) ile target project repo arasındaki
+sınır. Ayrıntılı çalışma modeli: framework repo'da `docs/ARCHITECTURE.md`.
 
 ## Framework Repo
 
-`~/Developer/agentic-devflow-os` (bu repo)
+**İçerir:** agent, skill, workflow, rule ve template tanımları (`.claude/`),
+plugin build sistemi (`scripts/build_devflow_plugin.py`), guard ve hook'lar,
+governance dokümantasyonu (`docs/`).
 
-**İçerir:**
-- Agent rol tanımları (`.claude/agents/`)
-- Workflow tanımları (`.claude/workflows/`)
-- Skill tanımları (`.claude/skills/`)
-- Rule tanımları (`.claude/rules/`)
-- Context ve task packet şablonları (`.claude/templates/`)
-- Plugin build sistemi (`scripts/build_devflow_plugin.py`)
-- Governance ve operations dokümantasyonu (`docs/`)
-
-**İçermez:**
-- Target project kaynak kodu
-- Target project migration dosyaları
-- Target project credential veya secret
-- Gerçek external MCP bağlantıları
+**İçermez:** target project kaynak kodu, migration dosyası, credential veya
+secret, gerçek external MCP bağlantısı.
 
 ## Target Project Repo
 
-Örnek: `~/Developer/projects/startup-crm`
-
-**Target project içinde framework bu sınırları takip eder:**
-- `.devflow/` altında state, context, task packets, runs ve reports tutulur
-- Framework'ün yalnızca dışa aktarılan artefaktları (agent, skill, template, workflow) kullanılır
-- Framework repo'ya doğrudan referans verilmez; plugin output üzerinden çalışılır
-
-## Target Project `.devflow/` Alanı
-
-```
-.devflow/
-├── context/          ← context pack'ler ve source register
-├── tasks/            ← task packet'ler
-├── runs/             ← agent run summary'leri
-└── reports/          ← scorecard ve merge recommendation'lar
-```
-
-Bu alan Git'te takip edilir ama içinde secret, credential veya kişisel veri bulunmaz.
+- Framework'ün yalnızca plugin çıktısı (`dist/devflow-plugin/`) kullanılır;
+  framework repo dosyalarına doğrudan referans verilmez.
+- Durum `.devflow/` altında tutulur: `project.json`, `policy.json`,
+  `source-register.json`, `context/`, `plans/`, `task-packets/`, `runs/`,
+  `reports/`, `delegation-events/`; `cache/` ve `logs/` gitignore'dadır.
+- `.devflow/runs/` ve `.devflow/reports/` yalnızca operations CLI ile yazılır.
+- `.devflow/` içinde secret, credential veya kişisel veri bulunmaz.
 
 ## Geçiş Sınırları
 
-- Framework repo → target project: yalnızca plugin output (dist/devflow-plugin/)
-- Target project → framework repo: geri bildirim ve governance güncellemesi (PR ile)
-- Credential, API key veya secret hiçbir yönde geçiş yapmaz
-- MCP bağlantısı gerçek external sistemlere framework repo üzerinden kurulmaz
-
-## İlk Target Project Kurulumu
-
-Target project'e framework uygulanmadan önce:
-1. Plugin build çalıştırılır: `python3 scripts/build_devflow_plugin.py`
-2. `dist/devflow-plugin/` target project'e kopyalanır veya referans gösterilir
-3. Target project'te `.devflow/` yapısı oluşturulur
-4. Delivery Lead ilk context pack ve source register'ı hazırlar
+- Framework → target: yalnızca plugin çıktısı ve bootstrap'ın kopyaladığı
+  `CLAUDE.md` şablonu ile rule'lar.
+- Target → framework: geri bildirim ve governance güncellemesi (PR ile).
+- Credential, API key veya secret hiçbir yönde geçmez.
+- Operations runner, target olarak framework repo verilirse exit 2 ile reddeder.

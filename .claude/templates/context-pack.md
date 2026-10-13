@@ -1,5 +1,9 @@
 # Context Pack: [görev adı]
 
+<!-- Tek context pack formatı budur. 300-500 kelime; belge içeriği değil yol +
+     ilgili bölüm. Dağıtım kuralları: .claude/rules/context-distribution.md.
+     Konum: .devflow/context/RUN-NNN-<rol>.md -->
+
 ## Meta
 
 - **Task ID:** TASK-[NNN]
@@ -25,15 +29,14 @@ Kaynak: `docs/product/requirements/REQ-XXX.md`
 
 ## İlgili Contract'lar
 
-- **API Contract:** `docs/contracts/api-v1.yaml`
+- **API Contract:** `docs/contracts/openapi/REQ-XXX.yaml`
   - Özet: [ilgili endpoint'ler ve schema'lar]
-- **DB Schema:** `docs/contracts/db-v1.sql` (varsa)
+- **DB Contract:** `docs/contracts/database/REQ-XXX.md` (varsa)
   - Özet: [ilgili tablolar]
 
 ## İlgili Mimari Kararlar
 
-- **ADR-NNN:** [başlık]
-  - Karar: [ne seçildi]
+- **ADR-NNN:** [başlık] — yalnızca Status ve Decision özeti
   - Etki: [bu görev için önemi]
 
 ## Evidence (NotebookLM — doğrulanmamış)
@@ -65,4 +68,4 @@ Bu context pack'te şunlar kasıtlı olarak yer almıyor:
 
 ## Kaynak Register
 
-`source-register.yaml` dosyasına bakın.
+`.devflow/source-register.json` (şablon: `source-register.yaml`).

@@ -50,7 +50,7 @@ geliştirildiğinde. Hem veri pipeline hem de UI katmanı içerir.
 
 - Tüm metrikler doğru hesaplanıyor (test ile kanıtlanmış)
 - Dashboard responsive ve erişilebilir
-- Veri kaynağı değiştiğinde grafik günceleniyor
+- Veri kaynağı değiştiğinde grafik güncelleniyor
 - Performance hedefleri karşılanmış
 
 ## Handoff Formatı
@@ -68,4 +68,4 @@ geliştirildiğinde. Hem veri pipeline hem de UI katmanı içerir.
 
 - Veri kalitesi sorunu: AI/Data Engineer root cause analizi
 - Performance sorunu: Backend Engineer + index/query optimizasyonu
-- UX beklenti uyumsuzluğu: Design Reviewer ile re-review
+- UX beklenti uyumsuzluğu: Frontend düzeltir, Design Reviewer en fazla bir kez yeniden inceler; sonrası insan kararı
