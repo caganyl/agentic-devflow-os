@@ -6,8 +6,23 @@
 # scripts/devflow_new_manifest.sh'i çağırır. Manifest her zaman "draft"
 # üretilir; "approved" yapmak insan adımıdır.
 #
-# DEVFLOW_HOME framework repo köküdür; verilmezse bu dosyanın bir üst klasörü.
+# DEVFLOW_HOME framework repo köküdür; verilmezse bu dosyanın gerçek konumunun
+# (symlink'ler çözülerek) bir üst klasörü.
 set -eu
 
-DEVFLOW_HOME="${DEVFLOW_HOME:-$(cd "$(dirname "$0")/.." && pwd -P)}"
+self_dir() {
+  p="$0"
+  while [ -L "$p" ]; do
+    d="$(cd "$(dirname "$p")" && pwd -P)"
+    l="$(readlink "$p")"
+    case "$l" in
+      /*) p="$l" ;;
+      *) p="$d/$l" ;;
+    esac
+  done
+  cd "$(dirname "$p")" && pwd -P
+}
+
+DEVFLOW_HOME="${DEVFLOW_HOME:-$(cd "$(self_dir)/.." && pwd -P)}"
+export DEVFLOW_HOME
 exec bash "$DEVFLOW_HOME/scripts/devflow_new_manifest.sh" "$@"

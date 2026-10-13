@@ -16,10 +16,11 @@ kendisidir; iş yapılan proje ayrı bir "hedef proje" reposudur.
 ## ⏱️ 5 dakikada başla
 
 ```bash
-# 1. Framework repo'yu klonla ve bin/ klasörünü PATH'e ekle
+# 1. Framework repo'yu klonla ve komutları kur (~/.local/bin'e symlink;
+#    gerekirse ~/.zshrc'ye tek bir PATH bloğu ekler). Sonra yeni terminal aç.
 git clone https://github.com/caganyl/agentic-devflow-os.git ~/Developer/agentic-devflow-os
-export DEVFLOW_HOME=~/Developer/agentic-devflow-os
-export PATH="$DEVFLOW_HOME/bin:$PATH"          # ~/.zshrc veya ~/.bashrc'ye ekle
+~/Developer/agentic-devflow-os/bin/install
+claude-devflow doctor                           # git, python3, jq, claude ve PATH kontrolü
 
 # 2. Hedef projede oturum aç: bootstrap (plugin build, branch, CLAUDE.md,
 #    rule'lar, docs iskeleti, REQ-001 manifesti, .devflow/) + claude --plugin-dir
@@ -198,7 +199,7 @@ agentic-devflow-os/
 ├── PROJECT_CONSTITUTION.md     # anayasa: kaynak sıralaması, insan onay kapıları, branch/güvenlik politikası
 ├── CLAUDE.md                   # bu repoda çalışan Claude oturumları için talimatlar + kodlama ilkeleri
 ├── AGENTS.md                   # rol listesi + Codex Phase 1A runtime politikası
-├── bin/                        # claude-devflow, devflow-manifest (PATH'e eklenir)
+├── bin/                        # install, claude-devflow, devflow-manifest
 ├── .claude/
 │   ├── agents/                 # 17 rol tanımı (frontmatter: model, maxTurns, tools, skills)
 │   ├── skills/                 # 25 skill — ajanlara iş yapma yöntemini öğretir
@@ -363,7 +364,7 @@ Manifest şeması: [`docs/ownership/schema.json`](docs/ownership/schema.json), �
 ## 🚀 Kurulum ve Hızlı Başlangıç
 
 ```bash
-export DEVFLOW_HOME=~/Developer/agentic-devflow-os && export PATH="$DEVFLOW_HOME/bin:$PATH"
+~/Developer/agentic-devflow-os/bin/install      # bir kez; güncelleme için repo'da git pull yeter
 
 # Hedef proje klasöründe: bootstrap + claude --plugin-dir "$DEVFLOW_HOME/dist/devflow-plugin".
 # Düz `claude` plugin'i yüklemez.
@@ -381,7 +382,8 @@ claude-devflow launch --objective "..." --req-id REQ-NNN
 
 | Komut | Ne yapar |
 |---|---|
-| [`bin/claude-devflow`](bin/claude-devflow) | `scripts/devflow_bootstrap.sh` + `claude --plugin-dir`; `launch …` alt komutu `scripts/devflow_operations.py launch --target "$PWD"` çağırır |
+| [`bin/install`](bin/install) | Komutları `~/.local/bin`'e (`DEVFLOW_BIN_DIR`) symlink'ler; klasör PATH'te değilse shell dosyasına işaretli blok ekler; eski `claude-devflow` fonksiyon/alias tanımlarını raporlar. `--no-path`, `--uninstall` |
+| [`bin/claude-devflow`](bin/claude-devflow) | `scripts/devflow_bootstrap.sh` + `claude --plugin-dir`; `launch …` alt komutu `scripts/devflow_operations.py launch --target "$PWD"` çağırır; `doctor` ön koşulları kontrol eder. Symlink'ten çağrılsa da framework kökünü kendisi bulur |
 | [`bin/devflow-manifest`](bin/devflow-manifest) | `scripts/devflow_new_manifest.sh` ile `draft` ownership manifesti üretir |
 
 Bootstrap adımları (hepsi idempotent): framework repo içindeyse çıkar · plugin eskiyse yeniden

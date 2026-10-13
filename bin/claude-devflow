@@ -11,17 +11,92 @@
 #       Bulunulan proje için managed run başlatır
 #       (scripts/devflow_operations.py launch --target "$PWD" ...).
 #
-# DEVFLOW_HOME framework repo köküdür; verilmezse bu dosyanın bir üst klasörü.
+#   claude-devflow doctor     Ön koşulları ve kurulumu kontrol eder.
+#   claude-devflow --help     Bu yardımı gösterir.
+#
+# Kurulum: framework repo kökünde `./bin/install` (PATH'e symlink ekler).
+# DEVFLOW_HOME framework repo köküdür; verilmezse bu dosyanın gerçek konumunun
+# (symlink'ler çözülerek) bir üst klasörü.
 set -eu
 
-DEVFLOW_HOME="${DEVFLOW_HOME:-$(cd "$(dirname "$0")/.." && pwd -P)}"
+# PATH'teki symlink'ten çağrıldığında $0 symlink'i gösterir; framework
+# kökünü bulmak için gerçek dosyaya kadar izle (macOS'ta readlink -f yok).
+self_dir() {
+  p="$0"
+  while [ -L "$p" ]; do
+    d="$(cd "$(dirname "$p")" && pwd -P)"
+    l="$(readlink "$p")"
+    case "$l" in
+      /*) p="$l" ;;
+      *) p="$d/$l" ;;
+    esac
+  done
+  cd "$(dirname "$p")" && pwd -P
+}
+
+DEVFLOW_HOME="${DEVFLOW_HOME:-$(cd "$(self_dir)/.." && pwd -P)}"
 export DEVFLOW_HOME
 PLUGIN_DIR="$DEVFLOW_HOME/dist/devflow-plugin"
 
-if [ "${1:-}" = "launch" ]; then
-  shift
-  exec python3 "$DEVFLOW_HOME/scripts/devflow_operations.py" launch --target "$PWD" "$@"
-fi
+die() {
+  printf 'claude-devflow: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  sed -n '2,19p' "$DEVFLOW_HOME/bin/claude-devflow" | sed 's/^# \{0,1\}//'
+  printf '\nDEVFLOW_HOME: %s\n' "$DEVFLOW_HOME"
+}
+
+# Hook'lar jq ve python3 olmadan fail-closed reddeder; eksikse baştan söyle.
+missing_tools() {
+  for tool in "$@"; do
+    command -v "$tool" >/dev/null 2>&1 || printf '%s ' "$tool"
+  done
+}
+
+[ -f "$DEVFLOW_HOME/scripts/devflow_bootstrap.sh" ] ||
+  die "DEVFLOW_HOME bir DevFlow framework repo'su değil: $DEVFLOW_HOME"
+
+case "${1:-}" in
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+  doctor)
+    status=0
+    printf 'DEVFLOW_HOME: %s\n' "$DEVFLOW_HOME"
+    for tool in git python3 jq claude; do
+      if path="$(command -v "$tool" 2>/dev/null)"; then
+        printf '  [ok]     %-8s %s\n' "$tool" "$path"
+      else
+        printf '  [eksik]  %s\n' "$tool"
+        status=1
+      fi
+    done
+    if [ -f "$PLUGIN_DIR/.claude-plugin/plugin.json" ]; then
+      printf '  [ok]     plugin   %s\n' "$PLUGIN_DIR"
+    else
+      printf '  [yok]    plugin   ilk çalıştırmada build edilir\n'
+    fi
+    if command -v claude-devflow >/dev/null 2>&1; then
+      printf '  [ok]     PATH     %s\n' "$(command -v claude-devflow)"
+    else
+      printf '  [eksik]  PATH     claude-devflow PATH üzerinde değil (./bin/install)\n'
+      status=1
+    fi
+    exit "$status"
+    ;;
+  launch)
+    shift
+    missing="$(missing_tools git python3 jq claude)"
+    [ -z "$missing" ] || die "eksik araç: $missing(claude-devflow doctor)"
+    exec python3 "$DEVFLOW_HOME/scripts/devflow_operations.py" launch --target "$PWD" "$@"
+    ;;
+esac
+
+missing="$(missing_tools git python3 jq claude)"
+[ -z "$missing" ] || die "eksik araç: $missing(claude-devflow doctor)"
 
 bash "$DEVFLOW_HOME/scripts/devflow_bootstrap.sh" "$PWD"
 

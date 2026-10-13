@@ -49,6 +49,8 @@ jobs:
 
           # Every tracked shell script, not just one hook.
           git ls-files -z -- '*.sh' | xargs -0 -r -n 1 bash -n
+          # POSIX sh entry points in bin/ (no extension).
+          git ls-files -z -- 'bin/*' | xargs -0 -r -n 1 sh -n
 
           python3 -m py_compile scripts/*.py
 
