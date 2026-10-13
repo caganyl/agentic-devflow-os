@@ -1,0 +1,121 @@
+#!/bin/sh
+# install — claude-devflow ve devflow-manifest komutlarını PATH'e ekler.
+#
+#   ./bin/install              kur (tekrar çalıştırmak güvenlidir)
+#   ./bin/install --no-path    shell başlangıç dosyasına dokunma
+#   ./bin/install --uninstall  symlink'leri ve eklenen PATH bloğunu kaldır
+#
+# Komutlar $DEVFLOW_BIN_DIR (varsayılan ~/.local/bin) altına bu repo'daki
+# bin/ dosyalarına symlink olarak eklenir; repo'yu `git pull` ile
+# güncellemek yeterlidir. Klasör PATH'te değilse ~/.zshrc (bash için
+# ~/.bash_profile veya ~/.bashrc) dosyasına işaretli tek bir blok eklenir.
+set -eu
+
+REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
+BIN_DIR="${DEVFLOW_BIN_DIR:-$HOME/.local/bin}"
+COMMANDS="claude-devflow devflow-manifest"
+BEGIN_MARK="# >>> agentic-devflow-os >>>"
+END_MARK="# <<< agentic-devflow-os <<<"
+
+mode=install
+touch_rc=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-path) touch_rc=0 ;;
+    --uninstall) mode=uninstall ;;
+    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) printf 'install: bilinmeyen seçenek: %s\n' "$arg" >&2; exit 2 ;;
+  esac
+done
+
+rc_file() {
+  case "$(basename "${SHELL:-}")" in
+    bash)
+      if [ "$(uname -s)" = "Darwin" ]; then
+        printf '%s\n' "$HOME/.bash_profile"
+      else
+        printf '%s\n' "$HOME/.bashrc"
+      fi
+      ;;
+    *) printf '%s\n' "$HOME/.zshrc" ;;
+  esac
+}
+
+remove_block() {
+  file="$1"
+  [ -f "$file" ] || return 0
+  grep -qF "$BEGIN_MARK" "$file" || return 0
+  tmp="$file.devflow-tmp.$$"
+  awk -v b="$BEGIN_MARK" -v e="$END_MARK" '
+    $0 == b {skip = 1; next}
+    $0 == e {skip = 0; next}
+    !skip {print}
+  ' "$file" > "$tmp"
+  cat "$tmp" > "$file"
+  rm -f "$tmp"
+}
+
+on_path() {
+  case ":$PATH:" in
+    *":$1:"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+RC="$(rc_file)"
+
+if [ "$mode" = uninstall ]; then
+  for cmd in $COMMANDS; do
+    link="$BIN_DIR/$cmd"
+    if [ -L "$link" ] && [ "$(readlink "$link")" = "$REPO/bin/$cmd" ]; then
+      rm -f "$link"
+      printf 'kaldırıldı: %s\n' "$link"
+    fi
+  done
+  remove_block "$RC"
+  printf 'PATH bloğu temizlendi: %s\n' "$RC"
+  exit 0
+fi
+
+mkdir -p "$BIN_DIR"
+for cmd in $COMMANDS; do
+  chmod +x "$REPO/bin/$cmd"
+  link="$BIN_DIR/$cmd"
+  if [ -e "$link" ] && [ ! -L "$link" ]; then
+    printf 'install: %s zaten var ve symlink değil; dokunmadım.\n' "$link" >&2
+    exit 1
+  fi
+  ln -sf "$REPO/bin/$cmd" "$link"
+  printf 'bağlandı: %s -> %s\n' "$link" "$REPO/bin/$cmd"
+done
+
+if on_path "$BIN_DIR"; then
+  printf 'PATH: %s zaten PATH üzerinde.\n' "$BIN_DIR"
+elif [ "$touch_rc" -eq 1 ]; then
+  remove_block "$RC"
+  {
+    printf '%s\n' "$BEGIN_MARK"
+    printf 'export PATH="%s:$PATH"\n' "$BIN_DIR"
+    printf '%s\n' "$END_MARK"
+  } >> "$RC"
+  printf 'PATH: %s dosyasına eklendi. Yeni bir terminal açın veya: source %s\n' "$RC" "$RC"
+else
+  printf 'PATH: %s PATH üzerinde değil; kendiniz ekleyin.\n' "$BIN_DIR"
+fi
+
+# Eski kurulumlardan kalan bir shell fonksiyonu veya alias PATH'teki komutu
+# gölgeler; varsa kullanıcıya göster (dosyayı değiştirmeden).
+for f in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zprofile"; do
+  [ -f "$f" ] || continue
+  hits="$(awk -v b="$BEGIN_MARK" -v e="$END_MARK" '
+    $0 == b {skip = 1; next}
+    $0 == e {skip = 0; next}
+    !skip && /(claude-devflow|devflow-manifest)/ && /(\(\)|function |alias )/ {print FILENAME ":" NR ": " $0}
+  ' "$f")"
+  if [ -n "$hits" ]; then
+    printf '\nUyarı: eski bir tanım yeni komutu gölgeleyebilir; bu satırları silin:\n%s\n' "$hits"
+  fi
+done
+
+printf '\nKontrol: claude-devflow doctor\n'
+printf 'Kullanım: cd <proje-klasörü> && claude-devflow\n'

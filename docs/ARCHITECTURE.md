@@ -39,10 +39,12 @@ Operations CLI, target olarak framework repo verilirse exit 2 ile reddeder.
 ## 3. Kurulum (tek yöntem)
 
 ```bash
-export DEVFLOW_HOME=~/Developer/agentic-devflow-os   # framework repo
-export PATH="$DEVFLOW_HOME/bin:$PATH"
+~/Developer/agentic-devflow-os/bin/install   # komutları ~/.local/bin'e bağlar
 cd <hedef-proje> && claude-devflow
 ```
+
+Komutlar framework kökünü (`DEVFLOW_HOME`) kendi gerçek konumlarından bulur;
+`DEVFLOW_HOME` yalnızca farklı bir checkout kullanmak için verilir.
 
 `bin/claude-devflow` önce `scripts/devflow_bootstrap.sh`'i, sonra
 `claude --plugin-dir "$DEVFLOW_HOME/dist/devflow-plugin"` çalıştırır. Düz
