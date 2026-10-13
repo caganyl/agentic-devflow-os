@@ -1,5 +1,20 @@
 #!/usr/bin/env bash
+# devflow-hook-hardening: v1
 set -euo pipefail
+
+# Fail closed. Claude Code blocks a tool call only on exit 2 or a deny JSON;
+# any other non-zero exit (a jq parse error, a Python exception inside a gate
+# under `set -e`) would let the call through. Convert every unexpected exit
+# status into exit 2. Intentional allow (exit 0, no output) and intentional
+# deny (deny JSON, exit 0) are unaffected.
+devflow_fail_closed() {
+  local status=$?
+  if [ "$status" -ne 0 ] && [ "$status" -ne 2 ]; then
+    printf '%s\n' "DevFlow hook internal error (enforce-role-boundaries.sh, status $status); denying for safety." >&2
+    exit 2
+  fi
+}
+trap devflow_fail_closed EXIT
 
 INPUT="$(cat)"
 if ! command -v jq >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
@@ -13,6 +28,32 @@ if ! command -v jq >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
   exit 0
 fi
 
+if ! printf '%s' "$INPUT" | jq -e 'type == "object"' >/dev/null 2>&1; then
+  printf '%s\n' "Role-boundary protection: hook input is not a JSON object; denying for safety." >&2
+  exit 2
+fi
+
+deny() {
+  local reason="$1"
+
+  jq -n --arg reason "$reason" '{
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: $reason
+    }
+  }'
+}
+
+# Numeric budgets come from the environment; a malformed value must not crash
+# a gate into a non-blocking exit or silently disable it.
+for budget_var in DEVFLOW_ADR_MAX_REVIEW_ROUNDS DEVFLOW_ADR_MAX_CHARS DEVFLOW_ADR_MAX_NEW_PER_BRANCH DEVFLOW_DOC_MAX_CHARS; do
+  eval "budget_value=\${$budget_var:-}"
+  if [ -n "$budget_value" ] && ! [[ "$budget_value" =~ ^[0-9]+$ ]]; then
+    deny "Role-boundary protection: $budget_var must be a non-negative integer. Fix the environment; the operation is blocked until then."
+    exit 0
+  fi
+done
 
 TOOL_NAME="$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')"
 AGENT_TYPE="$(printf '%s' "$INPUT" | jq -r '.agent_type // empty')"
@@ -31,20 +72,18 @@ fi
 
 ROOT="$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null || true)"
 
-if [ -z "$ROOT" ] || [ -z "$AGENT_TYPE" ]; then
+if [ -z "$ROOT" ]; then
   exit 0
 fi
 
-deny() {
-  local reason="$1"
-
-  jq -n --arg reason "$reason" '{
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: $reason
-    }
-  }'
+# Scripts shipped with the plugin take precedence over the target's scripts/.
+devflow_script() {
+  local name="$1"
+  if [ -n "${DEVFLOW_PLUGIN_ROOT:-}" ] && [ -f "$DEVFLOW_PLUGIN_ROOT/scripts/$name" ]; then
+    printf '%s' "$DEVFLOW_PLUGIN_ROOT/scripts/$name"
+  else
+    printf '%s' "$ROOT/scripts/$name"
+  fi
 }
 
 is_governed_agent() {
@@ -120,6 +159,53 @@ except ValueError:
 PYTHON
 }
 
+# Print the REQ id bound to the current managed run, or nothing. The binding
+# is trusted only when the run state carries a valid HMAC signature from
+# devflow_operations.py (read_run_state) and names this branch; a hand-written
+# or copied .devflow/runs/*.json is treated as unbound.
+managed_run_req() {
+  local branch="$1"
+  python3 - "$ROOT" "$branch" "$(devflow_script devflow_operations.py)" 2>/dev/null <<'PYREQ' || true
+import importlib.util, json, re, sys
+from pathlib import Path
+
+root, branch, ops_path = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
+
+
+def done(value=""):
+    print(value)
+    raise SystemExit(0)
+
+
+try:
+    project = json.loads((root / ".devflow" / "project.json").read_text(encoding="utf-8"))
+    run_id = project.get("current_run_id") if isinstance(project, dict) else None
+except (OSError, ValueError):
+    done()
+if not isinstance(run_id, str) or not re.fullmatch(r"RUN-\d{3,}", run_id):
+    done()
+run_path = root / ".devflow" / "runs" / f"{run_id}.json"
+if not ops_path.is_file() or not run_path.is_file():
+    done()
+spec = importlib.util.spec_from_file_location("devflow_operations_hook", ops_path)
+ops = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ops)
+# Never create a signing key from a hook: no key means nothing was signed.
+if not ops.state_key_path(root).is_file():
+    done()
+try:
+    state = ops.read_run_state(root, run_path)
+except SystemExit:
+    done()
+if not isinstance(state, dict):
+    done()
+if state.get("branch_name") and state.get("branch_name") != branch:
+    done()
+req_id = state.get("req_id")
+done(req_id if isinstance(req_id, str) else "")
+PYREQ
+}
+
 authorize_implementer_write() {
   local file_path="$1"
   local branch req_digits manifest_path target_path authorization_error
@@ -132,24 +218,10 @@ authorize_implementer_write() {
   elif [[ "$branch" == devflow/run-* ]] && [ -n "${DEVFLOW_RUN_BRANCH:-}" ] && [ "$branch" = "$DEVFLOW_RUN_BRANCH" ]; then
     # Managed run (launch): the branch is devflow/run-*, so the REQ binding
     # comes from the signed run state written by create-run/launch --req-id.
-    # Agents cannot write .devflow/runs/ (target guard), so this binding is
-    # not agent-controlled.
     local run_req
-    run_req="$(python3 - "$ROOT" <<'PYREQ'
-import json, sys
-from pathlib import Path
-root = Path(sys.argv[1])
-try:
-    project = json.loads((root / ".devflow" / "project.json").read_text(encoding="utf-8"))
-    run_id = project.get("current_run_id") or ""
-    run = json.loads((root / ".devflow" / "runs" / f"{run_id}.json").read_text(encoding="utf-8"))
-    print(run.get("req_id") or "")
-except (OSError, ValueError):
-    print("")
-PYREQ
-)"
+    run_req="$(managed_run_req "$branch")"
     if [[ ! "$run_req" =~ ^REQ-([0-9]{3,})$ ]]; then
-      deny "Ownership-manifest protection: this managed run ($branch) is not bound to a REQ, so implementer agents cannot write. Restart the run with 'launch --req-id REQ-NNN' after a human approves docs/ownership/REQ-NNN.json. Report this as a blocker to the human; do not loop back to revising ADRs, requirements or contracts."
+      deny "Ownership-manifest protection: this managed run ($branch) is not bound to a REQ (or its run state failed signature verification), so implementer agents cannot write. Restart the run with 'launch --req-id REQ-NNN' after a human approves docs/ownership/REQ-NNN.json. Report this as a blocker to the human; do not loop back to revising ADRs, requirements or contracts."
       return 1
     fi
     req_digits="${BASH_REMATCH[1]}"
@@ -171,10 +243,8 @@ PYREQ
     return 1
   fi
 
-  local ownership_validator="$ROOT/scripts/validate_ownership_manifest.py"
-  if [ -n "${DEVFLOW_PLUGIN_ROOT:-}" ] && [ -f "$DEVFLOW_PLUGIN_ROOT/scripts/validate_ownership_manifest.py" ]; then
-    ownership_validator="$DEVFLOW_PLUGIN_ROOT/scripts/validate_ownership_manifest.py"
-  fi
+  local ownership_validator
+  ownership_validator="$(devflow_script validate_ownership_manifest.py)"
 
   if ! authorization_error="$(
     python3 "$ownership_validator" \
@@ -192,6 +262,262 @@ PYREQ
   fi
 
   return 0
+}
+
+# ---------------------------------------------------------------------------
+# Bash policy (tokenized)
+#
+# BEST EFFORT ONLY. Filtering shell text cannot be complete: quoting, globbing,
+# variables and interpreters offer endless spellings of the same operation.
+# The real boundary is permissions.deny in .claude/settings.json plus the
+# isolated run worktree; these checks catch the common and accidental cases.
+#
+# Prints OK when the command passes; anything else (including a crash) is
+# treated as blocked by the callers.
+#   mode "governed": mutations for governed agents (git by path / with global
+#                    options, shells with -c, eval, sed -i, dd of=, ln,
+#                    install, find -delete/-exec <mutation>, \cmd aliases,
+#                    redirects outside quotes)
+#   mode "readonly": governed checks plus write/exec side doors of the
+#                    read-only allowlist (npm audit fix, git --output,
+#                    rg --pre, semgrep --autofix, sed w, ...)
+# ---------------------------------------------------------------------------
+bash_policy_verdict() {
+  python3 - "$1" "$2" <<'PYBASH'
+import re, shlex, sys
+from pathlib import Path
+
+mode, command = sys.argv[1], sys.argv[2]
+
+PUNCT = ";&|\n()`"
+ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+NESTED = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
+SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "mksh", "ash"}
+WRAPPERS = {"command", "builtin", "exec", "nohup", "time", "env", "nice", "timeout",
+            "xargs", "stdbuf", "ionice", "!", "{", "if", "then", "else", "elif", "do",
+            "while", "until"}
+WRAPPER_VALUE_OPTIONS = {
+    "env": {"-u", "--unset", "-C", "--chdir"},
+    "nice": {"-n", "--adjustment"},
+    "timeout": {"-s", "--signal", "-k", "--kill-after"},
+    "xargs": {"-I", "-n", "-P", "-d", "-L", "-s", "-E", "-a", "--max-args",
+              "--max-procs", "--delimiter", "--max-lines", "--max-chars", "--eof",
+              "--arg-file"},
+    "stdbuf": {"-i", "-o", "-e"},
+    "ionice": {"-c", "-n", "-p"},
+}
+GIT_VALUE_OPTIONS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
+                     "--super-prefix", "--config-env"}
+GIT_MUTATING = {"add", "commit", "push", "merge", "rebase", "reset", "clean", "revert",
+                "switch", "checkout", "branch", "worktree", "tag"}
+MUTATING = {"rm", "rmdir", "unlink", "shred", "mv", "cp", "mkdir", "touch", "tee",
+            "truncate", "chmod", "chown", "chgrp", "ln", "install"}
+FIND_WRITES = {"-delete", "-fprint", "-fprint0", "-fprintf", "-fls"}
+SED_WRITE = re.compile(r"(?:^|[;{}\n/0-9$!,])[ \t]*(?:[wW][ \t]+\S|e(?:[ \t]|$))")
+PKG = {"npm", "pnpm", "bun", "yarn"}
+
+
+class Block(Exception):
+    pass
+
+
+def tokens(text):
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=PUNCT)
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    return list(lexer)
+
+
+def segments(toks):
+    seg = []
+    for tok in toks:
+        if tok and all(c in PUNCT for c in tok):
+            if seg:
+                yield seg
+            seg = []
+        else:
+            seg.append(tok)
+    if seg:
+        yield seg
+
+
+def skip_wrapper(name, rest):
+    values = WRAPPER_VALUE_OPTIONS.get(name, set())
+    i = 0
+    while i < len(rest):
+        t = rest[i]
+        if name == "env" and ASSIGN.match(t):
+            i += 1
+            continue
+        if t == "--":
+            i += 1
+            break
+        if t.startswith("-") and t != "-":
+            i += 2 if t in values else 1
+            continue
+        break
+    rest = rest[i:]
+    if name == "timeout" and rest:
+        rest = rest[1:]
+    return rest
+
+
+def unwrap(seg):
+    while seg:
+        name = Path(seg[0]).name or seg[0]
+        if ASSIGN.match(seg[0]):
+            seg = seg[1:]
+        elif name in ("sudo", "doas"):
+            raise Block()
+        elif name in WRAPPERS or seg[0] in WRAPPERS:
+            seg = skip_wrapper(name, seg[1:])
+        else:
+            break
+    return seg
+
+
+def git_sub(args):
+    i = 0
+    while i < len(args):
+        t = args[i]
+        if t in GIT_VALUE_OPTIONS:
+            i += 2
+            continue
+        if t.startswith("-"):
+            i += 1
+            continue
+        return t, args[i + 1:]
+    return None, []
+
+
+def short_has(args, letters):
+    return any(a.startswith("-") and not a.startswith("--") and any(c in a[1:] for c in letters)
+               for a in args)
+
+
+def shell_has_c(args):
+    for a in args:
+        if a.startswith("-") and not a.startswith("--") and "c" in a[1:]:
+            return True
+        if not a.startswith(("-", "+")):
+            return False
+    return False
+
+
+def sed_writes(args):
+    scripts, i, explicit = [], 0, False
+    while i < len(args):
+        a = args[i]
+        if a == "--in-place" or a.startswith("--in-place="):
+            return True
+        if a in ("-e", "--expression"):
+            if i + 1 < len(args):
+                scripts.append(args[i + 1])
+            explicit = True
+            i += 2
+            continue
+        if a.startswith("--expression="):
+            scripts.append(a.partition("=")[2])
+            explicit = True
+        elif a in ("-f", "--file"):
+            return True  # script file: cannot inspect
+        elif a.startswith("-") and not a.startswith("--") and len(a) > 1:
+            if "i" in a[1:]:
+                return True
+        elif not a.startswith("-") and not explicit and not scripts:
+            scripts.append(a)
+        i += 1
+    return any(SED_WRITE.search(s) for s in scripts)
+
+
+def check_segment(seg, depth):
+    seg = unwrap(seg)
+    if not seg:
+        return
+    head = seg[0]
+    name = Path(head).name
+    args = seg[1:]
+    if name == "git":
+        sub, rest = git_sub(args)
+        if sub in GIT_MUTATING:
+            raise Block()
+        if mode == "readonly":
+            if any(a.startswith(("--output", "--open-files-in-pager", "--ext-diff")) for a in rest):
+                raise Block()
+            if sub == "grep" and any(a == "-O" or a.startswith("-O") for a in rest):
+                raise Block()
+        return
+    if name in MUTATING:
+        raise Block()
+    if name in SHELLS and shell_has_c(args):
+        raise Block()
+    if name == "eval":
+        raise Block()
+    if name == "sed" and sed_writes(args):
+        raise Block()
+    if name == "perl" and short_has(args, "i"):
+        raise Block()
+    if name == "dd" and any(a.startswith("of=") for a in args):
+        raise Block()
+    if name == "find":
+        if any(a in FIND_WRITES for a in args):
+            raise Block()
+        for i, a in enumerate(args):
+            if a in ("-exec", "-execdir", "-ok", "-okdir"):
+                inner = []
+                for b in args[i + 1:]:
+                    if b in (";", "+"):
+                        break
+                    inner.append(b)
+                check_segment(inner, depth + 1)
+        return
+    if mode == "readonly":
+        if name in PKG and "audit" in args and ("fix" in args or "--fix" in args):
+            raise Block()
+        if name in ("rg", "grep") and any(a == "--pre" or a.startswith("--pre=") for a in args):
+            raise Block()
+        if name in ("semgrep", "bandit", "trivy", "pip-audit") and any(
+                a in ("--autofix", "--fix", "-o") or a.startswith(("--output", "--autofix", "--fix"))
+                for a in args):
+            raise Block()
+
+
+def strip_quoted(text):
+    text = re.sub(r"'[^']*'", "''", text)
+    return re.sub(r'"(?:[^"\\]|\\.)*"', '""', text)
+
+
+def check(text, depth=0):
+    if depth > 4:
+        raise Block()
+    # Leading-backslash alias bypass (\rm, \git ...).
+    if re.search(r"(?:^|[\s;&|(`])\\[A-Za-z]", text):
+        raise Block()
+    for a, b in NESTED.findall(text):
+        check(a or b, depth + 1)
+    # Redirects write files; stream merges and /dev/null discards do not.
+    # Quoted text (git log --format='%h -> %s') is not a redirect.
+    probe = strip_quoted(text)
+    probe = re.sub(r"[0-9]?>&[0-9]-?", "", probe)
+    probe = re.sub(r"[0-9]?>[ \t]*/dev/null", "", probe)
+    if ">" in probe or "<" in probe:
+        raise Block()
+    try:
+        toks = tokens(text)
+    except ValueError:
+        raise Block()
+    for seg in segments(toks):
+        check_segment(seg, depth)
+
+
+try:
+    check(command)
+except Block:
+    print("BLOCK")
+else:
+    print("OK")
+PYBASH
 }
 
 bash_has_blocked_operation() {
@@ -250,12 +576,12 @@ bash_has_blocked_operation() {
     return 0
   fi
 
-  # Stream merges and discards (2>&1, >&2, 2>/dev/null, >/dev/null) do not
-  # write files. Strip them before the redirect check so ordinary test
-  # commands such as `dotnet test 2>&1 | tail -50` are not denied and retried.
-  local redirect_probe
-  redirect_probe="$(printf '%s' "$command" | sed -E 's/[0-9]?>&[0-9]//g; s/[0-9]?>[[:space:]]*\/dev\/null//g')"
-  if [[ "$redirect_probe" == *">"* || "$redirect_probe" == *"<"* ]]; then
+  # Tokenized checks: git by path or with global options, shell -c, eval,
+  # in-place edits, link/install/dd writes, find -delete, \cmd aliases and
+  # redirects outside quotes.
+  local verdict
+  verdict="$(bash_policy_verdict governed "$command" || true)"
+  if [ "$verdict" != "OK" ]; then
     return 0
   fi
 
@@ -288,22 +614,32 @@ security_command_is_non_mutating() {
     rg\ *|grep\ *|find\ *|ls*|sed\ -n*|head*|tail*|cat\ *|jq\ *|\
     npm\ audit*|pnpm\ audit*|bun\ audit*|pip-audit*|trivy\ fs*|\
     semgrep*|bandit*)
-      return 0
       ;;
     *)
       return 1
       ;;
   esac
+
+  local verdict
+  verdict="$(bash_policy_verdict readonly "$command" || true)"
+  [ "$verdict" = "OK" ]
 }
 
 
 # ---------------------------------------------------------------------------
 # ADR loop breaker (design phase convergence)
 #
-# Deterministic limits so the design phase cannot loop forever:
-#   - An ADR whose Status is Accepted/Superseded/Rejected is frozen.
+# Deterministic limits so the design phase cannot loop forever. Applies to
+# every agent and to the main session (empty agent_type):
+#   - ADR files live only in docs/architecture/adr/ (reviews in reviews/);
+#     ADR-named files in other adr/ subfolders or docs/decisions/ are denied.
+#   - An ADR whose Status is Accepted/Superseded/Rejected/Withdrawn/Deprecated
+#     is frozen. The only allowed edit is retiring it: changing the status
+#     value to Superseded/Withdrawn/Deprecated (optionally "by ADR-NNN").
 #   - After DEVFLOW_ADR_MAX_REVIEW_ROUNDS (default 2) review files exist for an
-#     ADR, solution-architect may no longer revise it; a human decides.
+#     ADR, it may no longer be revised; a human decides.
+#   - A branch may add at most DEVFLOW_ADR_MAX_NEW_PER_BRANCH (default 1) new
+#     ADR files, so a capped decision is not reopened under a new number.
 #   - An ADR may not grow beyond DEVFLOW_ADR_MAX_CHARS (default 12000 chars).
 #   - Only adr-reviewer writes docs/architecture/adr/reviews/, one immutable
 #     file per round: ADR-NNN-review-<round>.md, containing a VERDICT line.
@@ -311,18 +647,20 @@ security_command_is_non_mutating() {
 # ---------------------------------------------------------------------------
 adr_gate_reason() {
   HOOK_INPUT="$INPUT" python3 - "$ROOT" "$AGENT_TYPE" <<'PYADR'
-import json, os, re, sys
+import json, os, re, subprocess, sys
 from pathlib import Path
 
 root = Path(sys.argv[1]).resolve()
 agent = sys.argv[2]
-max_rounds = int(os.environ.get("DEVFLOW_ADR_MAX_REVIEW_ROUNDS", "2"))
-max_chars = int(os.environ.get("DEVFLOW_ADR_MAX_CHARS", "12000"))
+who = agent or "the main session"
+max_rounds = int(os.environ.get("DEVFLOW_ADR_MAX_REVIEW_ROUNDS") or "2")
+max_chars = int(os.environ.get("DEVFLOW_ADR_MAX_CHARS") or "12000")
+max_new = int(os.environ.get("DEVFLOW_ADR_MAX_NEW_PER_BRANCH") or "1")
 
 data = json.loads(os.environ.get("HOOK_INPUT", "{}"))
 tool = data.get("tool_name", "")
 ti = data.get("tool_input") or {}
-raw = Path(ti.get("file_path", "")).expanduser()
+raw = Path(ti.get("file_path") or ti.get("notebook_path") or "").expanduser()
 target = (raw if raw.is_absolute() else root / raw).resolve()
 try:
     rel = target.relative_to(root).as_posix()
@@ -331,8 +669,43 @@ except ValueError:
 
 adr_dir = "docs/architecture/adr/"
 review_dir = adr_dir + "reviews/"
+ADR_NAMED = re.compile(r"adr-?\d+", re.I)
+ADR_DOC = re.compile(r"(ADR-\d{3,})[^/]*\.md")
+FROZEN = {"accepted", "superseded", "rejected", "withdrawn", "deprecated"}
+RETIRED = {"superseded", "withdrawn", "deprecated"}
+STATUS_PATTERNS = (
+    # ## Status\n\nAccepted   (value on the next non-blank line)
+    re.compile(r"^#{1,6}[ \t]*status[ \t]*:?[ \t]*\n(?:[ \t]*\n)*[ \t]*(?:[-*+][ \t]+)?"
+               r"(?:\*\*|__)?[ \t]*([A-Za-z]+)", re.I | re.M),
+    # - **Status:** Accepted | **Status**: Accepted | Status: Accepted | ## Status: Accepted
+    re.compile(r"^[ \t]*(?:#{1,6}[ \t]*)?(?:[-*+][ \t]+)?(?:\*\*|__)?[ \t]*status[ \t]*"
+               r"(?:\*\*|__)?[ \t]*:[ \t]*(?:\*\*|__)?[ \t]*([A-Za-z]+)", re.I | re.M),
+)
+SUPERSEDED_BY = re.compile(
+    r"^\s*[(\[,;:—–-]*\s*(?:superseded\s+)?by\s+\[?ADR-?\d+[^\s)\]]*\]?"
+    r"(?:\([^)\s]*\))?\)?", re.I)
+VERDICT = re.compile(
+    r"^[ \t]*(?:\*\*)?VERDICT(?:\*\*)?[ \t]*:[ \t]*(?:\*\*)?[ \t]*"
+    r"(APPROVE_WITH_NOTES|APPROVE|BLOCK)[ \t]*(?:\*\*)?[ \t]*$", re.M)
+
+
+def deny(message):
+    print(message)
+    sys.exit(0)
+
+
+# --- ADR location ------------------------------------------------------------
+if ADR_NAMED.search(target.name):
+    under_adr = rel.startswith(adr_dir)
+    nested = under_adr and "/" in rel[len(review_dir if rel.startswith(review_dir) else adr_dir):]
+    if rel.startswith("docs/decisions/") or nested:
+        deny(f"ADR loop breaker: ADR documents live only directly in {adr_dir} (reviews "
+             f"directly in {review_dir}); {rel} is not an ADR location. Do not open a "
+             "parallel ADR elsewhere; stop and report to the human.")
+
 if not rel.startswith(adr_dir):
     sys.exit(0)
+
 
 def reviews_for(adr_id):
     d = root / review_dir
@@ -340,59 +713,136 @@ def reviews_for(adr_id):
         return []
     return sorted(d.glob(f"{adr_id}-review-*.md"))
 
-# --- review files -----------------------------------------------------------
+
+# --- review files ------------------------------------------------------------
 if rel.startswith(review_dir):
     if agent != "adr-reviewer":
-        print(f"ADR loop breaker: only adr-reviewer may write {review_dir}. "
-              f"{agent} cannot review or rewrite reviews.")
-        sys.exit(0)
-    m = re.fullmatch(r"(ADR-\d{3,})-review-(\d+)\.md", Path(rel).name)
+        deny(f"ADR loop breaker: only adr-reviewer may write {review_dir}. "
+             f"{who} cannot review or rewrite reviews.")
+    m = re.fullmatch(r"(ADR-\d{3,})-review-(\d+)\.md", target.name)
     if not m:
-        print("ADR loop breaker: review file name must be ADR-NNN-review-<round>.md.")
-        sys.exit(0)
+        deny("ADR loop breaker: review file name must be ADR-NNN-review-<round>.md.")
     adr_id, rnd = m.group(1), int(m.group(2))
     if target.exists():
-        print(f"ADR loop breaker: {rel} already exists; review rounds are immutable.")
-        sys.exit(0)
+        deny(f"ADR loop breaker: {rel} already exists; review rounds are immutable.")
     if rnd > max_rounds:
-        print(f"ADR loop breaker: {adr_id} already had {max_rounds} review rounds. "
-              "Stop and hand the decision to the human; do not start another round.")
-        sys.exit(0)
+        deny(f"ADR loop breaker: {adr_id} already had {max_rounds} review rounds. "
+             "Stop and hand the decision to the human; do not start another round.")
     if rnd != len(reviews_for(adr_id)) + 1:
-        print(f"ADR loop breaker: next review round for {adr_id} must be "
-              f"{len(reviews_for(adr_id)) + 1}, got {rnd}.")
-        sys.exit(0)
-    if tool == "Write":
-        content = ti.get("content", "")
-        if not re.search(r"^VERDICT:\s*(APPROVE|APPROVE_WITH_NOTES|BLOCK)\s*$", content, re.M):
-            print("ADR loop breaker: review must contain a line "
-                  "'VERDICT: APPROVE | APPROVE_WITH_NOTES | BLOCK'.")
-            sys.exit(0)
+        deny(f"ADR loop breaker: next review round for {adr_id} must be "
+             f"{len(reviews_for(adr_id)) + 1}, got {rnd}.")
+    if tool == "Write" and not VERDICT.search(ti.get("content", "")):
+        deny("ADR loop breaker: review must contain a line "
+             "'VERDICT: APPROVE | APPROVE_WITH_NOTES | BLOCK'.")
     sys.exit(0)
 
-# --- ADR documents ----------------------------------------------------------
-m = re.fullmatch(r"(ADR-\d{3,})[^/]*\.md", Path(rel).name)
-if not m or "/" in rel[len(adr_dir):]:
+# --- ADR documents -----------------------------------------------------------
+m = ADR_DOC.fullmatch(target.name)
+if not m:
+    if ADR_NAMED.search(target.name):
+        deny(f"ADR loop breaker: ADR file name must be ADR-NNN-<slug>.md; got {target.name}.")
     sys.exit(0)
 adr_id = m.group(1)
 
-if agent != "solution-architect":
-    sys.exit(0)
+
+def status_match(text):
+    found = [mt for mt in (p.search(text) for p in STATUS_PATTERNS) if mt]
+    return min(found, key=lambda mt: mt.start(1)) if found else None
+
+
+def is_retire_edit(existing):
+    """Only the status value changes, to Superseded/Withdrawn/Deprecated."""
+    if tool != "Edit":
+        return False
+    old_s, new_s = ti.get("old_string", ""), ti.get("new_string", "")
+    if not old_s or old_s not in existing:
+        return False
+    new_text = existing.replace(old_s, new_s) if ti.get("replace_all") else existing.replace(old_s, new_s, 1)
+    mt = status_match(existing)
+    if mt is None:
+        return False
+    a, b = existing.split("\n"), new_text.split("\n")
+    if len(a) != len(b):
+        return False
+    changed = [i for i, (x, y) in enumerate(zip(a, b)) if x != y]
+    line = existing.count("\n", 0, mt.start(1))
+    if changed != [line]:
+        return False
+    col_start = mt.start(1) - (existing.rfind("\n", 0, mt.start(1)) + 1)
+    col_end = col_start + len(mt.group(1))
+    old_line, new_line = a[line], b[line]
+    if new_line[:col_start] != old_line[:col_start]:
+        return False
+    word = re.match(r"[A-Za-z]+", new_line[col_start:])
+    if not word or word.group(0).lower() not in RETIRED:
+        return False
+    old_rest = old_line[col_end:]
+    new_rest = new_line[col_start + len(word.group(0)):]
+    return new_rest == old_rest or SUPERSEDED_BY.sub("", new_rest, count=1) == old_rest
+
+
+def git(*args):
+    try:
+        return subprocess.run(["git", "-C", str(root), "-c", "core.quotepath=off", *args],
+                              capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def adrs_added_on_branch():
+    """ADR files this branch added vs. the default branch, or None to skip."""
+    branch_result = git("branch", "--show-current")
+    branch = branch_result.stdout.strip() if branch_result and branch_result.returncode == 0 else ""
+    base_ref = None
+    for ref in ("origin/HEAD", "origin/main", "main", "master"):
+        r = git("rev-parse", "--verify", "--quiet", ref + "^{commit}")
+        if r is not None and r.returncode == 0 and r.stdout.strip():
+            base_ref = ref
+            break
+    if base_ref is None:
+        return None
+    default_name = base_ref.split("/")[-1]
+    if base_ref == "origin/HEAD":
+        r = git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+        if r is not None and r.returncode == 0:
+            default_name = r.stdout.strip().split("/", 1)[-1]
+    if branch and branch == default_name:
+        return None
+    mb = git("merge-base", "HEAD", base_ref)
+    if mb is None or mb.returncode != 0 or not mb.stdout.strip():
+        return None
+    names = set()
+    added = git("diff", "--name-only", "--no-renames", "--diff-filter=A", mb.stdout.strip(), "--", adr_dir)
+    untracked = git("ls-files", "--others", "--exclude-standard", "--", adr_dir)
+    for r in (added, untracked):
+        if r is not None and r.returncode == 0:
+            names.update(line for line in r.stdout.splitlines() if line)
+    return sum(1 for n in names
+               if not n.startswith(review_dir) and re.fullmatch(r"ADR-?\d+[^/]*\.md", Path(n).name, re.I))
+
 
 existing = target.read_text(encoding="utf-8", errors="replace") if target.exists() else ""
-status = re.search(r"^##\s*Status\s*\n+\s*([A-Za-z]+)", existing, re.M)
-if status and status.group(1) in ("Accepted", "Superseded", "Rejected"):
-    print(f"ADR loop breaker: {adr_id} is {status.group(1)} and frozen. Record "
-          "implementation-time deviations in the handoff/PR or propose a new ADR "
-          "that supersedes it; do not edit this one.")
-    sys.exit(0)
+status = status_match(existing)
+if status and status.group(1).lower() in FROZEN:
+    if is_retire_edit(existing):
+        sys.exit(0)
+    deny(f"ADR loop breaker: {adr_id} is {status.group(1)} and frozen. Record "
+         "implementation-time deviations in the handoff/PR or propose a new ADR "
+         "that supersedes it; do not edit this one. (Retiring it by changing only "
+         "the status to Superseded/Withdrawn/Deprecated is allowed.)")
 
 done = len(reviews_for(adr_id))
 if done >= max_rounds:
-    print(f"ADR loop breaker: {adr_id} already had {done} review rounds "
-          f"(limit {max_rounds}). Further revision needs a human decision; "
-          "report the open BLOCKERs and stop.")
-    sys.exit(0)
+    deny(f"ADR loop breaker: {adr_id} already had {done} review rounds "
+         f"(limit {max_rounds}). Further revision needs a human decision; "
+         "report the open BLOCKERs and stop.")
+
+if not target.exists():
+    added = adrs_added_on_branch()
+    if added is not None and added >= max_new:
+        deny(f"ADR loop breaker: this branch already added {added} ADR file(s) "
+             f"(limit {max_new}, DEVFLOW_ADR_MAX_NEW_PER_BRANCH). Stop and report to the "
+             "human; do not open a new ADR for the same decision.")
 
 if tool == "Write":
     new_len = len(ti.get("content", ""))
@@ -405,11 +855,53 @@ elif tool == "Edit":
 else:
     new_len = len(existing)
 if new_len > max_chars and new_len > len(existing):
-    print(f"ADR loop breaker: {adr_id} would be {new_len} chars (budget {max_chars}). "
-          "Keep the ADR to the decision; move details to the contract, the "
-          "implementation or a follow-up ADR. Shrinking edits are allowed.")
-    sys.exit(0)
+    deny(f"ADR loop breaker: {adr_id} would be {new_len} chars (budget {max_chars}). "
+         "Keep the ADR to the decision; move details to the contract, the "
+         "implementation or a follow-up ADR. Shrinking edits are allowed.")
 PYADR
+}
+
+# ---------------------------------------------------------------------------
+# Document size budget (handoffs and requirements)
+#
+# Mirrors the ADR budget: a Write/Edit that makes docs/handoffs/*.md or
+# docs/product/requirements/*.md exceed DEVFLOW_DOC_MAX_CHARS (default 8000)
+# characters is denied when it grows the file. Shrinking edits are allowed.
+# ---------------------------------------------------------------------------
+doc_budget_reason() {
+  HOOK_INPUT="$INPUT" python3 - "$ROOT" <<'PYDOC'
+import json, os, sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+max_chars = int(os.environ.get("DEVFLOW_DOC_MAX_CHARS") or "8000")
+data = json.loads(os.environ.get("HOOK_INPUT", "{}"))
+tool = data.get("tool_name", "")
+ti = data.get("tool_input") or {}
+raw = Path(ti.get("file_path") or ti.get("notebook_path") or "").expanduser()
+target = (raw if raw.is_absolute() else root / raw).resolve()
+try:
+    rel = target.relative_to(root).as_posix()
+except ValueError:
+    sys.exit(0)
+if not rel.endswith(".md") or not rel.startswith(("docs/handoffs/", "docs/product/requirements/")):
+    sys.exit(0)
+
+existing = target.read_text(encoding="utf-8", errors="replace") if target.exists() else ""
+if tool == "Write":
+    new_len = len(ti.get("content", ""))
+elif tool == "Edit":
+    old_s, new_s = ti.get("old_string", ""), ti.get("new_string", "")
+    new_len = (len(existing.replace(old_s, new_s)) if ti.get("replace_all")
+               else len(existing) - len(old_s) + len(new_s))
+else:
+    new_len = len(existing)
+if new_len > max_chars and new_len > len(existing):
+    print(f"Document budget: {rel} would be {new_len} chars (budget {max_chars}). Keep "
+          "handoffs to the latest state and next steps, and requirements to the "
+          "behaviour and acceptance criteria; move detail elsewhere. Shrinking edits "
+          "are allowed.")
+PYDOC
 }
 
 
@@ -429,7 +921,7 @@ root = Path(sys.argv[1]).resolve()
 agent = sys.argv[2]
 data = json.loads(os.environ.get("HOOK_INPUT", "{}"))
 ti = data.get("tool_input") or {}
-raw = Path(ti.get("file_path", "")).expanduser()
+raw = Path(ti.get("file_path") or ti.get("notebook_path") or "").expanduser()
 target = (raw if raw.is_absolute() else root / raw).resolve()
 try:
     rel = target.relative_to(root).as_posix()
@@ -467,10 +959,11 @@ PYPROF
 # ---------------------------------------------------------------------------
 # docs-writer gate
 #
-# README.md files may be written anywhere outside generated/protected trees.
-# Source files may only be edited (never rewritten) and the edit must change
-# comments only: with comments and whitespace removed, old and new text must be
-# identical. Everything else is denied.
+# README.md files may be written anywhere outside generated/protected trees,
+# and handoffs under docs/handoffs/ may be written in full (subject to the
+# document budget). Source files may only be edited (never rewritten) and the
+# edit must change comments only: with comments and whitespace removed, old and
+# new text must be identical. Everything else is denied.
 # ---------------------------------------------------------------------------
 docs_writer_reason() {
   HOOK_INPUT="$INPUT" python3 - "$ROOT" <<'PYDOCS'
@@ -481,7 +974,7 @@ root = Path(sys.argv[1]).resolve()
 data = json.loads(os.environ.get("HOOK_INPUT", "{}"))
 tool = data.get("tool_name", "")
 ti = data.get("tool_input") or {}
-raw = Path(ti.get("file_path", "")).expanduser()
+raw = Path(ti.get("file_path") or ti.get("notebook_path") or "").expanduser()
 target = (raw if raw.is_absolute() else root / raw).resolve()
 try:
     rel = target.relative_to(root).as_posix()
@@ -497,9 +990,13 @@ if parts & blocked_dirs or rel.startswith(("docs/ownership/", "docs/architecture
 if Path(rel).name.lower() == "readme.md":
     sys.exit(0)
 
+if rel.startswith("docs/handoffs/") and rel.endswith(".md"):
+    sys.exit(0)
+
 SOURCE = {".cs", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}
 if Path(rel).suffix.lower() not in SOURCE:
-    print("docs-writer may write README.md files and add comments to source files only."); sys.exit(0)
+    print("docs-writer may write README.md files and docs/handoffs/*.md, and add comments "
+          "to source files only."); sys.exit(0)
 if tool != "Edit":
     print("docs-writer: use Edit with a small old_string/new_string for source files; "
           "rewriting a source file with Write is not allowed."); sys.exit(0)
@@ -536,6 +1033,14 @@ PYDOCS
 
 analyst_command_allowed() {
   local command="$1" sentinel="__DEVFLOW_ARCH_SCAN__" script
+  # A single command only: no newline/CR injection, chaining, pipes or
+  # substitutions (the scanner regex below would otherwise accept a second
+  # command after a newline).
+  case "$command" in
+    *$'\n'*|*$'\r'*|*";"*|*"&"*|*"|"*|*'`'*|*'$('*)
+      return 1
+      ;;
+  esac
   command="${command//\"\$\{DEVFLOW_ARCH_SCAN_SCRIPT\}\"/$sentinel}"
   command="${command//\"\$DEVFLOW_ARCH_SCAN_SCRIPT\"/$sentinel}"
   command="${command//\$\{DEVFLOW_ARCH_SCAN_SCRIPT\}/$sentinel}"
@@ -558,8 +1063,26 @@ analyst_command_allowed() {
 }
 
 case "$TOOL_NAME" in
-  Edit|Write)
-    FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty')"
+  Edit|Write|NotebookEdit)
+    # NotebookEdit carries its target as notebook_path.
+    FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')"
+
+    # Main session (no agent_type): only the design-convergence gates apply.
+    if [ -z "$AGENT_TYPE" ]; then
+      if [ -n "$FILE_PATH" ]; then
+        ADR_GATE_REASON="$(adr_gate_reason)"
+        if [ -n "$ADR_GATE_REASON" ]; then
+          deny "$ADR_GATE_REASON"
+          exit 0
+        fi
+        DOC_BUDGET_REASON="$(doc_budget_reason)"
+        if [ -n "$DOC_BUDGET_REASON" ]; then
+          deny "$DOC_BUDGET_REASON"
+          exit 0
+        fi
+      fi
+      exit 0
+    fi
 
     if [ -z "$FILE_PATH" ]; then
       deny "Role-boundary protection: governed agent attempted a file mutation without a file path."
@@ -574,6 +1097,12 @@ case "$TOOL_NAME" in
     ADR_GATE_REASON="$(adr_gate_reason)"
     if [ -n "$ADR_GATE_REASON" ]; then
       deny "$ADR_GATE_REASON"
+      exit 0
+    fi
+
+    DOC_BUDGET_REASON="$(doc_budget_reason)"
+    if [ -n "$DOC_BUDGET_REASON" ]; then
+      deny "$DOC_BUDGET_REASON"
       exit 0
     fi
 
@@ -690,7 +1219,7 @@ case "$TOOL_NAME" in
     esac
 
     if bash_has_blocked_operation "$COMMAND"; then
-      deny "Role-boundary protection: governed agents cannot run Git mutation, destructive filesystem, dependency-install, merge, deployment, migration, permission, redirected-write, external-system write (PR/issue comments, replies, resolves) or active attack tooling Bash commands. Prepare the change and hand it to the human."
+      deny "Role-boundary protection: governed agents cannot run Git mutation, destructive filesystem, dependency-install, merge, deployment, migration, permission, redirected-write, nested-shell, external-system write (PR/issue comments, replies, resolves) or active attack tooling Bash commands. Prepare the change and hand it to the human."
       exit 0
     fi
     ;;
