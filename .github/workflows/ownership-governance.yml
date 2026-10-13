@@ -20,7 +20,7 @@ jobs:
     name: PR Quality
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
 
@@ -32,29 +32,56 @@ jobs:
           persist-credentials: false
           submodules: false
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Verify runtime prerequisites
         run: |
           set -euo pipefail
           python3 --version
           git --version
 
-      - name: Check hook and Python syntax
+      - name: Check shell and Python syntax
         run: |
           set -euo pipefail
 
-          bash -n .claude/hooks/enforce-role-boundaries.sh
+          # Every tracked shell script, not just one hook.
+          git ls-files -z -- '*.sh' | xargs -0 -r -n 1 bash -n
 
-          python3 -m py_compile \
+          python3 -m py_compile scripts/*.py
+
+      - name: Lint (ruff F, E9)
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --quiet ruff==0.16.8
+          # Scoped to the CLI/validator/build scripts and their tests; widen to
+          # "scripts tests" once the remaining files are clean.
+          ruff check --select F,E9 \
+            scripts/devflow_operations.py \
             scripts/validate_ownership_manifest.py \
             scripts/validate_ownership_diff.py \
+            scripts/devflow_arch_scan.py \
+            scripts/build_devflow_plugin.py \
+            scripts/build_codex_devflow_plugin.py \
+            tests/test_devflow_operations.py \
+            tests/test_devflow_delivery_run.py \
+            tests/test_contract_evidence_gated_delivery.py \
+            tests/test_security_evidence_gated_delivery.py \
+            tests/test_work_product_evidence_gate.py \
+            tests/test_work_product_ownership_binding.py \
+            tests/test_evidence_verification.py \
+            tests/test_native_delegation_evidence.py \
+            tests/test_run_state_integrity.py \
+            tests/test_launch_risk_floor.py \
             tests/test_validate_ownership_manifest.py \
-            tests/test_enforce_role_boundaries.py \
-            tests/test_validate_ownership_diff.py
-
-      - name: Run unit tests
-        run: |
-          set -euo pipefail
-          python3 -m unittest discover -s tests -p 'test_*.py' -v
+            tests/test_validate_ownership_diff.py \
+            tests/test_devflow_arch_scan.py \
+            tests/test_devflow_plugin_build.py \
+            tests/test_codex_devflow_plugin_build.py \
+            tests/test_cli_hardening_ownership.py \
+            tests/test_cli_hardening_operations.py
 
       - name: Check pull request whitespace
         env:
@@ -94,6 +121,44 @@ jobs:
           test "$(git rev-parse --verify "${HEAD_SHA}^{commit}")" = "$HEAD_SHA"
 
           git diff --check "$BASE_SHA" "$HEAD_SHA"
+
+  unit-tests:
+    name: Unit tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.9", "3.12"]
+
+    steps:
+      - name: Checkout merged pull request result
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Configure git identity for fixture repositories
+        run: |
+          set -euo pipefail
+          git config --global user.name "DevFlow CI"
+          git config --global user.email "devflow-ci@users.noreply.github.com"
+
+      - name: Run unit tests
+        run: |
+          set -euo pipefail
+          python --version
+          python -m unittest discover -s tests -p 'test_*.py'
 
   ownership-diff-gate:
     name: Ownership Diff Gate

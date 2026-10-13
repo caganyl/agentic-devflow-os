@@ -377,7 +377,7 @@ class ContractEvidencePathValidationTest(unittest.TestCase):
         cls.tmpdir_obj.cleanup()
 
     def _create_contract(self, filename: str = "contract.md") -> str:
-        contract_dir = cls = self.target / "docs" / "contracts"
+        contract_dir = self.target / "docs" / "contracts"
         contract_dir.mkdir(parents=True, exist_ok=True)
         (contract_dir / filename).write_text("# Contract\n", encoding="utf-8")
         return f"docs/contracts/{filename}"
@@ -519,7 +519,7 @@ class ContractEvidenceRecordingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp)
             make_git_repo(target, "feature-contract-test")
-            run_id = _setup_backend_utility_run(target)
+            _setup_backend_utility_run(target)
             # Create the file (even if it exists, the command should reject first on contract_required)
             evidence_path = _create_contract_file(target)
 
@@ -538,7 +538,7 @@ class ContractEvidenceRecordingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp)
             make_git_repo(target, "feature-contract-test")
-            run_id = _setup_new_feature_run(target)
+            _setup_new_feature_run(target)
             evidence_path = _create_contract_file(target)
 
             res = run_ops([
@@ -556,7 +556,7 @@ class ContractEvidenceRecordingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp)
             make_git_repo(target, "feature-contract-test")
-            run_id = _setup_new_feature_run(target)
+            _setup_new_feature_run(target)
 
             res = run_ops([
                 "record-contract-evidence",

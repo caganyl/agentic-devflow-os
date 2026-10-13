@@ -768,7 +768,7 @@ _held_state_locks: dict[str, int] = {}
 
 
 def _try_lock_file(handle) -> bool:
-    if os.name == "nt":
+    if sys.platform == "win32":
         import msvcrt
 
         handle.seek(0)
@@ -788,7 +788,7 @@ def _try_lock_file(handle) -> bool:
 
 
 def _unlock_file(handle) -> None:
-    if os.name == "nt":
+    if sys.platform == "win32":
         import msvcrt
 
         handle.seek(0)
@@ -1844,7 +1844,7 @@ def _ownership_binding_status(target: "Path | None", req_id: str) -> dict:
                 "req_id": req_id}
 
     governed = sorted({
-        o.get("agent") for o in (manifest.get("owners") or [])
+        str(o.get("agent")) for o in (manifest.get("owners") or [])
         if isinstance(o, dict) and o.get("agent") in OWNERSHIP_BINDABLE_ROLES
     })
     return {
@@ -2650,7 +2650,7 @@ def cmd_create_run(args) -> int:
         launch_risk_floor_required = False
         launch_risk_floor_reason = "low_risk_local_utility"
 
-    run_state = {
+    run_state: dict = {
         "schema_version": DEVFLOW_SCHEMA_VERSION,
         "run_id": run_id,
         "created_at": now,
@@ -2738,7 +2738,7 @@ def cmd_launch(args) -> int:
     if dry_run:
         agent_teams_label = "enabled" if agent_teams else "disabled"
         env_plan = (
-            f"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1"
+            "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1"
             if agent_teams
             else "[standard env, no agent-teams flag]"
         )
@@ -3612,7 +3612,7 @@ def cmd_record_security_evidence(args) -> int:
     print(f"  max_severity: {max_severity}")
     print(f"  evidence_path: {evidence_path}")
     print(f"  security_gate_satisfied: {security_gate_satisfied}")
-    print(f"  provenance: generated_in_run")
+    print("  provenance: generated_in_run")
     return 0
 
 
@@ -3724,9 +3724,9 @@ def cmd_record_contract_evidence(args) -> int:
 
     print(f"Contract evidence kaydedildi: {run_id} [TAMAMLANDI]")
     print(f"  evidence_path: {evidence_path}")
-    print(f"  contract_status: completed")
-    print(f"  contract_gate_satisfied: True")
-    print(f"  provenance: generated_in_run")
+    print("  contract_status: completed")
+    print("  contract_gate_satisfied: True")
+    print("  provenance: generated_in_run")
     print("  NOTE: Bu artefakt bu run içinde üretilmiştir.")
     print("  Belirli bir native session'a causal binding iddiası taşımaz.")
     return 0
@@ -3839,7 +3839,7 @@ def cmd_record_work_product_evidence(args) -> int:
             continue
         if record.get("evidence_path", "").replace("\\", "/") != normalized_evidence:
             continue
-        other_task = next((t for t in tasks if t["id"] == other_task_id), {})
+        other_task: dict = next((t for t in tasks if t["id"] == other_task_id), {})
         print(
             f"Hata: '{evidence_path}' zaten '{other_task_id}' "
             f"({other_task.get('assigned_role', 'bilinmeyen rol')}) görevinin work-product "
@@ -3882,7 +3882,7 @@ def cmd_record_work_product_evidence(args) -> int:
     print(f"  task_id: {task_id}")
     print(f"  task_type: {task_type}")
     print(f"  evidence_path: {evidence_path}")
-    print(f"  git_change_verified: True")
+    print("  git_change_verified: True")
     print(
         "  SINIR: Bu gate yerel work-product varlığını doğrular. "
         "Belirli bir agent session'a causal attribution iddiası taşımaz."
@@ -4311,8 +4311,8 @@ def main() -> None:
         choices=sorted(SECURITY_EVIDENCE_SEVERITIES),
         dest="max_severity",
         help=(
-            f"Bulunan maksimum severity "
-            f"(pass ile: none/low; blocked ile: medium/high/critical)"
+            "Bulunan maksimum severity "
+            "(pass ile: none/low; blocked ile: medium/high/critical)"
         ),
     )
     p_sec_ev.add_argument(

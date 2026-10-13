@@ -184,6 +184,18 @@ class DiffGateTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("protected area", result.stderr)
 
+    def test_governance_branch_may_change_tooling_config(self):
+        self._write("README.md", "readme\n")
+        base = self._commit("base")
+        self._git("checkout", "-q", "-b", "devflow/tooling")
+        self._write("pyproject.toml", "[tool.ruff]\ntarget-version = \"py39\"\n")
+        self._write(".github/CODEOWNERS", "* @owner\n")
+        head = self._commit("tooling")
+
+        result = self._run(base, head, "devflow/tooling")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_base_manifest_owned_path_still_allowed(self):
         self._write("docs/product/requirements/REQ-042.md")
         self._write("docs/product/acceptance-criteria/REQ-042.md")

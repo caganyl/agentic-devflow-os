@@ -638,7 +638,6 @@ class ReportNotReadyWithoutEvidenceTest(unittest.TestCase):
         tasks = self.mod.generate_task_graph_nodes("RUN-001", "backend_utility", "Build CSV parser")
         # Record evidence for impl but not QA
         impl_task = next(t for t in tasks if t["task_type"] == "implementation")
-        qa_task = next(t for t in tasks if t["task_type"] == "qa")
         for t in tasks:
             t["status"] = "verified"
         evidence = {

@@ -882,7 +882,7 @@ class GenerateTaskGraphSubcommandTest(unittest.TestCase):
         )["current_run_id"]
 
     def test_generate_task_graph_succeeds(self):
-        run_id = self._init_run()
+        self._init_run()
         result = run_ops(["generate-task-graph", "--target", str(self.target),
                           "--delivery-type", "bug_resolution"])
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -898,7 +898,7 @@ class GenerateTaskGraphSubcommandTest(unittest.TestCase):
         self.assertEqual(run_data["delivery_type"], "bug_resolution")
 
     def test_generate_task_graph_creates_task_packets(self):
-        run_id = self._init_run()
+        self._init_run()
         run_ops(["generate-task-graph", "--target", str(self.target),
                  "--delivery-type", "new_feature"])
         packets_dir = self.target / ".devflow" / "task-packets"
@@ -906,7 +906,7 @@ class GenerateTaskGraphSubcommandTest(unittest.TestCase):
         self.assertGreater(len(packets), 0, "Task packets should be created")
 
     def test_task_packet_files_have_required_fields(self):
-        run_id = self._init_run()
+        self._init_run()
         run_ops(["generate-task-graph", "--target", str(self.target),
                  "--delivery-type", "release_readiness"])
         packets_dir = self.target / ".devflow" / "task-packets"
@@ -917,7 +917,7 @@ class GenerateTaskGraphSubcommandTest(unittest.TestCase):
                 self.assertIn(field, packet, f"{pf.name}: missing field '{field}'")
 
     def test_task_packet_no_forbidden_fields(self):
-        run_id = self._init_run()
+        self._init_run()
         run_ops(["generate-task-graph", "--target", str(self.target),
                  "--delivery-type", "ai_rag"])
         mod = _load_ops_module()

@@ -152,7 +152,7 @@ def classify_layer(project_name: str, is_test: bool) -> str:
 # ---------------------------------------------------------------------------
 
 def parse_csproj(path: Path) -> dict:
-    info = {"sdk": "", "target_frameworks": [], "output_type": "", "packages": [],
+    info: dict = {"sdk": "", "target_frameworks": [], "output_type": "", "packages": [],
             "project_references": [], "is_test_flag": False, "nullable": "", "warnings_as_errors": False}
     try:
         tree = ET.parse(path)
@@ -497,7 +497,7 @@ def scan(root: Path) -> dict:
     dotnet = scan_dotnet(root, files)
     frontend = scan_frontend(root, files)
     state = "brownfield" if (dotnet or frontend) else "empty"
-    proposed = {}
+    proposed: dict = {}
     if dotnet:
         proposed["dotnet"] = {
             "layer_by_project": {p["name"]: p["layer"] for p in dotnet["projects"]},
