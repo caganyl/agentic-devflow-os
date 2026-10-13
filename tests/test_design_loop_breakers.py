@@ -22,8 +22,18 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK_PATH = REPO_ROOT / ".claude" / "hooks" / "enforce-role-boundaries.sh"
 VALIDATOR_PATH = REPO_ROOT / "scripts" / "validate_ownership_manifest.py"
+OPERATIONS_PATH = REPO_ROOT / "scripts" / "devflow_operations.py"
 
 RUN_BRANCH = "devflow/run-run-001"
+
+
+def _load_operations():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("devflow_operations_fixture", OPERATIONS_PATH)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 class _HookFixture(unittest.TestCase):
@@ -40,6 +50,8 @@ class _HookFixture(unittest.TestCase):
         scripts = self.root / "scripts"
         scripts.mkdir()
         shutil.copyfile(VALIDATOR_PATH, scripts / "validate_ownership_manifest.py")
+        # The hook verifies the run-state signature through this module.
+        shutil.copyfile(OPERATIONS_PATH, scripts / "devflow_operations.py")
 
         for rel in ("docs/product/requirements", "docs/product/acceptance-criteria",
                     "docs/contracts/openapi", "docs/ownership",
@@ -77,11 +89,22 @@ class _HookFixture(unittest.TestCase):
         }
         (self.root / "docs/ownership/REQ-042.json").write_text(json.dumps(manifest))
 
-    def _write_run_state(self, req_id):
+    def _write_run_state(self, req_id, signed=True):
+        # Signed exactly as create-run/launch would (devflow_operations.py).
         devflow = self.root / ".devflow"
         (devflow / "runs").mkdir(parents=True, exist_ok=True)
-        (devflow / "project.json").write_text(json.dumps({"current_run_id": "run-001"}))
-        (devflow / "runs" / "run-001.json").write_text(json.dumps({"run_id": "run-001", "req_id": req_id}))
+        (devflow / "project.json").write_text(json.dumps({"current_run_id": "RUN-001"}))
+        state = {"run_id": "RUN-001", "req_id": req_id, "branch_name": RUN_BRANCH}
+        run_file = devflow / "runs" / "RUN-001.json"
+        if not signed:
+            run_file.write_text(json.dumps(state))
+            return
+        saved_key = os.environ.pop("DEVFLOW_STATE_KEY_FILE", None)
+        try:
+            _load_operations().write_run_state(self.root, run_file, state)
+        finally:
+            if saved_key is not None:
+                os.environ["DEVFLOW_STATE_KEY_FILE"] = saved_key
 
     def _hook(self, agent, file_path, tool="Write", tool_input=None, env_extra=None):
         ti = {"file_path": file_path}
