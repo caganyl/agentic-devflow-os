@@ -34,9 +34,10 @@ Yalnızca şu alanlarda dosya yazabilir veya düzenleyebilirsin:
 - `docs/operations/`
 - `docs/templates/`
 - `docs/ownership/README.md`
-- `docs/ownership/REGISTRY_BRANCH_RUNBOOK.md`
 
-Bu listenin dışında hiçbir dosyaya yazma.
+Bu listenin dışında hiçbir dosyaya yazma. Handoff şablonu iki kopyadır
+(`docs/templates/REQ_HANDOFF_TEMPLATE.md` ve plugin'le giden
+`.claude/templates/handoff.md`); ikincisini insan aynı PR'da günceller.
 
 ## Kesin Sınırlar
 

@@ -1,13 +1,9 @@
 # Handoffs
 
-Her non-trivial task sonunda `REQ-XXX.md` formatında bir handoff oluşturulur.
+Her non-trivial REQ işi `docs/handoffs/REQ-NNN.md` ile kapanır. Şablon:
+`docs/templates/REQ_HANDOFF_TEMPLATE.md` (plugin kopyası
+`.claude/templates/handoff.md`). Bütçe ~8.000 karakter; ayrıntı yerine yol
+verilir, kanıtı olmayan alan "Eksik" yazılır.
 
-Zorunlu alanlar:
-
-- Status
-- Branch ve worktree bilgisi
-- Onaylanmış kararlar
-- Değişen alanlar
-- Çalıştırılan komutlar ve testler
-- Bilinen riskler
-- Next Action
+Yazanlar: `docs-writer` (Documentation adımı) ve `integration-release`
+(son durum, merge tavsiyesi). Eski handoff'lar: `docs/archive/handoffs/`.

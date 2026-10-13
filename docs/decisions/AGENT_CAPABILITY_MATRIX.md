@@ -4,12 +4,12 @@ Bu dosya, Agentic DevFlow OS içindeki rollerin hangi tür değişiklikleri yapa
 
 | Agent | Prompt sınırı | Runtime enforcement | CI merge gate | Yazma alanı | Bash | Human approval boundary |
 |---|---|---|---|---|---|---|
-| Delivery Lead | Planlama-only | Hook: tüm `Edit`/`Write` ve `Bash` deny | Governance branch path sınırı (agent kimliği değil path denetlenir) | Yok | Hayır | Plan, kod veya komut üretemez |
+| Delivery Lead | Planlayıcı: plan döner, alt ajan başlatmaz (`tools: Read, Grep, Glob`; `Agent` yok) | Hook: tüm `Edit`/`Write` ve `Bash` deny | Governance branch path sınırı (agent kimliği değil path denetlenir) | Yok | Hayır | Orkestrasyon ve CLI kayıtları ana oturumda; plan onayı insanda |
 | Product Analyst | Yalnızca product doküman alanı | Hook: path allowlist (`docs/product`, `docs/decisions`); Bash deny | Governance branch path sınırı | `docs/product/**`, `docs/decisions/**` | Hayır | Requirement onayı insanda |
-| Solution Architect | Yalnızca architecture doküman alanı | Hook: path allowlist (`docs/architecture`, `docs/decisions`); ADR loop breaker (Accepted ADR dondurulur, 2 review turundan sonra revizyon yok, ~12.000 karakter bütçe, `reviews/` yazılamaz); Bash deny | Governance branch path sınırı | `docs/architecture/**`, `docs/decisions/**` | Hayır | ADR onayı insanda |
+| Solution Architect | Yalnızca architecture doküman alanı | Hook: path allowlist (`docs/architecture`, `docs/decisions`); ADR loop breaker (Accepted ADR dondurulur — yalnızca status satırı Superseded/Deprecated/Withdrawn yapılabilir; 2 review turundan sonra revizyon yok; ~12.000 karakter bütçe; `reviews/` yazılamaz; `adr/` alt klasörlerinde ve `docs/decisions/` altında ADR dosyası açılamaz; branch başına en fazla 1 yeni ADR); Bash deny | Governance branch path sınırı | `docs/architecture/**`, `docs/decisions/**` | Hayır | ADR onayı insanda |
 | ADR Reviewer | Review-only, tek turda VERDICT | Hook: path allowlist (`docs/architecture/adr/reviews`); dosya adı `ADR-NNN-review-<tur>.md`, VERDICT satırı zorunlu, en fazla 2 tur, review dosyaları değiştirilemez; Bash deny | Governance branch path sınırı | `docs/architecture/adr/reviews/**` | Hayır | İkinci turdan sonra karar insanda |
 | Architecture Analyst | Analiz ve profil taslağı | Hook: path allowlist (yalnızca `docs/architecture/profile/ARCHITECTURE_PROFILE.md` ve `architecture-profile.json`); `confirmed` yazamaz, onaylı profili değiştiremez; Bash yalnızca gerçek tarayıcı (`python3` sonrası ilk argüman `$DEVFLOW_ARCH_SCAN_SCRIPT` veya `scripts/devflow_arch_scan.py`) ve tek non-mutating inceleme komutu | Governance branch path sınırı | `docs/architecture/profile/**` | Dar (tarayıcı + inceleme) | Profil onayı insanda |
-| Docs Writer | README ve yorum | Hook: `README.md` her yerde (korumalı/üretilmiş alanlar hariç); kaynak dosyada yalnızca Edit ve yalnızca yorum değiştiren düzenleme (yorumlar çıkarılınca eski = yeni); Bash yalnızca non-mutating | Diff incelemesi insanda | `**/README.md`, kaynak dosyalarda yorumlar | Dar (inceleme) | Kod değişikliği yapamaz |
+| Docs Writer | README, yorum ve handoff | Hook: `README.md` her yerde (korumalı/üretilmiş alanlar hariç); `docs/handoffs/`; kaynak dosyada yalnızca Edit ve yalnızca yorum değiştiren düzenleme (yorumlar çıkarılınca eski = yeni); Bash yalnızca non-mutating | Diff incelemesi insanda | `**/README.md`, `docs/handoffs/**`, kaynak dosyalarda yorumlar | Dar (inceleme) | Kod değişikliği yapamaz |
 | Contract Broker | Yalnızca contract alanı | Hook: path allowlist (`docs/contracts`); Bash deny | Governance branch path sınırı | `docs/contracts/**` | Hayır | Contract onayı insanda |
 | Frontend Engineer | REQ-ID + approved manifest gerektirir | Hook: `--authorize-agent` ile branch + approved manifest + owner + `write_paths` kontrolü (fail-closed); Bash mutation/deploy/migration blok listesi | CI: base-approved manifestteki owner `write_paths` dışında diff merge olamaz | Manifestte tanımlı `write_paths` | Sınırlı (mutation/deploy/migration komutları blok) | main merge insanda |
 | Backend Engineer | REQ-ID + approved manifest gerektirir | Aynı (yukarıdaki implementer enforcement) | Aynı (CI: base-approved manifest owner `write_paths` kontrolü) | Manifestte tanımlı `write_paths` | Sınırlı | main merge insanda |
@@ -20,7 +20,7 @@ Bu dosya, Agentic DevFlow OS içindeki rollerin hangi tür değişiklikleri yapa
 | Design Reviewer | Rapor-only | Hook: path allowlist (`design/reviews`, `docs/quality/accessibility`); Bash deny | Governance branch path sınırı | `design/reviews/**`, `docs/quality/accessibility/**` | Hayır | UX kararı insanda |
 | EvalOps Reviewer | Rapor/eval-only | Hook: path allowlist (`evals/**`, `docs/ai/**`); Bash global mutation/deploy/migration bloklarıyla sınırlı | Governance branch path sınırı | `evals/**`, `docs/ai/**` | Sınırlı (non-production eval/test; mutating Bash blok) | Release kalite önerisi insanda |
 | Integration / Release | Release/handoff-only | Hook: path allowlist (`docs/release`, `docs/handoffs`); Bash global mutation/deploy/migration bloklarıyla sınırlı | Governance branch path sınırı | `docs/release/**`, `docs/handoffs/**` | Sınırlı (read/test; mutating Bash blok) | Main merge ve deploy insanda |
-| Governance Operations Author | Runbook/checklist/template-only | Hook: dar path allowlist; Bash deny | Governance branch path sınırı | `docs/operations/**`, `docs/templates/**`, `docs/ownership/README.md`, `docs/ownership/REGISTRY_BRANCH_RUNBOOK.md` | Hayır | Prosedür ve statik rehber onayı insanda; authority manifesti değiştiremez |
+| Governance Operations Author | Runbook/checklist/template-only | Hook: dar path allowlist; Bash deny | Governance branch path sınırı | `docs/operations/**`, `docs/templates/**`, `docs/ownership/README.md` | Hayır | Prosedür ve statik rehber onayı insanda; authority manifesti değiştiremez |
 
 ## Runtime Enforcement Notları
 
@@ -96,6 +96,21 @@ Bu dosya, Agentic DevFlow OS içindeki rollerin hangi tür değişiklikleri yapa
 - Integration / Release agent merge yapmaz; release-readiness kanıtını ve handoff'ı hazırlar. Nihai merge insan onayındadır.
 - Hiçbir agent main merge, production deploy, production migration veya secret işlemi yapamaz; bunlar yalnızca insan onayıyla yapılır.
 - Her non-trivial değişiklik REQ-ID, test kanıtı ve handoff ile bağlanır.
+
+## Önyüklenen Skill'ler
+
+Alt ajanlar `skills:` frontmatter'ıyla skill içeriğini başlangıçta yükler:
+implementer'lar `tdd-vertical-slice`, `stack-verification`,
+`root-cause-investigation` (database-engineer ayrıca `db-migration-safety`,
+qa-automation ayrıca `qa-acceptance-verification`); delivery-lead
+`task-routing`; product-analyst `requirement-grilling`; contract-broker
+`api-contract-design`; architecture-analyst `architecture-discovery`;
+docs-writer `documentation-sync`; security-red-team
+`adversarial-security-review`; design-reviewer `visual-design-review`;
+evalops-reviewer `evalops-regression`; integration-release
+`release-scorecard`, `pr-review-triage`. adr-reviewer ve docs-writer
+`omitClaudeMd: true` ile başlar. Ortak kurallar:
+`.claude/rules/agent-common.md`.
 
 ## Model Ataması
 

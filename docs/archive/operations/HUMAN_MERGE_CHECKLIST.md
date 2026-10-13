@@ -1,3 +1,5 @@
+> **Arşiv — güncel değil.** Güncel hâli: [docs/ownership/README.md](../../ownership/README.md). Bkz. `docs/archive/README.md`.
+
 # Human Merge Checklist
 
 Bu checklist, `main` branch'e merge edilecek her pull request için insan

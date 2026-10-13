@@ -1,0 +1,33 @@
+#!/bin/sh
+# claude-devflow — DevFlow'u yükleyerek Claude Code oturumu açar.
+#
+#   claude-devflow [claude argümanları...]
+#       Bulunulan klasörü scripts/devflow_bootstrap.sh ile hazırlar (plugin
+#       eskiyse build, git + req-001-bootstrap branch, CLAUDE.md, rule'lar,
+#       docs iskeleti, REQ-001 manifesti, .devflow/) ve
+#       `claude --plugin-dir dist/devflow-plugin` başlatır.
+#
+#   claude-devflow launch --objective "REQ-NNN: ..." --req-id REQ-NNN [--dry-run] [--agent-teams]
+#       Bulunulan proje için managed run başlatır
+#       (scripts/devflow_operations.py launch --target "$PWD" ...).
+#
+# DEVFLOW_HOME framework repo köküdür; verilmezse bu dosyanın bir üst klasörü.
+set -eu
+
+DEVFLOW_HOME="${DEVFLOW_HOME:-$(cd "$(dirname "$0")/.." && pwd -P)}"
+export DEVFLOW_HOME
+PLUGIN_DIR="$DEVFLOW_HOME/dist/devflow-plugin"
+
+if [ "${1:-}" = "launch" ]; then
+  shift
+  exec python3 "$DEVFLOW_HOME/scripts/devflow_operations.py" launch --target "$PWD" "$@"
+fi
+
+bash "$DEVFLOW_HOME/scripts/devflow_bootstrap.sh" "$PWD"
+
+# Bootstrap framework repo içinde hiçbir şey yapmadan çıkar; plugin yine de gerekir.
+if [ ! -f "$PLUGIN_DIR/.claude-plugin/plugin.json" ]; then
+  python3 "$DEVFLOW_HOME/scripts/build_devflow_plugin.py" >/dev/null
+fi
+
+exec claude --plugin-dir "$PLUGIN_DIR" "$@"

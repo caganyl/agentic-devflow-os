@@ -4,9 +4,9 @@ Bu dosya Agentic DevFlow OS içindeki standart rolleri listeler.
 
 ## Çekirdek Roller
 
-- **Delivery Lead** — planlama, task routing, iş dağıtımı, quality gate ve handoff koordinasyonu
+- **Delivery Lead** — plan, task routing, risk ve quality gate önerisi (dağıtmaz; orkestratör ana oturumdur)
 - **Product Analyst** — PRD, requirement (REQ-XXX), acceptance criteria, kapsam tanımı
-- **Solution Architect** — ADR, mimari seçenekler, sistem tasarımı, trade-off analizi
+- **Solution Architect** — ADR (yalnızca eşik sağlanırsa), karar notu, trade-off analizi
 - **Contract Broker** — OpenAPI, event, database ve shared type sözleşmeleri
 - **ADR Reviewer** — bir ADR'ye tek turda VERDICT (en fazla 2 tur, sonrası insan kararı)
 - **Architecture Analyst** — mevcut projeyi tarar, insan onayına giden mimari profil taslağını yazar
@@ -27,68 +27,41 @@ Bu dosya Agentic DevFlow OS içindeki standart rolleri listeler.
 
 ## Delivery Rolleri
 
-- **Integration/Release** — integration branch, CI değerlendirmesi, release scorecard, merge recommendation
-- **Governance Operations Author** — REQ lifecycle runbook, human merge checklist, handoff şablonları
-- **Docs Writer** — klasör README'leri, kök README'nin otomatik blokları ve yalnızca yorum değişiklikleri
+- **Integration/Release** — kanıt toplama, release scorecard, PR review triage, merge tavsiyesi
+- **Governance Operations Author** — ownership & merge rehberi, handoff şablonu, operasyon prosedürleri
+- **Docs Writer** — klasör README'leri, kök README'nin otomatik blokları, yalnızca yorum değişiklikleri ve handoff
 
-## Agent Takım Çalışma Modeli
+## Çalışma Modeli
 
-### Planlama ve Araştırma
-
-Planning, research ve review işlerinde roller kendi aralarında task listesi
-ve mesajlaşma ile çalışır. Aynı anda birden fazla araştırma görevi yürütülebilir.
-
-### Implementation
-
-Implementation işleri yalnızca net ownership alanlarında paralel yürütülür:
-- Frontend + Backend → contract onayı sonrasında, farklı dosya yollarında
-- QA + Backend → test ve implementation, farklı dosya yollarında
-
-Çakışan veya cross-cutting işler sıraya alınır.
-
-### Recovery
-
-Agent team session kesilirse:
-- Run summary ve açık task listesi üzerinden devam edilir
-- `.claude/templates/run-summary.md` formatı kullanılır
-- Tamamlanmamış görev tamamlanmadan delivery bitmiş ilan edilmez
+- Orkestratör ana oturumdur; Delivery Lead yalnızca plan döner.
+- Implementation yalnızca ayrık ownership yollarında paralel yürür
+  (Frontend + Backend contract kaydından sonra); çakışan işler sıraya alınır.
+- Sıra: implementation → QA → Security → Docs Writer → Integration/Release → insan.
+- Oturum kesilirse run durumu ve açık task listesi üzerinden devam edilir.
 
 ## Task Routing Özeti
 
-Detay için `.claude/rules/task-routing.md` dosyasına bakın.
+Codex `.claude/rules/` okumaz; tablonun kaynağı `.claude/rules/task-routing.md`,
+burada kısa kopyası durur.
 
-| Task türü             | Ana roller                                                                                |
-| --------------------- | ----------------------------------------------------------------------------------------- |
-| Yeni ürün fikri       | Delivery Lead, Product Analyst, Design Reviewer, Solution Architect                       |
-| Yeni feature          | Delivery Lead, Product Analyst, Solution Architect, Contract Broker, Frontend, Backend, QA|
-| AI/RAG özelliği       | Delivery Lead, AI/Data Engineer, EvalOps Reviewer, Security Red Team, Backend             |
-| Veri dashboard'u      | Delivery Lead, AI/Data Engineer, Design Reviewer, Backend, QA                             |
-| Bug                   | Delivery Lead, QA, ilgili domain engineer                                                 |
-| Güvenlik riski        | Security Red Team, Backend, Delivery Lead, (gerekirse) Database Engineer                  |
-| Release               | QA, Security Red Team, Integration/Release                                                |
-| Maliyet optimizasyonu | Delivery Lead, Solution Architect, AI/Data Engineer, Integration/Release                  |
+| Task türü             | Ana roller |
+| --------------------- | ---------- |
+| Yeni ürün fikri       | Delivery Lead, Product Analyst, Design Reviewer, Solution Architect (fizibilite notu) |
+| Yeni feature          | Delivery Lead, Product Analyst, Contract Broker, Frontend, Backend, QA, Security, Docs Writer, Integration/Release (ADR eşiği varsa + Solution Architect, ADR Reviewer) |
+| AI/RAG özelliği       | Delivery Lead, AI/Data Engineer, EvalOps Reviewer, Security Red Team, Backend |
+| Veri dashboard'u      | Delivery Lead, AI/Data Engineer, Design Reviewer, Backend, QA |
+| Bug                   | Delivery Lead, QA, ilgili domain engineer |
+| Güvenlik riski        | Security Red Team, Backend, Delivery Lead, (gerekirse) Database Engineer |
+| Release               | QA, Security Red Team, Integration/Release |
+| Maliyet optimizasyonu | Delivery Lead, Solution Architect, AI/Data Engineer, Integration/Release |
+| Projeye katılım / yeni proje | Architecture Analyst, Docs Writer; greenfield'da Solution Architect, Backend, Frontend |
+| Dokümantasyon         | Docs Writer |
 
-## Agent Tanımları
+## Tanımlar
 
-Her role ait agent tanımı `.claude/agents/` altında bulunur.
-
-## Skill Kataloğu
-
-Her workflow ve agent'ın kullandığı skill'ler `.claude/skills/` altında bulunur:
-
-- `orchestrate-delivery` — delivery akış yönetimi
-- `task-routing` — minimum rol seti seçimi
-- `project-context-synthesis` — context pack üretimi
-- `notebooklm-grounded-retrieval` — NotebookLM evidence retrieval
-- `obsidian-project-context` — Obsidian stratejik bağlam
-- `requirement-traceability` — requirement zinciri doğrulama
-- `api-contract-design` — contract-first API tasarımı
-- `db-migration-safety` — güvenli migration
-- `qa-acceptance-verification` — acceptance test doğrulama
-- `adversarial-security-review` — güvenlik review
-- `visual-design-review` — UX ve a11y review
-- `evalops-regression` — AI eval ve regression
-- `release-scorecard` — merge recommendation
+Agent'lar `.claude/agents/`, skill'ler `.claude/skills/`, workflow'lar
+`.claude/workflows/` altındadır. Katalog ve sistem anlatımı: `README.md`,
+`docs/ARCHITECTURE.md`.
 
 # Codex Phase 1A Runtime Policy
 
@@ -111,7 +84,7 @@ Real delivery runs must execute only in a DevFlow-managed Git worktree and its a
 
 Do not claim implementation or delivery complete without a current Git-diff-backed work product in eligible source or test files and evidence tied to that diff. Planning, review prose, generated context, MCP output, and agent summaries are not implementation evidence.
 
-Prefer the smallest focused test or check that covers the changed behavior. Broader suites require a risk or dependency-impact reason.
+While working, run the smallest focused test or check that covers the changed behavior; run the full suite once before declaring the task done.
 
 ## Human approval gates
 

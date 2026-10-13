@@ -1,14 +1,9 @@
 # Requirements
 
-Her requirement `REQ-XXX.md` formatında tutulur.
+Her requirement `docs/product/requirements/REQ-NNN.md` (veya
+`REQ-NNN-kisa-ad.md`) olarak tutulur; şablon `.claude/templates/requirement.md`.
+En fazla bir sayfa (~8.000 karakter). Zorunlu alanlar: Problem,
+User/stakeholder, Scope, Out of Scope, numaralı Acceptance Criteria,
+Non-functional, Dependencies, Risks, Open Questions.
 
-Zorunlu alanlar:
-
-- Problem
-- User / stakeholder
-- Scope
-- Acceptance criteria
-- Non-functional requirements
-- Dependencies
-- Risks
-- NotebookLM evidence references
+Tamamlanmış MCP audit REQ'leri (REQ-001…003): `docs/archive/product/`.

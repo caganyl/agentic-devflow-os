@@ -1,3 +1,5 @@
+> **Arşiv — güncel değil.** Güncel hâli: [docs/ARCHITECTURE.md](../../ARCHITECTURE.md). Bkz. `docs/archive/README.md`.
+
 # DevFlow Target Project Runtime
 
 **Tarih:** 2026-06-26
