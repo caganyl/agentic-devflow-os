@@ -1,11 +1,7 @@
 ---
 name: qa-acceptance-verification
 description: Requirement ve acceptance criteria üzerinden test coverage, regression ve eksik senaryo tespitini yapar.
-agent: qa-automation
-triggers:
-  - Implementation tamamlandıktan sonra
-  - Release öncesi QA gate'inde
-  - Test coverage değerlendirilirken
+when_to_use: Implementation tamamlandıktan sonra, QA sign-off öncesi veya test kapsamı değerlendirilirken.
 ---
 
 # Skill: QA Acceptance Verification
@@ -19,12 +15,8 @@ ve regression riskinin yönetildiğini doğrula.
 
 ### 1. Acceptance Criteria Taraması
 
-Requirement dosyasından tüm AC'leri çıkar:
-```python
-# AC-01: [açıklama]
-# AC-02: [açıklama]
-# ...
-```
+Requirement dosyasından (`docs/product/requirements/REQ-XXX.md`) tüm AC'leri
+numaralarıyla çıkar (AC-1, AC-2, ...).
 
 ### 2. Test Coverage Matrisi Oluştur
 
@@ -47,15 +39,31 @@ AC başına şu senaryoları kontrol et:
 
 ### 4. Test Yazma Standartları
 
-```python
-def test_ac01_user_can_create_resource():
-    """AC-01: Kullanıcı geçerli veriyle kaynak oluşturabilmeli."""
-    # Arrange
-    ...
-    # Act
-    ...
-    # Assert
-    ...
+.NET (xUnit + `WebApplicationFactory`):
+
+```csharp
+public class CreateOrderTests(WebApplicationFactory<Program> factory)
+    : IClassFixture<WebApplicationFactory<Program>>
+{
+    [Fact] // REQ-012 AC-1
+    public async Task AC1_ValidOrder_Returns201()
+    {
+        var client = factory.CreateClient();
+        var response = await client.PostAsJsonAsync("/orders", new { sku = "A1", qty = 1 });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+}
+```
+
+React (Vitest + React Testing Library):
+
+```tsx
+it("AC-2: geçersiz miktarda hata mesajı gösterir", async () => {
+  render(<OrderForm />);
+  await userEvent.type(screen.getByRole("spinbutton", { name: /miktar/i }), "0");
+  await userEvent.click(screen.getByRole("button", { name: /gönder/i }));
+  expect(screen.getByRole("alert")).toHaveTextContent(/en az 1/i);
+});
 ```
 
 - Her test tek bir AC'yi test eder
@@ -65,8 +73,11 @@ def test_ac01_user_can_create_resource():
 
 ### 5. Regression Kontrolü
 
+Dilim sırasında yalnızca değişen davranışı kapsayan odaklı testleri çalıştır;
+sign-off'tan önce bir kez tüm suite'i çalıştır.
+
 ```
-- [ ] Tüm mevcut testler hala geçiyor
+- [ ] Tüm suite sign-off öncesi bir kez çalıştırıldı ve geçiyor
 - [ ] Değiştirilen kodun etkilediği alan tarandı
 - [ ] Integration test suite çalıştırıldı
 - [ ] E2E testler kritik akışları kapsıyor

@@ -1,10 +1,7 @@
 ---
 name: pr-review-triage
 description: Açık bir PR'daki review bot ve insan yorumlarını okur, her birini düzelt/düzeltme/yanlış pozitif olarak sınıflar, düzeltmeleri implementer görevlerine çevirir ve insana yanıt planı bırakır. Yorum yazmaz, çözümlemez, commit/push yapmaz.
-agent: integration-release
-triggers:
-  - PR açıldıktan sonra review bot'ları (Copilot, CodeRabbit, Bugbot, Claude Code Review) yorum bıraktığında
-  - İnsan reviewer değişiklik istediğinde
+when_to_use: Bir PR'da review bot'ları (Copilot, CodeRabbit, Bugbot, Claude Code Review) veya insan reviewer yorum bıraktığında.
 ---
 
 # Skill: PR Review Triage

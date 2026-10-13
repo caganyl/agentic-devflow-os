@@ -1,11 +1,7 @@
 ---
 name: release-scorecard
 description: PR kapsamı, CI, test, security review, known limitations, rollback ihtiyacı ve merge recommendation üretir.
-agent: integration-release
-triggers:
-  - Feature delivery tamamlandığında
-  - Release readiness workflow'unda
-  - Merge recommendation gerektiğinde
+when_to_use: Bir run'ın QA, security ve dokümantasyon adımları bittiğinde, release-readiness workflow'unda veya merge tavsiyesi istendiğinde.
 ---
 
 # Skill: Release Scorecard
@@ -28,41 +24,43 @@ Tüm kalite kanıtlarını bir araya getir ve net bir merge kararı üret.
 - Kapsam dışı kalan işler: [liste]
 ```
 
-### 2. CI Kontrol
+Her satır kayıtlı bir kanıta bağlanır (yol veya komut çıktısı); kanıt yoksa
+"Eksik" yazılır.
+
+### 2. CI ve Test Kanıtı
 
 ```
-- [ ] Lint: temiz
-- [ ] Type check: temiz
-- [ ] Unit test suite: geçiyor (X/X)
-- [ ] Integration test suite: geçiyor (X/X)
-- [ ] E2E testler: geçiyor (X/X) [varsa]
-- [ ] Coverage hedefi karşılandı
+- [ ] Run state'te qa_evidence kayıtlı, source=executed (record-qa-evidence --test-command), qa_passed=true
+- [ ] Lint / typecheck / build: stack-verification sonucu handoff'ta
+- [ ] PR Quality ve Ownership Diff Gate son commit için yeşil (PR varsa)
+- [ ] Her AC için en az bir test var (handoff AC tablosu)
 ```
 
-### 3. Code Review
+### 3. Karar ve Contract Kanıtı
 
 ```
-- [ ] Tüm PR'lar peer review aldı
-- [ ] Kimse kendi PR'ını tek başına onaylamadı
-- [ ] ADR gerektiren değişiklikler belgelendi
-- [ ] Contract değişikliği varsa versiyonlama yapıldı
+- [ ] adr_required=true ise ADR reviewer APPROVE dosyası var (docs/architecture/adr/reviews/)
+- [ ] new_feature run'ında contract kanıtı kayıtlı (record-contract-evidence)
+- [ ] Contract değişikliği varsa contract'ta versiyon/status güncel
+- [ ] Açık PR review yorumları triage edildi (docs/release/pr-reviews/)
 ```
 
 ### 4. Security Review
 
 ```
-- [ ] Security Red Team review tamamlandı
+- [ ] security_review_required=false ise "not applicable"; true ise security_evidence kayıtlı
+- [ ] Security Red Team raporu docs/quality/security-reports/ altında
 - [ ] Critical blocker yok
 - [ ] High blocker yok (veya kabul edildi ve belgelendi)
 - [ ] Bilinen Medium ve Low'lar listelendi
 ```
 
-### 5. QA Verification
+### 5. QA ve Work-Product Kanıtı
 
 ```
-- [ ] Tüm AC'ler için test geçiyor
-- [ ] Regression suite temiz
-- [ ] QA sign-off verildi
+- [ ] approval_gates.tests_passing ve qa_sign_off = true
+- [ ] Implementation ve QA task'ları için work-product kanıtı kayıtlı
+- [ ] generate-run-report çıktısı: technical_readiness ve merge_recommendation
 ```
 
 ### 6. Known Limitations
@@ -95,9 +93,10 @@ Tüm kalite kanıtlarını bir araya getir ve net bir merge kararı üret.
 **Gerekçe:** [1-3 cümle]
 
 **Onay için gereken insan aksiyonu:**
-- [ ] Engineering lead onayı
+- [ ] Commit/push ve PR (insan)
+- [ ] Main merge (insan)
 - [ ] (AI feature ise) Model deployment onayı
-- [ ] (DB migration ise) DBA onayı
+- [ ] (DB migration ise) Production migration onayı
 
 **Blocker'lar:** [varsa liste]
 
@@ -106,7 +105,7 @@ Tüm kalite kanıtlarını bir araya getir ve net bir merge kararı üret.
 
 ## Karar Kriterleri
 
-- **MERGE READY:** Tüm checkbox'lar işaretli, blocker yok, known limitations kabul edilmiş
+- **MERGE READY:** Tüm checkbox'lar kanıtla işaretli, blocker yok, known limitations yazılmış (karar yine insanındır)
 - **BLOCKED:** Herhangi bir Critical/High blocker, test başarısızlığı veya CI hatası var
 
 ## Kesin Sınırlar

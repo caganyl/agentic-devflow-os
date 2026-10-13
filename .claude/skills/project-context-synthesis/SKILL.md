@@ -1,115 +1,80 @@
 ---
 name: project-context-synthesis
-description: Local repo, seçilmiş dokümanlar ve source register üzerinden kısa ve kaynak referanslı context pack üretir.
-agent: delivery-lead
-triggers:
-  - Yeni bir task başlatılmadan önce
-  - Uzun süredir çalışılmamış bir REQ'e devam edilirken
-  - Agent'a görev atanmadan önce
+description: Bir alt ajana görev vermeden önce local repo, seçilmiş dokümanlar ve source register'dan kısa, kaynak referanslı bir context pack (300-500 kelime) üretir; kademeli bağlam (CONTEXT_REQUEST) kuralını uygular.
+when_to_use: Alt ajana görev atanmadan önce, uzun süredir dokunulmamış bir REQ'e devam edilirken veya bir ajan CONTEXT_REQUEST döndüğünde. Context pack'i ana oturum yazar.
 ---
 
 # Skill: Project Context Synthesis
 
 ## Amaç
 
-İlgili agent'a ihtiyacından fazla değil, tam ihtiyacı kadar bağlam ver.
+İlgili ajana ihtiyacından fazla değil, tam ihtiyacı kadar bağlam ver. Context
+pack'i ve source register'ı ana oturum yazar; `delivery-lead` yalnızca hangi
+bağlamın gerektiğini planında önerir.
 
 ## Prosedür
 
-### 1. Kaynak Listesini Oluştur
+### 1. Kaynakları Seç
 
-Şu kaynakları kontrol et (hepsini değil, ilgili olanları):
+Yalnızca ilgili olanlar:
 
 ```
-- docs/product/requirements/REQ-XXX.md
-- docs/architecture/adr/
-- docs/contracts/
-- docs/handoffs/REQ-XXX.md
-- src/ (ilgili modül)
-- tests/ (ilgili test)
+- docs/product/requirements/REQ-XXX.md (yalnızca ilgili AC maddeleri)
+- docs/architecture/adr/ (indeks + ilgili ADR'nin Status ve Decision bölümü)
+- docs/contracts/ (yalnızca dokunulan endpoint/event/tablo)
+- docs/handoffs/REQ-XXX.md (yalnızca son "Sonraki Adım")
+- docs/architecture/profile/ARCHITECTURE_PROFILE.md (rolün bölümü)
+- ilgili kaynak modül ve testler
 ```
 
-Her kaynak için not al:
-- Son değişiklik tarihi
-- İlgililik derecesi (high/medium/low)
-- Güven seviyesi (canonical/draft/stale)
+Her kaynak için güven düzeyi: canonical / draft / stale. Stale kaynak
+"doğrulanması gerekiyor" diye işaretlenir.
 
-### 2. Source Register'ı Güncelle
+### 2. Dış Kaynaklar (yalnızca bağlıysa)
 
-`.claude/templates/source-register.yaml` formatında kayıt tut:
+- NotebookLM bağlıysa `notebooklm-grounded-retrieval` skill'ini uygula:
+  yalnızca evidence özeti (bulgu, kaynak, güven, "doğrulanması gerekiyor").
+- Obsidian bağlıysa `obsidian-project-context` skill'ini uygula: yalnızca
+  seçilmiş stratejik not özeti, tüm vault değil.
+- Bağlı değillerse bu adımı atla; context pack bunlar olmadan tamdır.
 
-```yaml
-sources:
-  - id: req-xxx
-    path: docs/product/requirements/REQ-XXX.md
-    type: requirement
-    relevance: high
-    confidence: canonical
-    last_verified: "YYYY-MM-DD"
-  - id: contract-api
-    path: docs/contracts/api-v1.yaml
-    type: contract
-    relevance: high
-    confidence: approved
-    last_verified: "YYYY-MM-DD"
-```
+### 3. Source Register
 
-### 3. Evidence Summary Ekle (NotebookLM kullanılıyorsa)
-
-```markdown
-### Evidence from NotebookLM
-- Finding: [bulgu]
-  Source: [doküman adı]
-  Confidence: high/medium/low
-  Note: "doğrulanması gerekiyor — canonical değil"
-```
+Kaynak metadata'sı `.devflow/source-register.json`'a yazılır (şablon:
+`.claude/templates/source-register.yaml`). Ham içerik, URL, token veya
+credential yazılmaz; yasak alanları CLI reddeder (exit 10).
 
 ### 4. Context Pack Üret
 
-`.claude/templates/context-pack.md` formatında üret:
-- 300-500 kelimeyi geçme
-- Kaynak referansı içer
-- Kapsam dışı olanları açıkça belirt
+Tek format: `.claude/templates/context-pack.md`. Konum:
+`.devflow/context/RUN-NNN-<rol>.md`. 300-500 kelime, kaynak yolu + bölüm,
+kapsam dışı açıkça yazılır. Rol başına ne verileceği:
+`.claude/rules/context-distribution.md`.
 
-### 4b. Kademeli Bağlam (Iterative Retrieval)
+### 4b. Kademeli Bağlam
 
 Esin kaynağı: affaan-m/everything-claude-code `iterative-retrieval` fikri.
 
-Context pack'i "her şey olsun" diye şişirme. Önce en dar paketi ver; alt ajan
-eksik görürse ister:
-
-1. İlk paket: görev özeti, ilgili AC maddeleri, seam/contract yolları,
-   `docs/product/GLOSSARY.md` terimleri, kapsam dışı. 300-500 kelime.
-2. Alt ajan eksik bağlam görürse işi durdurmadan sonucunun başına şu bloğu
-   koyar (en fazla 3 kalem, her biri yol + bölüm):
+1. İlk paket en dardır: görev özeti, ilgili AC, seam/contract yolları,
+   `docs/product/GLOSSARY.md` terimleri, kapsam dışı.
+2. Alt ajan eksik görürse sonucunun başına yazar (en fazla 3 kalem):
    ```text
    CONTEXT_REQUEST:
-   - docs/contracts/openapi/orders.yaml#/paths/~1orders/post
+   - docs/contracts/openapi/REQ-012.yaml#/paths/~1orders/post
    - src/Orders/Application/CreateOrderHandler.cs (yalnızca Handle metodu)
    ```
-3. Orkestratör yalnızca istenen bölümleri ekleyip görevi yeniden verir.
-4. En fazla 2 retrieval turu. Üçüncü istek, görev tanımının yanlış
-   bölündüğünün işaretidir; görevi küçült veya insana sor.
+3. Yalnızca istenen bölümleri ekleyip görevi yeniden ver.
+4. En fazla 2 retrieval turu. Üçüncü istek görevin yanlış bölündüğünün
+   işaretidir; görevi küçült veya insana sor.
 
 ### 4c. Yerel Kod Haritası (pilot, opsiyonel)
 
-Büyük repolarda (özellikle .NET çözümleri) keşif için yerel bir kod
-haritası aracı (ör. Graphify) pilot olarak denenebilir. Koşullar:
-
-- Yalnızca yerel AST/kod modu kullanılır; doküman veya kaynak kod içeriği
-  onaysız bir dış LLM sağlayıcısına gönderilmez.
-- Harita çıktısı canonical kaynak değildir; source register'da
-  `confidence: draft` olarak kaydedilir.
-- Context pack'e haritanın tamamı değil, ilgili modülün özeti girer.
-- Pilotun ölçütü: aynı görevde keşif için okunan dosya sayısı ve token.
-
-### 5. Dağıtım Kararı
-
-`.claude/rules/context-distribution.md` kurallarına göre hangi agent'a
-ne kadar bağlam verileceğine karar ver.
+Büyük repolarda (özellikle .NET çözümleri) yerel bir kod haritası aracı
+pilot olarak denenebilir: yalnızca yerel AST/kod modu; içerik onaysız dış
+LLM'e gönderilmez; çıktı `confidence: draft` kaydedilir; context pack'e
+yalnızca ilgili modülün özeti girer.
 
 ## Notlar
 
-- Raw doküman yerine kaynak referanslı özet ver
-- Hassas veri (secret, kişisel not) context pack'e ekleme
-- Eski (stale) kaynak varsa "doğrulanması gerekiyor" işareti koy
+- Raw doküman yerine kaynak referanslı özet ver.
+- Hassas veri (secret, kişisel not) context pack'e girmez.

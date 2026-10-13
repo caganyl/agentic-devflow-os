@@ -1,10 +1,7 @@
 ---
 name: obsidian-project-context
 description: Obsidian vault'tan yalnızca seçilmiş stratejik bağlamı kullanır; tüm vault değil, kişisel notlar değil.
-agent: delivery-lead
-triggers:
-  - Stratejik ürün bağlamı gerektiğinde
-  - Ürün yönü veya öncelik kararı alınırken
+when_to_use: Obsidian bağlıyken stratejik ürün bağlamı veya öncelik kararı için not seçilecekken.
 ---
 
 # Skill: Obsidian Project Context

@@ -1,12 +1,7 @@
 ---
 name: adversarial-security-review
 description: Threat modeling, prompt injection, secret exposure, unsafe input, authz/authn, dependency ve veri riskleri için adversarial güvenlik review yapar.
-agent: security-red-team
-triggers:
-  - Implementation tamamlandıktan sonra, release öncesinde
-  - AI/LLM feature içeren her implementation
-  - Auth/authz değişikliği yapıldığında
-  - External veri alınan her özellikte
+when_to_use: Implementation sonrası ve release öncesi security review'da; auth/authz değişikliği, dış veri alan özellik veya AI/LLM girdisi olduğunda.
 ---
 
 # Skill: Adversarial Security Review

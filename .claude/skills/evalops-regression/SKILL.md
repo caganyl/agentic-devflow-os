@@ -1,11 +1,7 @@
 ---
 name: evalops-regression
 description: Golden, adversarial ve regression eval yaklaşımını; quality/cost/latency/faithfulness trade-off'larını yönetir.
-agent: evalops-reviewer
-triggers:
-  - AI/RAG/LLM feature tamamlandığında
-  - Model, provider, prompt veya retrieval değiştiğinde
-  - Release öncesi kalite regresyonu kontrolünde
+when_to_use: AI/RAG/LLM özelliği tamamlandığında, model/provider/prompt/retrieval değiştiğinde veya release öncesi kalite regresyonu ölçülürken.
 ---
 
 # Skill: EvalOps Regression

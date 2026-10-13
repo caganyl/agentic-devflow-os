@@ -1,71 +1,60 @@
 ---
 name: task-routing
-description: Task türü, risk, bağımlılık ve ownership üzerinden minimum agent setini seçer.
-agent: delivery-lead
-triggers:
-  - Her yeni task veya REQ-ID geldiğinde
-  - Mevcut plan güncellendiğinde
-  - Scope değiştiğinde
+description: Bir task veya REQ için gereksiz rol çağırmadan minimum DevFlow rol setini, workflow'u ve paralel/sıralı grupları seçer; kararı kısa bir routing notu olarak belgeler.
+when_to_use: Yeni bir task veya REQ geldiğinde, plan güncellenirken, kapsam değiştiğinde veya hangi ajanın çağrılacağı belirsizken.
 ---
 
 # Skill: Task Routing
 
 ## Amaç
 
-Her task için gereksiz rol çağırmadan doğru minimum agent setini belirle.
+Her task için doğru minimum rol setini belirle. Routing tablosu ve karar
+ağacının tek kaynağı `.claude/rules/task-routing.md`'dir; burada kopyası
+tutulmaz, dosyayı oku.
 
 ## Prosedür
 
-### 1. Task Türünü Belirle
+### 1. Workflow'u Seç
 
-Şu soruları sor:
-- Yeni ürün fikri mi? → `new-product-discovery` workflow
-- Onaylı REQ ile yeni feature mi? → `feature-delivery` workflow
-- AI/LLM/RAG bileşen var mı? → `ai-rag-delivery` workflow
-- Veri görselleştirme veya dashboard mı? → `data-dashboard-delivery` workflow
-- Bir bug düzeltmesi mi? → `bug-resolution` workflow
-- Güvenlik riski veya incident mi? → `security-response` workflow
-- Release hazırlığı mı? → `release-readiness` workflow
-- Maliyet optimizasyonu mu? → `cost-optimization` workflow
+- Yeni ürün fikri → `new-product-discovery`
+- Onaylı REQ ile yeni feature → `feature-delivery`
+- AI/LLM/RAG bileşeni → `ai-rag-delivery`
+- Dashboard veya veri görselleştirme → `data-dashboard-delivery`
+- Bug → `bug-resolution`
+- Güvenlik riski veya incident → `security-response`
+- Release hazırlığı → `release-readiness`
+- Maliyet optimizasyonu → `cost-optimization`
+- Projeye katılım / onaylı mimari profil yok → `project-onboarding`
+- Yalnızca README veya yorum → Docs Writer, workflow gerekmez
 
-### 2. Temel Rol Setini Al
+### 2. Temel Rol Setini Al ve Risk Faktörlerini Uygula
 
-`.claude/rules/task-routing.md` tablosundan task türüne uygun temel seti al.
-
-### 3. Risk Faktörlerini Uygula
-
-Her faktör için ilgili rolü ekle:
+Temel seti `.claude/rules/task-routing.md` tablosundan al, karar ağacını
+uygula. Ek roller:
 
 | Faktör | Eklenen Rol |
 |--------|-------------|
-| Mimari karar gerekiyor | Solution Architect |
-| Yeni external sistem entegrasyonu | Security Red Team |
+| ADR eşiği sağlanıyor | Solution Architect + ADR Reviewer |
+| Yeni dış sistem entegrasyonu veya yüksek güvenlik riski | Security Red Team |
 | AI/ML bileşen | EvalOps Reviewer |
 | Database schema değişikliği | Database Engineer |
-| UI içeriyor | Design Reviewer (varsa) |
-| Production deploy gerekiyor | Integration/Release |
-| Yüksek güvenlik riski | Security Red Team (zorunlu) |
+| UI değişikliği | Design Reviewer |
+| Kod veya klasör yapısı değişti | Docs Writer (QA ve Security sonrası) |
+| Merge öncesi kanıt/scorecard | Integration/Release |
 
-### 4. Paralel Çalışma Kontrolü
+### 3. Paralel Çalışma Kontrolü
 
-Her iki role aynı dosya yoluna dokunacaksa paralel atama yapma.
-Contract onayı olmadan Frontend + Backend'e paralel atama yapma.
+Aynı dosya yoluna dokunacak iki role paralel atama yapma. Contract kaydı
+olmadan Frontend + Backend'e paralel atama yapma.
 
-### 5. Routing Kararını Belgele
+### 4. Routing Kararını Belgele
 
 ```markdown
 ## Task Routing Kararı: [görev adı]
-
-- Task türü: [tür]
-- Temel roller: [liste]
-- Eklenen roller ve gerekçe: [liste]
-- Çıkarılan roller ve gerekçe: [liste]
-- Paralel gruplar: [Frontend+Backend, QA+Implementation vb.]
-- Sıralı bağımlılıklar: [A → B → C]
+- Workflow: [ad] · delivery type: [tip]
+- Roller: [liste] · eklenen/çıkarılan ve gerekçe: [liste]
+- Paralel gruplar: [...] · sıralı bağımlılıklar: [A → B → C]
 ```
 
-## Notlar
-
-- Daha az rol = daha hızlı teslimat, ama gözden kaçan risk
-- Daha fazla rol = daha kapsamlı coverage, ama koordinasyon maliyeti
-- Delivery Lead her ikisi arasında bilinçli seçim yapar ve belgelenr
+Daha az rol daha hızlıdır ama risk kaçırabilir; daha fazla rol koordinasyon
+maliyetidir. Seçim bilinçli yapılır ve gerekçesi bu notta belgelenir.

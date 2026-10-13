@@ -1,11 +1,7 @@
 ---
 name: architecture-discovery
 description: Mevcut (brownfield) bir .NET ve/veya Next.js/React projesinin mimarisini deterministik tarayıcı ve birkaç örnek dosyayla çıkarır, insan onayına giden mimari profil taslağını üretir ve onaylı kuralların sürekli kontrolünü kurar.
-agent: architecture-analyst
-triggers:
-  - Projeye sonradan katılan biri projeyi tanımak istediğinde
-  - Bir projede DevFlow ilk kez kullanılacakken
-  - Implementer ajan "mimari profil yok" blocker'ı raporladığında
+when_to_use: Dolu bir projeye ilk katılımda, DevFlow ilk kez kullanılırken veya bir implementer 'mimari profil yok' blocker'ı raporladığında.
 ---
 
 # Skill: Architecture Discovery
