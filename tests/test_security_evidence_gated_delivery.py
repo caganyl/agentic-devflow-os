@@ -878,6 +878,7 @@ class SecurityEvidenceFullScenarioTest(unittest.TestCase):
         run_ops([
             "record-qa-evidence", "--target", str(self.target),
             "--test-command", "python3 -c pass",
+            "--total", "1", "--passed", "1", "--failed", "0",
         ])
 
     def test_full_pass_evidence_scenario_awaiting_human_approval(self):

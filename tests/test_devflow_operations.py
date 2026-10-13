@@ -365,7 +365,6 @@ class CreateRunTest(unittest.TestCase):
             (self.target / ".devflow" / "project.json").read_text(encoding="utf-8")
         )
         run_id = project_data["current_run_id"]
-        import re
         self.assertRegex(run_id, r"^RUN-\d{3}$")
 
     def test_branch_name_starts_with_prefix(self):

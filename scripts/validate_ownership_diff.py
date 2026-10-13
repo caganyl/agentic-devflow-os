@@ -424,7 +424,13 @@ def validate_diff_ownership(diff_entries, owner_write_paths, req_id):
         for path in entry["paths"]:
             normalized = normalize_path(path)
             matches = matching_owner_indexes(normalized, owner_write_paths)
-            if len(matches) == 0:
+            protected = vom.protected_target_reason(normalized)
+            if protected is not None:
+                errors.append(
+                    f"path {path!r} is in a {protected}; req branch diffs must not "
+                    f"modify it regardless of base manifest {req_id} write_paths"
+                )
+            elif len(matches) == 0:
                 errors.append(
                     f"path {path!r} is not under any owner write_paths in base manifest {req_id}"
                 )
@@ -565,6 +571,13 @@ def validate_bootstrap_diff_coverage(diff_entries, owner_write_paths, manifest_r
                 errors.append(
                     f"bootstrap PR diff must not modify other docs/ownership/ files alongside "
                     f"the new manifest; found: {path!r}"
+                )
+                continue
+            protected = vom.protected_target_reason(normalized)
+            if protected is not None:
+                errors.append(
+                    f"path {path!r} is in a {protected}; bootstrap PR diffs must not "
+                    f"modify it regardless of manifest {req_id} write_paths"
                 )
                 continue
             matches = matching_owner_indexes(normalized, owner_write_paths)

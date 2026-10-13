@@ -141,6 +141,7 @@ class EvidenceVerificationTest(unittest.TestCase):
         result = run_ops([
             "record-qa-evidence", "--target", str(self.target),
             "--test-command", "python3 -c pass",
+            "--total", "1", "--passed", "1", "--failed", "0",
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
         state = self._state()
@@ -152,6 +153,7 @@ class EvidenceVerificationTest(unittest.TestCase):
         result = run_ops([
             "record-qa-evidence", "--target", str(self.target),
             "--test-command", "python3 -c import sys; sys.exit(3)",
+            "--total", "1", "--passed", "0", "--failed", "1",
         ])
         self.assertEqual(result.returncode, 0, result.stderr)
         state = self._state()

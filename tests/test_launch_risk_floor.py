@@ -133,7 +133,8 @@ def _set_qa_gates(target: Path, run_id: str) -> None:
     _record_observed_delegation(target, run_id)
     subprocess.run(
         [sys.executable, str(OPS_SCRIPT), "record-qa-evidence",
-         "--target", str(target), "--test-command", "python3 -c pass"],
+         "--target", str(target), "--test-command", "python3 -c pass",
+         "--total", "1", "--passed", "1", "--failed", "0"],
         capture_output=True, text=True, check=True,
     )
 

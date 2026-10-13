@@ -14,7 +14,18 @@
 set -euo pipefail
 
 TARGET="${1:-$PWD}"
-DEVFLOW_HOME="${DEVFLOW_HOME:-$HOME/Developer/agentic-devflow-os}"
+# Default to the framework checkout containing this script; from a built plugin
+# (<framework>/dist/devflow-plugin/scripts/) that is two levels further up.
+# DEVFLOW_HOME still overrides both.
+SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+if [ -z "${DEVFLOW_HOME:-}" ]; then
+  if [ ! -f "$SCRIPT_ROOT/scripts/build_devflow_plugin.py" ] \
+    && [ -f "$SCRIPT_ROOT/../../scripts/build_devflow_plugin.py" ]; then
+    DEVFLOW_HOME="$(cd "$SCRIPT_ROOT/../.." && pwd -P)"
+  else
+    DEVFLOW_HOME="$SCRIPT_ROOT"
+  fi
+fi
 PLUGIN_DIR="$DEVFLOW_HOME/dist/devflow-plugin"
 
 BOOTSTRAP_REQ="001"
