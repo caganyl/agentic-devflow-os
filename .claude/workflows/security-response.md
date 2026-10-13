@@ -17,7 +17,7 @@ güvenlik incident tespit edildiğinde. Hız ve gizlilik kritiktir.
 
 1. **Security Red Team** — tehdit analizi, severity tespiti, remediation planı
 2. **Backend Engineer** — güvenlik patch implementasyonu
-3. **Delivery Lead** — koordinasyon, insan escalation kararı
+3. **Delivery Lead** — plan; insan escalation önerisi (karar insanda)
 4. **Database Engineer** (veri sızıntısı veya SQL injection varsa)
 5. **Integration/Release** (critical patch release ise)
 
@@ -42,7 +42,7 @@ güvenlik incident tespit edildiğinde. Hız ve gizlilik kritiktir.
 
 ## Üretilecek Artefaktlar
 
-- Security review raporu (`.claude/rules/` veya handoff olarak)
+- Security review raporu (`docs/quality/security-reports/`)
 - Patch kodu
 - Güvenlik test senaryoları
 - Incident report (kısa, hassas detay içermez)
@@ -70,4 +70,5 @@ güvenlik incident tespit edildiğinde. Hız ve gizlilik kritiktir.
 - Açık production'daysa: insan escalation → acil karar
 - Fix regression yaratıyorsa: rollback → alternative approach
 - Scope belirsizliği: Security Red Team ile sınır çiz, daha dar fix yap
+- Patch sonrası yeniden inceleme: en fazla bir tur; hâlâ açık bulgu varsa karar insana
 - Gizlilik ihlali riski: insan onayı olmadan disclosure yapma

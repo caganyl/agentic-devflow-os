@@ -1,3 +1,5 @@
+> **Arşiv — güncel değil.** Güncel hâli: [docs/ARCHITECTURE.md](../../ARCHITECTURE.md). Bkz. `docs/archive/README.md`.
+
 # DevFlow Autonomous Delivery Model
 
 Bu doküman Agentic DevFlow OS'un delivery modelini, framework/target repo

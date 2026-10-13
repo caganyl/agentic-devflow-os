@@ -1,4 +1,7 @@
-# ADR-XXX — [Karar Başlığı]
+# ADR-NNN — [Karar Başlığı]
+
+<!-- Dosya: docs/architecture/adr/ADR-NNN-kisa-ad.md (alt klasör yok).
+     Bir branch'te en fazla bir yeni ADR. -->
 
 <!-- Bütçe: en fazla ~12.000 karakter (hook ile zorlanır). Bir ADR bir karardır;
      ayrıntılı tasarım contract'a, kod ayrıntısı implementation'a, açık uçlu
@@ -7,8 +10,10 @@
 ## Status
 Proposed
 
-<!-- Proposed | Accepted | Superseded | Rejected. Accepted yalnızca insan
-     tarafından yazılır; Accepted ADR dondurulur (hook), değişiklik yeni ADR ile yapılır. -->
+<!-- Proposed | Accepted | Superseded | Deprecated | Withdrawn | Rejected.
+     Accepted yalnızca insan tarafından yazılır; Accepted ADR dondurulur (hook).
+     Değişiklik yeni ADR ile yapılır; eski ADR yalnızca status satırı
+     değiştirilerek Superseded/Deprecated/Withdrawn yapılabilir. -->
 
 ## Context
 <!-- En fazla 2 paragraf: hangi REQ, hangi kısıt, neden şimdi karar gerekiyor. -->

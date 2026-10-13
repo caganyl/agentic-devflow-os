@@ -63,7 +63,7 @@ Bu özet ve aşağıdaki bilgiler ile devam edilebilir:
 1. Aktif run: `RUN-[NNN]` → `.devflow/runs/RUN-[NNN].json`
 2. Context pack: `.devflow/context/[pack-adı].md`
 3. Açık görevler: yukarıdaki tablo
-4. `autonomous-delivery-run` skill'ini kullanarak devam et
+4. `orchestrate-delivery` skill'ini kullanarak devam et
 
 ## Sonraki Run İçin Notlar
 

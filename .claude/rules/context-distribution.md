@@ -1,118 +1,47 @@
+---
+paths:
+  - ".devflow/context/**"
+  - ".devflow/task-packets/**"
+  - ".claude/templates/context-pack.md"
+---
+
 # Context Distribution Rules
 
-Bu kurallar agent'lara hangi bağlamın nasıl dağıtılacağını tanımlar.
+Bu kurallar ajanlara hangi bağlamın verileceğini tanımlar. Context pack
+formatı: `.claude/templates/context-pack.md`. Üretim adımları:
+`project-context-synthesis` skill'i.
 
 ## Temel İlke
 
-Her agent yalnızca kendi görevini tamamlamak için gereken minimum bağlamı alır.
-Tüm vault, tüm doküman seti veya tam repo içeriği asla tek bir agent'a gönderilmez.
+Her ajan yalnızca kendi görevi için gereken minimum bağlamı alır. Tüm vault,
+tüm doküman seti veya tam repo içeriği tek bir ajana gönderilmez. Belge
+içeriği yerine yol + 5-10 satırlık özet verilir.
 
-## Context Pack İçeriği
+## Rol Başına Bağlam
 
-Her task-specific context pack şunları içermelidir:
-
-```yaml
-context_pack:
-  req_id: REQ-XXX
-  task_summary: "kısa görev tanımı"
-  relevant_requirements:
-    - req_id: REQ-XXX
-      summary: "..."
-      ac_snippet: "ilgili acceptance criteria"
-  relevant_contracts:
-    - path: "docs/contracts/..."
-      summary: "..."
-  relevant_decisions:
-    - path: "docs/architecture/adr/..."
-      summary: "..."
-  evidence_from_notebooklm:
-    - finding: "..."
-      source: "doküman adı"
-      confidence: "high/medium/low"
-      note: "doğrulanması gerekiyor"
-  strategic_context_from_obsidian:
-    - note: "..."
-      relevance: "neden dahil edildi"
-  known_risks: []
-  out_of_scope: []
-```
-
-## Dağıtım Kuralları
-
-### Product Analyst
-- PRD geçmişi, rakip analiz, kullanıcı araştırması özeti
-- Mevcut requirement'lar (ilgili REQ'ler)
-- Obsidian: stratejik ürün bağlamı (seçili notlar)
-
-### Solution Architect
-- Mevcut ADR'lar
-- Sistem sınırları ve dependency grafiği
-- NotebookLM: teknik araştırma bulguları
-
-### Contract Broker
-- Mevcut contract'lar (OpenAPI, event, DB schema)
-- Frontend + Backend interface beklentileri özeti
-- Requirement'tan gelen data model ipuçları
-
-### Frontend Engineer
-- Onaylı contract (API spec, event spec)
-- Design spec veya mockup referansı
-- Yalnızca frontend dosya alanı ile ilgili ADR'lar
-
-### Backend Engineer
-- Onaylı contract (API spec, event spec, DB schema)
-- Yalnızca backend ve service layer ile ilgili ADR'lar
-- Security kısıtlamaları özeti
-
-### Database Engineer
-- DB schema contract
-- Migration geçmişi özeti
-- Rollback gereksinimleri
-
-### AI/Data Engineer
-- AI/ML ile ilgili ADR'lar
-- Eval konfigürasyonları
-- Model ve provider kısıtlamaları
-
-### QA Automation
-- Acceptance criteria (tam liste)
-- Mevcut test coverage durumu
-- Regression risk alanları
-
-### Security Red Team
-- Tehdit modeli (varsa)
-- Auth/authz contract'ları
-- Bilinen güvenlik kısıtlamaları
-
-### Design Reviewer
-- UI mockup/spec referansları
-- Erişilebilirlik gereksinimleri
-- Marka ve tasarım sistemi referansları
+| Rol | Verilecek bağlam |
+|---|---|
+| Product Analyst | PRD geçmişi, kullanıcı araştırması özeti, ilgili REQ'ler, seçilmiş Obsidian notları |
+| Solution Architect | ADR indeksi + ilgili ADR'ların yalnızca Status ve Decision bölümleri, sistem sınırları, NotebookLM teknik bulguları |
+| Contract Broker | Mevcut contract'lar, frontend/backend arayüz beklentileri, requirement'tan veri modeli ipuçları |
+| Frontend Engineer | Kayıtlı contract, design spec/mockup referansı, profilin Frontend bölümü |
+| Backend Engineer | Kayıtlı contract, profilin Backend bölümü, güvenlik kısıtları özeti |
+| Database Engineer | DB schema contract, migration geçmişi özeti, rollback gereksinimleri |
+| AI/Data Engineer | AI/ML ADR'ları, eval konfigürasyonu, model ve provider kısıtları |
+| QA Automation | Acceptance criteria (tam liste), mevcut test durumu, regression risk alanları |
+| Security Red Team | Tehdit modeli (varsa), auth/authz contract'ları, bilinen güvenlik kısıtları |
+| Design Reviewer | UI mockup/spec referansları, erişilebilirlik gereksinimleri, tasarım sistemi |
+| Docs Writer | Değişen dosya listesi, mimari profil yolu, kök README'deki `devflow:auto` blokları |
 
 ## Kademeli Bağlam
 
 İlk paket dar tutulur. Alt ajan eksik bağlamı sonucunun başında
 `CONTEXT_REQUEST:` bloğuyla (en fazla 3 yol + bölüm) ister; orkestratör en
-fazla 2 tur ek bağlam verir. Ayrıntı: `project-context-synthesis` skill'i, 4b.
+fazla 2 tur ek bağlam verir. Üçüncü istek görevin yanlış bölündüğünün
+işaretidir: görevi küçült veya insana sor.
 
-## Hassas Veri Kuralları
+## Hassas Veri
 
-Hiçbir agent'a şunlar gönderilmez:
-- API key, token veya secret
-- Production credential'ları
-- Kişisel kullanıcı verisi
-- Ham NotebookLM belgesi (yalnızca evidence summary)
-- Tam Obsidian vault içeriği (yalnızca seçilen notlar özeti)
-
-## Context Yaşam Döngüsü
-
-```
-1. Delivery Lead context ihtiyacını belirler
-2. project-context-synthesis skill çalışır
-3. source-register güncellenir
-4. task-specific context pack üretilir
-5. İlgili agent'a iletilir
-6. Agent görevini tamamlar
-7. Output git artefaktına dönüştürülür
-8. Context pack sonraki task için güncellenir
-```
+Hiçbir ajana gönderilmez: API key, token, secret, production credential,
+kişisel kullanıcı verisi, ham NotebookLM belgesi (yalnızca evidence özeti),
+tam Obsidian vault içeriği (yalnızca seçilmiş not özeti).

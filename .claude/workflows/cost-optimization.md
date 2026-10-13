@@ -17,7 +17,7 @@ değişikliği değerlendirildiğinde.
 ## Kullanılacak Roller
 
 1. **Delivery Lead** — maliyet/kalite trade-off kararlarını önceliklendirme
-2. **Solution Architect** — mimari iyileştirme seçenekleri, ADR
+2. **Solution Architect** — iyileştirme seçenekleri; ADR yalnızca eşik sağlanırsa
 3. **AI/Data Engineer** — LLM/embedding model seçimi, prompt optimizasyonu, caching
 4. **Integration/Release** — iyileştirme sonrası benchmark ve scorecard
 
@@ -64,5 +64,5 @@ değişikliği değerlendirildiğinde.
 ## Failure / Recovery
 
 - Quality bozuluyor: değişikliği geri al, daha küçük adımla dene
-- Maliyet hedefi tutmuyor: Solution Architect ile alternatif mimari değerlendir
+- Maliyet hedefi tutmuyor: bir alternatif dene; ikinci denemede de tutmuyorsa sonuçları insana sun, mimari döngü başlatma
 - Benchmark anlaşmazlığı: EvalOps Reviewer ile eval metodolojisini netleştir

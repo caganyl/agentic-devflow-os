@@ -1,11 +1,7 @@
 ---
 name: documentation-sync
 description: Klasör README'lerini yazar, kök README'nin otomatik bloklarını mimari profile ve gerçek komutlara göre günceller ve değişen dosyalara yalnızca değerli yorumlar ekler. docs-writer ajanı uygular.
-agent: docs-writer
-triggers:
-  - Bir REQ'in implementation ve QA'i bittiğinde, release öncesi
-  - Mimari profil onaylandıktan sonra (onboarding)
-  - Kök README'deki komutlar veya klasör haritası eskidiğinde
+when_to_use: Bir REQ'in implementation, QA ve security adımları bittiğinde (Documentation task'ı), mimari profil onaylandıktan sonra veya kök README'deki komutlar/klasör haritası eskidiğinde.
 ---
 
 # Skill: Documentation Sync

@@ -1,11 +1,7 @@
 ---
 name: tdd-vertical-slice
 description: Implementer ve QA rolleri için kırmızı-yeşil döngüsü. Testler yalnızca contract ve acceptance criteria'dan çıkan public seam'lerde, her seferinde tek dilim olarak yazılır.
-agent: backend-engineer
-triggers:
-  - Onaylı manifestli bir REQ için implementation başlarken
-  - Bug fix için repro testi yazılırken
-  - QA bir acceptance criterion'u teste çevirirken
+when_to_use: Onaylı manifestli bir REQ için implementation başlarken, bug için repro testi yazılırken veya bir AC teste çevrilirken.
 ---
 
 # Skill: TDD — Dikey Dilim
@@ -29,7 +25,7 @@ davranışı. Seam listesi icat edilmez, şuradan çıkar:
 - Görevin acceptance criteria maddeleri
 
 Task packet'te seam listesi yoksa önce listeyi yaz (en fazla 5 seam) ve
-Delivery Lead'e raporla. Listede olmayan seam'e test yazma.
+sonucunda ana oturuma raporla. Listede olmayan seam'e test yazma.
 
 ### 2. Döngü: bir seam, bir test, bir minimal implementation
 

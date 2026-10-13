@@ -1,12 +1,7 @@
 ---
 name: api-contract-design
 description: Contract-first yaklaşımla frontend/backend paralelliği için OpenAPI, event, DB schema ve shared type sözleşmeleri üretir.
-agent: contract-broker
-triggers:
-  - Frontend ve Backend paralel çalışmaya başlamadan önce
-  - Yeni API endpoint eklenirken
-  - Event bus veya message schema değiştiğinde
-  - Shared type eklenirken
+when_to_use: Frontend ve backend aynı arayüzde paralel çalışmadan önce, yeni endpoint/event/shared type eklenirken veya mevcut contract değişirken.
 ---
 
 # Skill: API Contract Design

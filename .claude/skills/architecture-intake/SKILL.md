@@ -1,10 +1,7 @@
 ---
 name: architecture-intake
 description: Sıfırdan başlayan (greenfield) bir projede mimariyi insanla tek tek soru sorarak belirler ve brownfield projelerle aynı formatta onaylı mimari profil üretir. Ana oturum insanla birlikte çalıştırır.
-agent: solution-architect
-triggers:
-  - Mimari tarayıcı project_state empty döndüğünde
-  - Yeni bir servis veya frontend uygulaması sıfırdan kurulacakken
+when_to_use: Mimari tarayıcı project_state empty döndüğünde veya yeni bir servis/frontend sıfırdan kurulacakken; ana oturum insanla çalıştırır.
 ---
 
 # Skill: Architecture Intake (Greenfield)

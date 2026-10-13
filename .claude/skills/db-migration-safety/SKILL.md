@@ -1,11 +1,7 @@
 ---
 name: db-migration-safety
 description: Migration önerisi, rollback planı, approval gate ve destructive database işlem sınırlarını uygular.
-agent: database-engineer
-triggers:
-  - Yeni database migration yazılacağında
-  - Schema değişikliği gerektiğinde
-  - Production migration onayı alınmadan önce
+when_to_use: Yeni migration yazılırken, schema değişirken veya production migration onayı istenmeden önce.
 ---
 
 # Skill: DB Migration Safety

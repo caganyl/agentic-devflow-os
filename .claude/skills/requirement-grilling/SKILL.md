@@ -1,11 +1,7 @@
 ---
 name: requirement-grilling
 description: Bir fikri REQ'e çevirmeden önce insanla tek tek soru sorarak belirsizlikleri kapatır; çıktısı net acceptance criteria, kapsam dışı listesi ve terim sözlüğü güncellemesidir. Ana oturum insanla birlikte çalıştırır.
-agent: product-analyst
-triggers:
-  - Yeni bir fikir veya belirsiz bir istek REQ'e dönüştürülecekken
-  - Acceptance criteria eksik veya yoruma açıkken
-  - Tasarım fazında aynı soru ikinci kez tartışılmaya başladığında
+when_to_use: Yeni bir fikir veya belirsiz bir istek REQ'e dönüştürülecekken, AC eksik/yoruma açıkken veya tasarımda aynı soru ikinci kez tartışılmaya başladığında; ana oturum insanla çalıştırır.
 ---
 
 # Skill: Requirement Grilling

@@ -1,3 +1,5 @@
+> **Arşiv — güncel değil.** Güncel hâli: [docs/ARCHITECTURE.md](../ARCHITECTURE.md). Bkz. `docs/archive/README.md`.
+
 # Sistem Genel Bakış
 
 Bu belge Agentic DevFlow OS'un ne olduğunu, hangi parçalardan oluştuğunu ve

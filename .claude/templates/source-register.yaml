@@ -14,7 +14,7 @@ sources:
     notes: ""
 
   - id: contract-api-v1
-    path: docs/contracts/api-v1.yaml
+    path: docs/contracts/openapi/REQ-XXX.yaml
     type: contract
     relevance: high
     confidence: approved
@@ -22,7 +22,7 @@ sources:
     notes: ""
 
   - id: adr-001
-    path: docs/architecture/adr/ADR001-example.md
+    path: docs/architecture/adr/ADR-001-example.md
     type: adr
     relevance: medium
     confidence: canonical

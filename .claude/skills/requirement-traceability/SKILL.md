@@ -1,12 +1,7 @@
 ---
 name: requirement-traceability
 description: Evidence → requirement → acceptance criteria → task → test → handoff zincirini kurar ve doğrular.
-agent: delivery-lead
-triggers:
-  - Yeni requirement oluşturulurken
-  - Test coverage değerlendirilirken
-  - Handoff hazırlanırken
-  - Release öncesi traceability kontrolünde
+when_to_use: Requirement yazılırken, test kapsamı veya handoff hazırlanırken ve release öncesi AC → test → handoff zinciri kontrol edilirken.
 ---
 
 # Skill: Requirement Traceability
@@ -57,7 +52,7 @@ Her AC için kontrol et:
 - **AC var, test yok:** QA Automation'a görev oluştur
 - **Test var, AC yok:** Product Analyst'e gönder, AC'yi netleştir
 - **Test geçiyor ama hangi AC'yi kapsıyor belli değil:** Test adını ve docstring'i güncelle
-- **Handoff güncellenmemiş:** Delivery Lead handoff'u güncelle
+- **Handoff güncellenmemiş:** Docs Writer (veya Integration/Release) handoff'u günceller
 
 ### 4. Release Traceability Kontrolü
 

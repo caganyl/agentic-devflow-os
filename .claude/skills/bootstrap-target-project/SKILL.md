@@ -1,19 +1,16 @@
 ---
 name: bootstrap-target-project
-description: Target project .devflow/ yapısını doğrular ve framework / target repo ayrımını korur.
-agent: delivery-lead
-triggers:
-  - Yeni bir target project'e DevFlow uygulanmadan önce
-  - .devflow/ workspace'in doğru yapıda olup olmadığı kontrol edilmesi gerektiğinde
-  - Framework repo ile target repo ayrımı sorgulandığında
+description: Operatör rehberi — target project'te .devflow/ yapısını kurar ve doğrular, framework/target repo ayrımını korur.
+disable-model-invocation: true
 ---
 
 # Skill: Bootstrap Target Project
 
 ## Amaç
 
-Target project repository'sinde `.devflow/` çalışma alanını kurmak, doğrulamak ve
-framework repo ile target repo arasındaki sınırı korumak.
+Operatör rehberi: target project repository'sinde `.devflow/` çalışma alanını
+kurmak, doğrulamak ve framework/target sınırını korumak. Günlük kullanımda
+bunu `claude-devflow` (bootstrap + plugin) zaten yapar; bkz. `docs/ARCHITECTURE.md`.
 
 ## Prosedür
 
@@ -64,7 +61,8 @@ Bu komut şu yapıyı oluşturur:
 ├── task-packets/        ← görev paketleri
 ├── runs/                ← run state dosyaları
 ├── reports/             ← scorecard ve raporlar
-├── cache/               ← gitignore'lanmış
+├── delegation-events/   ← SubagentStart/Stop kanıtı (recorder yazar)
+├── cache/               ← gitignore'lanmış (state imza anahtarı)
 └── logs/                ← gitignore'lanmış
 ```
 
@@ -102,7 +100,7 @@ Target project'in `.gitignore` dosyasında şunlar olduğunu kontrol et:
 
 ### 6. Framework / Target Ayrımı Sınırları
 
-- Framework repo (`~/Developer/agentic-devflow-os`) yalnızca DevFlow kontrol düzlemini taşır.
+- Framework repo (`DEVFLOW_HOME`, bu repo) yalnızca DevFlow kontrol düzlemini taşır.
 - Target project kendi kaynak kodunu ve `.devflow/` çalışma alanını taşır.
 - Framework repo içinde target project artefaktı üretme.
 - Target project içinde framework repo'ya doğrudan referans verme.

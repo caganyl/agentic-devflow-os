@@ -1,11 +1,7 @@
 ---
 name: visual-design-review
 description: UI/UX, tipografi, spacing, layout hiyerarşisi, responsive davranış, accessibility, interaction feedback ve "AI-generated generic UI" riskleri için review yapar.
-agent: design-reviewer
-triggers:
-  - UI içeren her feature tamamlandığında
-  - Merge öncesi design/a11y review gerektiğinde
-  - Tasarım kararı tartışmalı olduğunda
+when_to_use: UI içeren bir değişiklik tamamlandığında, merge öncesi design/a11y review'da veya bir tasarım kararı tartışmalıyken.
 ---
 
 # Skill: Visual Design Review
@@ -82,7 +78,7 @@ ama kullanılması zor veya görsel açıdan tutarsız arayüzleri tespit et.
 LLM ile üretilen UI'larda özellikle şunlara dikkat et:
 ```
 - [ ] Renk paleti ürünle tutarlı mı? (Şablondan kalan mavi-gri değil mi?)
-- [ ] Component boyutları ve spacing stash değerleri mi yoksa keyfi mi?
+- [ ] Component boyutları ve spacing tasarım sistemi token'larından mı geliyor, yoksa keyfi değerler mi?
 - [ ] İkon seti tutarlı mı? (karışık icon library yok mu?)
 - [ ] Buton stilleri uygulamada kullanılan sistemle örtüşüyor mu?
 - [ ] Gereksiz veya içeriksiz placeholder metin kaldı mı?

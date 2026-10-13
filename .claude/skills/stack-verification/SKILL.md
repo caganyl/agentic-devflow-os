@@ -1,11 +1,7 @@
 ---
 name: stack-verification
 description: Bir görevi "bitti" demeden önce .NET ve Next.js/React projelerinde sabit sırayla build, format, tip, test, mimari, bağımlılık ve UI dedektörü kontrollerini çalıştırır; bağlama yalnızca hataları taşır ve sonucu record-qa-evidence ile kaydettirir.
-agent: qa-automation
-triggers:
-  - Implementer görevini tamamlamadan önce
-  - QA sign-off öncesi
-  - PR review düzeltmelerinden sonra
+when_to_use: Bir implementer veya QA görevini 'bitti' demeden önce, QA sign-off öncesi ve PR review düzeltmelerinden sonra.
 ---
 
 # Skill: Stack Verification
@@ -63,13 +59,16 @@ ihlali var. `known_deviations` altındakiler görevi düşürmez.
 
 ### Sonuç ve kanıt
 
-Tüm adımlar geçtiyse sayıları ana oturuma bildir; kanıt kaydını yetkili CLI
-yapar:
+Tüm adımlar geçtiyse sonucu ana oturuma bildir; kanıtı ana oturum yetkili
+CLI ile kaydeder (CLI test komutunu kendisi çalıştırıp exit kodunu ölçer):
 
 ```bash
 python3 "$DEVFLOW_OPERATIONS_SCRIPT" record-qa-evidence --target "$DEVFLOW_RUN_WORKTREE" \
-  --total <n> --passed <n> --failed 0 --exit-code 0
+  --test-command "dotnet test --nologo"
 ```
+
+Dilim sırasında yalnızca odaklı testleri çalıştır; bu sıranın tamamı görev
+sonunda bir kez çalışır.
 
 Bir adımda üç düzeltme denemesinden sonra hâlâ kırmızıysa dur ve
 `root-cause-investigation` skill'ine geç veya blocker olarak raporla.

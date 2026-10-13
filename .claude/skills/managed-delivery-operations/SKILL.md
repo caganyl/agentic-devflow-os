@@ -1,20 +1,18 @@
 ---
 name: managed-delivery-operations
-description: Yalnızca scripts/devflow_operations.py üzerinden kontrollü Git operasyonu yapılabileceğini belirtir ve yasak operasyonları engeller.
-agent: delivery-lead
-triggers:
-  - Commit, push veya PR oluşturmadan önce
-  - Herhangi bir Git operasyonu planlanırken
-  - Delivery teslim aşamasında
+description: Operatör rehberi — hedef projede Git ve teslimat işlemlerinin yalnızca scripts/devflow_operations.py üzerinden yapılabileceğini, yasak operasyonları ve exit kodlarını listeler.
+disable-model-invocation: true
 ---
 
 # Skill: Managed Delivery Operations
 
 ## Amaç
 
-Target project'te tüm Git operasyonlarının `scripts/devflow_operations.py`
-üzerinden kontrollü olarak yapılmasını güvenceye al. Ham Git komutlarının
-yanlışlıkla çalıştırılmasını önle.
+Operatör rehberi: target project'te run, kanıt ve teslimat işlemlerinin
+`scripts/devflow_operations.py` üzerinden yapılmasını ve yasak Git
+operasyonlarının çalıştırılmamasını anlatır. Commit, push ve merge insan
+adımıdır; governed ajanlar için hook `git add/commit/push` dahil Git
+mutasyonunu reddeder.
 
 ## İzin Verilen Operasyonlar
 
@@ -26,6 +24,10 @@ Yalnızca `devflow_operations.py` subcommand'ları üzerinden:
 | `create-run` | Yeni delivery run oluştur (korumalı branch dışında) |
 | `launch` | Managed run worktree oluştur ve Claude supervisor başlat |
 | `status` | Run durumunu göster |
+| `generate-task-graph` | Deterministik task graph (`--needs-adr` opt-in) |
+| `update-task-status` | Task durumunu geçiş doğrulamasıyla güncelle |
+| `record-qa-evidence` / `record-security-evidence` / `record-contract-evidence` / `record-work-product-evidence` | Kanıt kaydı ve approval gate güncellemesi |
+| `generate-run-report` | Run raporu ve scorecard (`.devflow/reports/`) |
 | `prepare-delivery` | Delivery hazırlık doğrulama raporu üret |
 
 ## Kesinlikle Yasak Operasyonlar

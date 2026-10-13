@@ -1,11 +1,7 @@
 ---
 name: root-cause-investigation
 description: Bug çözümünde kök neden kanıtlanmadan fix yazılmamasını sağlar. Repro, hipotez günlüğü ve en fazla üç hipotezlik bir sınır kullanır.
-agent: qa-automation
-triggers:
-  - bug-resolution workflow'u başladığında
-  - Bir test beklenmedik şekilde başarısız olduğunda ve sebep açık olmadığında
-  - Aynı hata ikinci kez "düzeltildi" denip geri geldiğinde
+when_to_use: bug-resolution workflow'u başladığında, bir test beklenmedik şekilde kırıldığında veya aynı hata 'düzeltildi' denip geri geldiğinde.
 ---
 
 # Skill: Root Cause Investigation

@@ -1,13 +1,20 @@
+---
+paths:
+  - ".devflow/**"
+  - ".claude/workflows/**"
+---
+
 # Task Routing Rules
 
-Bu kurallar hangi task türünde hangi agent rollerinin devreye alınacağını tanımlar.
+Hangi task türünde hangi rollerin devreye gireceğinin tek kaynağı bu
+dosyadır. Orkestratör ana oturumdur; `delivery-lead` yalnızca plan döner.
 
 ## Routing Tablosu
 
 | Task türü             | Ana roller                                                                                 |
 | --------------------- | ------------------------------------------------------------------------------------------ |
-| Yeni ürün fikri       | Delivery Lead, Product Analyst, Design Reviewer, Solution Architect                        |
-| Yeni feature          | Delivery Lead, Product Analyst, Solution Architect, Contract Broker, Frontend, Backend, QA |
+| Yeni ürün fikri       | Delivery Lead, Product Analyst, Design Reviewer, Solution Architect (fizibilite notu)      |
+| Yeni feature          | Delivery Lead, Product Analyst, Contract Broker, Frontend, Backend, QA, Security, Docs Writer, Integration/Release (ADR eşiği varsa + Solution Architect, ADR Reviewer) |
 | AI/RAG özelliği       | Delivery Lead, AI/Data Engineer, EvalOps Reviewer, Security Red Team, Backend Engineer     |
 | Veri dashboard'u      | Delivery Lead, AI/Data Engineer, Design Reviewer, Backend Engineer, QA Automation         |
 | Bug                   | Delivery Lead, QA Automation, ilgili domain engineer (Frontend/Backend/Database/AI)        |
@@ -17,15 +24,18 @@ Bu kurallar hangi task türünde hangi agent rollerinin devreye alınacağını 
 | Projeye katılım / yeni proje kurulumu | Architecture Analyst, Docs Writer; greenfield'da Solution Architect, Backend, Frontend |
 | Dokümantasyon (README, yorum) | Docs Writer                                                                     |
 
-## Minimum Rol Seçimi İlkesi
+Teslimat sırası: implementation → QA → Security → Docs Writer →
+Integration/Release → insan (merge).
 
-Her task'te tüm roller çağrılmaz. Delivery Lead şu faktörlere göre minimum rol setini seçer:
+## Minimum Rol Seçimi
 
-1. **Task türü** — yukarıdaki tablo temel seti belirler
-2. **Bağımlılıklar** — hangi rol diğerinden önce gelir
-3. **Risk seviyesi** — yüksek risk → daha fazla review rolü
-4. **Ownership sınırları** — aynı dosya alanına paralel assignment yapılmaz
-5. **Mevcut artefaktlar** — contract varsa Contract Broker atlanabilir
+Her task'te tüm roller çağrılmaz. Temel set tablodan gelir; şu faktörlere
+göre rol eklenir veya çıkarılır:
+
+1. **Bağımlılıklar** — hangi rol diğerinden önce gelir
+2. **Risk seviyesi** — yüksek risk → daha fazla review rolü
+3. **Ownership sınırları** — aynı dosya alanına paralel atama yapılmaz
+4. **Mevcut artefaktlar** — contract kayıtlıysa Contract Broker atlanır
 
 ## Rol Seçimi Karar Ağacı
 
@@ -35,32 +45,27 @@ Task geldiğinde:
   1b. Implementation içeriyorsa onaylı mimari profil var mı?
      → Hayır, proje dolu: Architecture Analyst (project-onboarding workflow)
      → Hayır, proje boş: ana oturum insanla architecture-intake
-  2. Requirement (REQ-ID) var mı?
-     → Hayır: Product Analyst devreye al
-  3. Acceptance criteria tanımlı mı?
-     → Hayır: Product Analyst devreye al
-  4. Mimari karar gerekiyor mu? (yalnızca şu durumlarda evet:
+  2. Requirement (REQ-ID) ve acceptance criteria var mı?
+     → Hayır: Product Analyst (belirsizse önce ana oturum + insan: requirement-grilling)
+  3. Mimari karar gerekiyor mu? (yalnızca şu durumlarda evet:
      yeni dış bağımlılık/servis, context'ler arası veri modeli/migration,
      auth/güvenlik sınırı, geriye uyumsuz public contract, geri alınması
      pahalı karar)
      → Evet: Solution Architect ADR yazar, adr-reviewer en fazla 2 turda karar verir
      → Hayır: ADR yok; gerekirse docs/decisions/ altına kısa karar notu
-  5. Frontend + Backend paralel çalışacak mı?
-     → Evet: Contract Broker önce devreye al
-  6. AI/ML/LLM bileşen var mı?
-     → Evet: EvalOps Reviewer ekle
-  7. Security-sensitive alan mı?
-     → Evet: Security Red Team ekle
-  8. Release hazırlığı mı?
-     → Evet: Integration/Release ekle
+  4. Frontend + Backend paralel çalışacak mı? → Evet: önce Contract Broker
+  5. AI/ML/LLM bileşen var mı? → Evet: EvalOps Reviewer
+  6. Security-sensitive alan mı? → Evet: Security Red Team
+  7. Kod veya klasör yapısı değişti mi? → Evet: Docs Writer (QA ve Security sonrası)
+  8. Release hazırlığı mı? → Evet: Integration/Release
 ```
 
 ## Paralel Çalışma Kuralları
 
-Paralel assignment yalnızca ownership path'leri ayrık olduğunda kullanılır:
+Paralel atama yalnızca ownership path'leri ayrık olduğunda yapılır.
 
 **Paralel olabilir:**
-- Frontend + Backend (contract onayı sonrası, farklı dosya alanları)
+- Frontend + Backend (contract kaydı sonrası, farklı dosya alanları)
 - QA + Backend (test ve implementation, farklı dosya alanları)
 - Design Reviewer + Implementation (review ve kod, farklı dosya alanları)
 
@@ -71,8 +76,8 @@ Paralel assignment yalnızca ownership path'leri ayrık olduğunda kullanılır:
 
 ## Approval Gate Noktaları
 
-Her routing planında şu gate'ler belirtilir:
-- Contract review gate (frontend/backend paralel başlamadan önce)
-- Security review gate (release öncesi)
-- Human approval gate (main merge öncesi)
-- QA acceptance gate (completion öncesi)
+Her plan şu gate'leri belirtir:
+- Contract kaydı (`record-contract-evidence`; frontend/backend paralel başlamadan önce)
+- QA kabul kapısı (completion öncesi)
+- Security review (release öncesi, risk sinyali varsa)
+- İnsan onayı (main merge öncesi)

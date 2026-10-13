@@ -34,7 +34,10 @@ Aşağıdaki işlemler insan onayı olmadan yapılmaz:
 - Her feature kendi branch ve worktree'sinde geliştirilir.
 - Bir branch'te aynı anda yalnızca bir writer agent çalışır.
 - Paralel frontend/backend/database çalışması contract onayından sonra başlar.
-- Entegrasyon önce integration/REQ-ID branch'inde yapılır.
+- Implementation `req-NNN-kisa-aciklama` branch'inde veya `launch --req-id`
+  ile açılan managed run branch'inde (`devflow/run-*`) yapılır; entegrasyon
+  bu branch'ten main'e açılan PR ile, insan merge'üyle olur. Ayrı bir
+  integration branch'i kullanılmaz.
 
 ## 5. Documentation Policy
 
@@ -46,7 +49,8 @@ Aşağıdaki işlemler insan onayı olmadan yapılmaz:
 - Proposed ADR veya karar notu implementasyonu bloklamaz (bkz. §5a).
 - API değişikliği contract güncellemesi gerektirir.
 - Database değişikliği migration ve rollback notu gerektirir.
-- Non-trivial her iş handoff güncellemesi gerektirir.
+- Non-trivial her iş handoff güncellemesi gerektirir. Handoff ve requirement
+  dosyaları ~8.000 karakter bütçelidir (hook ile zorlanır).
 
 ## 5a. Run İçi Onay Tanımı
 

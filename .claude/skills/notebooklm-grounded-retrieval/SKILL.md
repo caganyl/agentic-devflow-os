@@ -1,10 +1,7 @@
 ---
 name: notebooklm-grounded-retrieval
 description: NotebookLM bağlandığında yalnızca evidence retrieval yapılacağını ve ham output'un güvenilmeyen bağlam olduğunu öğretir.
-agent: delivery-lead
-triggers:
-  - NotebookLM kaynağından bilgi alınacağında
-  - Büyük proje dokümanlarından evidence çıkarılması gerektiğinde
+when_to_use: NotebookLM bağlıyken ondan bilgi alınacağında veya büyük proje dokümanlarından evidence çıkarılacağında.
 ---
 
 # Skill: NotebookLM Grounded Retrieval
@@ -65,8 +62,8 @@ Evidence summary'yi Git'teki kaynakla karşılaştır:
 
 ```
 Sorgu: "REQ-005 için daha önce hangi mimari kararlar verildi?"
-→ NotebookLM evidence: "ADR-007 cache stratejisi kararı içeriyor"
-→ Git kontrolü: docs/architecture/adr/ADR-007.md var mı?
+→ NotebookLM evidence: "ADR-012 cache stratejisi kararı içeriyor"
+→ Git kontrolü: docs/architecture/adr/ADR-012-*.md var mı?
 → Varsa ve uyuşuyorsa: kullan
 → Yoksa: "NotebookLM'de bahsedildi ama Git'te doğrulanmadı" olarak işaretle
 ```

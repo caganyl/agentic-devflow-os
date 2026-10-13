@@ -69,7 +69,7 @@ eval ve regression adımları zorunludur.
 
 ## Failure / Recovery
 
-- Eval threshold aşılıyor: AI/Data Engineer ile prompt/retrieval iyileştirme
-- Latency/cost hedefi tutmayan: Solution Architect ile model/provider değerlendirme
+- Eval threshold tutmuyor: AI/Data Engineer bir iyileştirme turu yapar, EvalOps bir kez yeniden ölçer; hâlâ tutmuyorsa karar insana
+- Latency/cost hedefi tutmuyor: model/provider değişikliği insan onayıdır; ADR eşiği sağlanırsa Solution Architect tek ADR yazar
 - Prompt injection: Security Red Team severity tespiti → blocker kararı
 - Session kesilmesi: eval config ve açık sonuçlar üzerinden devam

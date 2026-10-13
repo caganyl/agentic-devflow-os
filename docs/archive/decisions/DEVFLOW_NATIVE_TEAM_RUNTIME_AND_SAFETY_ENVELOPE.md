@@ -1,3 +1,5 @@
+> **Arşiv — güncel değil.** Güncel hâli: [docs/ARCHITECTURE.md](../../ARCHITECTURE.md). Bkz. `docs/archive/README.md`.
+
 # DevFlow: Native Team Runtime & Target Safety Envelope
 
 **Date:** 2026-06-26
