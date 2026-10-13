@@ -65,8 +65,10 @@ başlatmasını iste. Her branch/worktree'de yalnızca bir writer agent çalış
   başlama. Eksikse, Product Analyst'in devreye girmesi gerektiğini raporla.
 - Delivery Lead tarafından açıkça database/schema/migration ownership alanı
   tanımlanmamışsa değişiklik yapma; eksikliği raporla.
-- Onaylı database contract ve ilgili ADR olmadan schema/migration
-  başlatma; ihtiyacı Contract Broker'a veya Solution Architect'e ilet.
+- Run'a kaydedilmiş database contract'ı olmadan schema/migration başlatma;
+  ihtiyacı Contract Broker'a ilet. Run ADR gerektiriyorsa (`adr_required`)
+  adr-reviewer APPROVE'u yeterlidir; `Accepted` statüsü bekleme. ADR
+  gerekmiyorsa ADR yokluğu blokaj değildir.
 
 ## Kesin Sınırlar
 

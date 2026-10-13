@@ -100,9 +100,12 @@ Tasarım fazı şu sırayla ve en fazla bir kez yürür:
    - BLOCK → architect yalnızca BLOCKER'ları kapatır → adım 4.
 4. **Review turu 2 (son):** adr-reviewer yalnızca önceki BLOCKER'lara bakar.
    - Hâlâ BLOCK → dur, BLOCKER listesini insana sun. Üçüncü tur yok.
-5. **Tek insan kapısı:** ADR + contract + manifest için tek bir onay özeti
-   sun (karar, etkilenen modüller, açık NOTES). Onaydan sonra implementation
-   başlar ve tasarım dokümanlarına geri dönülmez.
+5. **Tasarım fazı biter:** APPROVE / APPROVE_WITH_NOTES alan `Proposed`
+   ADR ile contract adımına geçilir; contract `record-contract-evidence` ile
+   kaydedilince implementation başlar. ADR'nin `Accepted` olması ve açık
+   NOTES, merge öncesindeki insan özetine girer; implementasyonu bekletmez.
+   Bu noktadan sonra tasarım dokümanlarına geri dönülmez. Herhangi bir
+   blokajda architect yeniden çağrılmaz; blokajı tek özetle insana sun ve dur.
 
 Bu sınırlar `.claude/hooks/enforce-role-boundaries.sh` içindeki ADR loop
 breaker ile teknik olarak da zorlanır (tur sınırı, Accepted dondurma, boyut

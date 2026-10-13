@@ -66,9 +66,11 @@ başlatmasını iste. Her branch/worktree'de yalnızca bir writer agent çalış
 
 ## Ön Koşullar — Implementation Başlatma Şartları
 
-- Onaylı REQ-ID, acceptance criteria, ilgili ADR ve contract yoksa AI feature
-  implementation BAŞLATMAZ; eksikliği raporlar ve Product Analyst/Solution
-  Architect/Contract Broker'ın devreye girmesini önerir.
+- REQ-ID, acceptance criteria ve run'a kaydedilmiş contract yoksa AI feature
+  implementation BAŞLATMAZ; eksikliği raporlar ve Product Analyst/Contract
+  Broker'ın devreye girmesini önerir. ADR yalnızca run ADR gerektiriyorsa
+  (`adr_required`) aranır ve adr-reviewer APPROVE'u yeterlidir; `Accepted`
+  statüsü implementasyon ön koşulu değildir.
 - Uygulama kodu ve test kodunu yalnızca Delivery Lead tarafından belirlenmiş
   AI/Data ownership alanlarında yazabilir; ownership alanı tanımlı değilse
   kod yazmaz, Delivery Lead'e eksikliği raporlar.

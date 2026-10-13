@@ -141,8 +141,14 @@ Tasarım fazı bir çıkış koşuluyla biter; mükemmellik hedeflenmez.
 
 - ADR yalnızca `solution-architect.md` içindeki eşik sağlanırsa istenir.
   Eşik yoksa architect'e "karar notu" görevi ver veya adımı atla.
+  `new_feature` task graph'ında ADR task'ı yalnızca eşik sağlandığında
+  `generate-task-graph --needs-adr` ile eklenir.
+- Bir REQ için en fazla bir ADR yazılır. Aynı karar için yeni ADR numarası,
+  `drafts/` alt klasörü veya `docs/decisions/` altında ADR açılmaz.
 - Review'u `adr-reviewer` tek turda yapar. Verdict APPROVE veya
-  APPROVE_WITH_NOTES ise tasarım fazı biter ve insana tek onay özeti sunulur.
+  APPROVE_WITH_NOTES ise tasarım fazı biter: ADR `Proposed` kalsa da run
+  içinde contract ve implementasyon başlar. `Accepted` statüsü insanın merge
+  sırasındaki kararıdır, implementasyon ön koşulu değildir.
 - BLOCK gelirse architect yalnızca BLOCKER'ları kapatır, ikinci ve son tur
   yapılır. İkinci turda hâlâ BLOCK varsa dur; BLOCKER listesini insana sun.
   Üçüncü tur başlatma (hook zaten reddeder).

@@ -25,7 +25,7 @@ Usage:
     python3 scripts/devflow_operations.py launch --target PATH [--objective TEXT] [--dry-run] [--agent-teams]
     python3 scripts/devflow_operations.py status --target PATH
     python3 scripts/devflow_operations.py prepare-delivery --target PATH [--confirm-delivery]
-    python3 scripts/devflow_operations.py generate-task-graph --target PATH --delivery-type TYPE [--objective TEXT] [--force]
+    python3 scripts/devflow_operations.py generate-task-graph --target PATH --delivery-type TYPE [--objective TEXT] [--needs-adr] [--force]
     python3 scripts/devflow_operations.py update-task-status --target PATH --task-id ID --status STATUS
     python3 scripts/devflow_operations.py record-qa-evidence --target PATH --total N --passed N --failed N --exit-code N [--evidence-path PATH]
     python3 scripts/devflow_operations.py record-security-evidence --target PATH --run-id RUN-NNN --verdict pass|blocked --max-severity none|low|medium|high|critical --evidence-path RELATIVE_PATH
@@ -349,7 +349,7 @@ VALID_VERDICT_SEVERITY_COMBOS: dict[str, frozenset] = {
 # Delivery types that require a contract gate.  Only new_feature for now.
 DELIVERY_TYPES_WITH_CONTRACT_GATE = frozenset({"new_feature"})
 
-CONTRACT_EVIDENCE_PATH_PREFIX = "docs/quality/contracts/"
+CONTRACT_EVIDENCE_PATH_PREFIX = "docs/contracts/"
 
 CONTRACT_REVIEW_STATUS_ENUM = frozenset({
     "not_applicable",
@@ -507,14 +507,18 @@ DELIVERY_TYPE_TASK_TEMPLATES: dict[str, list[dict]] = {
          "assigned_role": "product-analyst", "dep_suffixes": ["001"],
          "qa_expectation": "Acceptance criteria netleştirildi ve onaylandı",
          "output_path": ".devflow/context/acceptance-criteria.md"},
+        # Opt-in (--needs-adr): only when the ADR threshold in
+        # solution-architect.md is met. An unconditional ADR task kept
+        # managed runs cycling through design work instead of implementing.
         {"id_suffix": "003", "title": "Architecture Decision", "task_type": "planning",
          "assigned_role": "solution-architect", "dep_suffixes": ["001"],
-         "qa_expectation": "ADR taslağı üretildi",
-         "output_path": "docs/architecture/adr/"},
+         "qa_expectation": "ADR eşiği sağlandı; ADR adr-reviewer'dan APPROVE aldı (en fazla 2 tur)",
+         "output_path": "docs/architecture/adr/",
+         "optional": "adr"},
         {"id_suffix": "004", "title": "Contract Definition", "task_type": "contract_definition",
          "assigned_role": "contract-broker", "dep_suffixes": ["002", "003"],
          "qa_expectation": "Contract kanıtı kaydedildi; frontend ve backend paralel başlayabilir",
-         "output_path": "docs/quality/contracts/"},
+         "output_path": "docs/contracts/"},
         {"id_suffix": "005", "title": "Backend Implementation", "task_type": "implementation",
          "assigned_role": "backend-engineer", "dep_suffixes": ["004"],
          "qa_expectation": "API endpoint'ler çalışıyor; birim testler geçiyor",
@@ -657,7 +661,7 @@ DELIVERY_TYPE_TASK_TEMPLATES: dict[str, list[dict]] = {
          "output_path": ".devflow/context/"},
         {"id_suffix": "002", "title": "Architecture Analysis", "task_type": "planning",
          "assigned_role": "solution-architect", "dep_suffixes": ["001"],
-         "qa_expectation": "İyileştirme seçenekleri değerlendirildi; ADR üretildi",
+         "qa_expectation": "İyileştirme seçenekleri değerlendirildi; ADR yalnızca eşik sağlanırsa",
          "output_path": "docs/architecture/adr/"},
         {"id_suffix": "003", "title": "Cost Optimization Implementation", "task_type": "implementation",
          "assigned_role": "ai-data-engineer", "dep_suffixes": ["002"],
@@ -683,7 +687,7 @@ DELIVERY_TYPE_TASK_TEMPLATES: dict[str, list[dict]] = {
          "output_path": "docs/quality/"},
         {"id_suffix": "004", "title": "Technical Feasibility", "task_type": "planning",
          "assigned_role": "solution-architect", "dep_suffixes": ["002"],
-         "qa_expectation": "Teknik feasibility değerlendirmesi ve ADR taslağı hazır",
+         "qa_expectation": "Teknik feasibility notu hazır; ADR yalnızca eşik sağlanırsa",
          "output_path": "docs/architecture/adr/"},
         {"id_suffix": "005", "title": "Human Approval Gate", "task_type": "approval",
          "assigned_role": "delivery-lead", "dep_suffixes": ["002", "003", "004"],
@@ -1311,13 +1315,24 @@ def _inject_security_review_task(tasks: list, run_id: str, objective: str) -> li
     return pre_release + [sec_task, updated_release]
 
 
-def generate_task_graph_nodes(run_id: str, delivery_type: str, objective: str) -> list:
-    """Return a deterministic list of task node dicts for the given delivery type."""
-    templates = DELIVERY_TYPE_TASK_TEMPLATES.get(delivery_type, [])
+def generate_task_graph_nodes(
+    run_id: str, delivery_type: str, objective: str, needs_adr: bool = False
+) -> list:
+    """Return a deterministic list of task node dicts for the given delivery type.
+
+    Templates marked ``"optional": "adr"`` are included only when
+    ``needs_adr`` is True. Task id suffixes stay stable either way, and
+    dependencies on an omitted task are dropped.
+    """
+    templates = [
+        t for t in DELIVERY_TYPE_TASK_TEMPLATES.get(delivery_type, [])
+        if t.get("optional") != "adr" or needs_adr
+    ]
+    present = {t["id_suffix"] for t in templates}
     tasks = []
     for tmpl in templates:
         task_id = f"{run_id}-TASK-{tmpl['id_suffix']}"
-        dep_ids = [f"{run_id}-TASK-{s}" for s in tmpl["dep_suffixes"]]
+        dep_ids = [f"{run_id}-TASK-{s}" for s in tmpl["dep_suffixes"] if s in present]
         tasks.append({
             "id": task_id,
             "title": tmpl["title"],
@@ -1410,7 +1425,7 @@ def validate_contract_evidence_path(target: Path, evidence_path: str) -> tuple[b
     - Must not contain '..' traversal
     - Must not contain wildcards (* or ?)
     - Must not start with .devflow/ or .claude/
-    - Must start with docs/quality/contracts/
+    - Must start with docs/contracts/
     - File must exist at target/evidence_path
 
     Returns (ok, error_message).
@@ -2730,9 +2745,19 @@ def cmd_prepare_delivery(args) -> int:
     current_branch = get_current_branch(target)
 
     gates = run_data.get("approval_gates", {})
+    # Mirror build_run_report: a run whose canonical state says no security
+    # review is required must not be blocked on security_review_complete.
+    # Legacy states without the field default to required (fail closed).
+    if not run_data.get("security_review_required", True):
+        security_ok = True
+    elif (run_data.get("security_review_status") == "completed"
+          and run_data.get("security_gate_satisfied") is not None):
+        security_ok = bool(run_data.get("security_gate_satisfied"))
+    else:
+        security_ok = bool(gates.get("security_review_complete", False))
     all_gates_passed = (
         gates.get("tests_passing", False)
-        and gates.get("security_review_complete", False)
+        and security_ok
         and gates.get("qa_sign_off", False)
     )
 
@@ -2829,7 +2854,8 @@ def cmd_generate_task_graph(args) -> int:
             sys.exit(16)
 
     objective = getattr(args, "objective", None) or run_data.get("objective", "")
-    tasks = generate_task_graph_nodes(run_id, delivery_type, objective)
+    needs_adr = bool(getattr(args, "needs_adr", False))
+    tasks = generate_task_graph_nodes(run_id, delivery_type, objective, needs_adr=needs_adr)
 
     # ---------------------------------------------------------------------------
     # Launch risk floor enforcement
@@ -2868,6 +2894,9 @@ def cmd_generate_task_graph(args) -> int:
     run_data["tasks"] = tasks
     run_data["task_graph_status"] = "generated"
     run_data["delivery_type"] = delivery_type
+    # adr_required records the explicit --needs-adr decision. Downstream
+    # agents treat a missing ADR as a blocker only when this is True.
+    run_data["adr_required"] = needs_adr
 
     # Write effective security applicability (floor-enforced) to canonical run state.
     # Not overridden by finalization; not writable via direct JSON edit
@@ -3244,7 +3273,7 @@ def cmd_record_contract_evidence(args) -> int:
     """
     Record contract evidence for a new_feature delivery run.
 
-    Validates the evidence path (must be under docs/quality/contracts/),
+    Validates the evidence path (must be under docs/contracts/),
     checks that contract_required=True for this run, confirms the run-id
     matches the active run, then writes contract_status=completed and
     contract_gate_satisfied=True to canonical run state.
@@ -3294,7 +3323,7 @@ def cmd_record_contract_evidence(args) -> int:
         )
         sys.exit(18)
 
-    # Validate evidence path: must be under docs/quality/contracts/, exist, be relative, no traversal.
+    # Validate evidence path: must be under docs/contracts/, exist, be relative, no traversal.
     path_ok, path_err = validate_contract_evidence_path(target, evidence_path)
     if not path_ok:
         print(f"Hata: {path_err}", file=sys.stderr)
@@ -3830,6 +3859,15 @@ def main() -> None:
     )
     p_graph.add_argument("--objective", default=None, help="Delivery hedefi (override)")
     p_graph.add_argument(
+        "--needs-adr",
+        action="store_true",
+        help=(
+            "new_feature için Architecture Decision task'ını ekle. Yalnızca "
+            "solution-architect.md'deki ADR eşiği sağlanıyorsa kullanın; "
+            "varsayılan olarak ADR task'ı üretilmez."
+        ),
+    )
+    p_graph.add_argument(
         "--force", action="store_true", help="Mevcut task graph'ı üzerine yaz"
     )
     p_graph.set_defaults(func=cmd_generate_task_graph)
@@ -3942,7 +3980,7 @@ def main() -> None:
         required=True,
         dest="evidence_path",
         help=(
-            "docs/quality/contracts/ altında bir dosyaya repository-relative göreli yol. "
+            "docs/contracts/ altında bir dosyaya repository-relative göreli yol. "
             "Mutlak yol, '..', wildcard, .devflow/ ve .claude/ yasak."
         ),
     )

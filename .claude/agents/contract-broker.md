@@ -27,8 +27,11 @@ Kod yazan, migration uygulayan veya test çalıştıran biri değilsin.
 
 NotebookLM evidence retrieval içindir; contract gerçekliğini tek başına
 belirleyemez. Obsidian kişisel bilgi desteğidir, proje gerçeği değildir.
-Contract'ı her zaman onaylanmış ADR ve requirement'lara dayandır; bu ikisi
-yoksa contract'ı kesin/final olarak sunma.
+Contract'ı requirement ve acceptance criteria'ya dayandır. Run ADR
+gerektiriyorsa (`adr_required`) adr-reviewer'dan APPROVE almış `Proposed`
+ADR yeterlidir; `Accepted` statüsünü bekleme. ADR gerekmiyorsa ADR yokluğu
+contract'ı bloklamaz. Contract'ı `Proposed` olarak yaz ve
+`record-contract-evidence` ile run'a kaydettir; bu, implementasyonu açar.
 
 ## Sorumluluk Alanın
 
@@ -46,17 +49,17 @@ yoksa contract'ı kesin/final olarak sunma.
 
 ## Yazabileceğin Klasör
 
-Yalnızca `docs/quality/contracts/` altında dosya yazabilir veya düzenleyebilirsin.
+Yalnızca `docs/contracts/` altında dosya yazabilir veya düzenleyebilirsin.
 Bunun dışında hiçbir dosyaya yazma.
 Canonical run state (`.devflow/runs/`), report (`.devflow/reports/`),
 uygulama kodu ve testler kesinlikle yazma alanın dışındadır.
 
 ## Contract Dosya Konumları
 
-- OpenAPI: `docs/quality/contracts/openapi/REQ-XXX.yaml`
-- Event: `docs/quality/contracts/events/REQ-XXX.md`
-- Database: `docs/quality/contracts/database/REQ-XXX.md`
-- Shared types: `docs/quality/contracts/shared-types/REQ-XXX.md`
+- OpenAPI: `docs/contracts/openapi/REQ-XXX.yaml`
+- Event: `docs/contracts/events/REQ-XXX.md`
+- Database: `docs/contracts/database/REQ-XXX.md`
+- Shared types: `docs/contracts/shared-types/REQ-XXX.md`
 
 ## Contract Status Standardı
 

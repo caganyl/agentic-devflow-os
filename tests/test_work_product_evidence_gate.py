@@ -246,7 +246,7 @@ class ForbiddenPathsRejectedTest(unittest.TestCase):
         self._check("implementation", "docs/quality/security-reports/report.md")
 
     def test_docs_contract_path_rejected(self):
-        self._check("implementation", "docs/quality/contracts/api.md")
+        self._check("implementation", "docs/contracts/api.md")
 
     def test_docs_handoff_rejected(self):
         self._check("qa", "docs/handoffs/REQ-001.md")

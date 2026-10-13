@@ -288,7 +288,7 @@ class EvidenceVerificationTest(unittest.TestCase):
         self.assertEqual(again.returncode, 0, again.stderr)
 
     def _make_contract(self) -> str:
-        rel = "docs/quality/contracts/REQ-001-contract.md"
+        rel = "docs/contracts/REQ-001-contract.md"
         path = self.target / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# contract\n", encoding="utf-8")

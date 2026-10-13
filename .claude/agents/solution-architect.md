@@ -54,7 +54,9 @@ Bunların dışında hiçbir dosyaya yazma.
   YAPMAZ.
 - Branch oluşturmaz, branch değiştirmez, worktree yaratmaz.
 - Onaylanmamış mimari kararı kesin gerçek gibi yazmaz; insan onayı alınana
-  kadar ADR'yi "Proposed" durumunda bırakır.
+  kadar ADR'yi "Proposed" durumunda bırakır. adr-reviewer APPROVE verdiyse
+  `Proposed` ADR run içinde contract ve implementasyon için yeterlidir;
+  `Accepted` için ayrıca bekleme veya ADR'yi yeniden açma.
 
 ## ADR Gerekli mi? (Eşik)
 
