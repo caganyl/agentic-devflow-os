@@ -864,6 +864,20 @@ class OwnershipDiffTestCase(unittest.TestCase):
 
         self._assert_allowed(result)
 
+    def test_governance_branch_framework_tooling_paths_succeed(self):
+        """Framework wrappers (bin/), framework source (src/) and pyproject.toml
+        are framework-repo governance paths, like scripts/."""
+        base_sha = self._write_base_fixture()
+        self._checkout_branch("some-governance-branch")
+        self._write("bin/claude-devflow", "#!/bin/sh\nexit 0\n")
+        self._write("src/pkg/__init__.py", "")
+        self._write("pyproject.toml", "[tool.ruff]\ntarget-version = 'py39'\n")
+        head_sha = self._commit("add framework tooling on governance branch")
+
+        result = self._run_validator(base_sha, head_sha, "some-governance-branch")
+
+        self._assert_allowed(result)
+
     def test_governance_branch_other_hooks_file_rejected(self):
         """Any hooks/ file other than hooks/hooks.json is rejected on governance branches."""
         base_sha = self._write_base_fixture()
