@@ -463,8 +463,11 @@ class SafePathWriteTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2,
                          "Write to .devflow/reports/ must be blocked (canonical scorecard)")
 
-    def test_devflow_delegation_events_write_allowed(self):
-        self._assert_write_allowed("/project/.devflow/delegation-events/evt-001.json")
+    def test_devflow_delegation_events_write_blocked(self):
+        # Only the SubagentStart/Stop recorder hook writes delegation evidence;
+        # a forged event file written by a tool call counted as delegation.
+        result = run_guard(write_payload("/project/.devflow/delegation-events/evt-001.json"))
+        self.assertEqual(result.returncode, 2)
 
     def test_readme_write_allowed(self):
         self._assert_write_allowed("/project/README.md")

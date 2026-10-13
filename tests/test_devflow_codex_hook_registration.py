@@ -43,18 +43,27 @@ class CodexHookRegistrationTests(unittest.TestCase):
         return handlers[0]
 
     def _run_command(
-        self, cwd: Path, *, guard_required: bool
+        self, cwd: Path, *, guard_required: bool | None, stdin: str = "hook-payload-must-not-be-exposed",
+        extra_env: dict | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        # guard_required: True -> "1", False -> explicit opt-out "0",
+        # None -> variable unset (the default must be "required").
         env = os.environ.copy()
         env.pop("DEVFLOW_CODEX_GUARD_REQUIRED", None)
+        env.pop("DEVFLOW_RUN_WORKTREE", None)
+        env.pop("DEVFLOW_RUN_BRANCH", None)
         env["DEVFLOW_BOOTSTRAP_TEST_VALUE"] = "sensitive-test-value"
-        if guard_required:
+        if guard_required is True:
             env["DEVFLOW_CODEX_GUARD_REQUIRED"] = "1"
+        elif guard_required is False:
+            env["DEVFLOW_CODEX_GUARD_REQUIRED"] = "0"
+        if extra_env:
+            env.update(extra_env)
         return subprocess.run(
             ["/bin/sh", "-c", self._handler()["command"]],
             cwd=cwd,
             env=env,
-            input="hook-payload-must-not-be-exposed",
+            input=stdin,
             text=True,
             capture_output=True,
             check=False,
@@ -79,13 +88,14 @@ class CodexHookRegistrationTests(unittest.TestCase):
         handler = self._handler()
         self.assertEqual(handler.get("type"), "command")
 
-    def test_command_has_activation_gate_and_successful_inactive_exit(self) -> None:
+    def test_command_is_required_by_default_with_explicit_opt_out(self) -> None:
+        # Fail closed: the guard runs unless DEVFLOW_CODEX_GUARD_REQUIRED=0.
         command = self._handler().get("command", "")
-        self.assertIn("DEVFLOW_CODEX_GUARD_REQUIRED", command)
-        self.assertRegex(command, r'!= [\\"]+1[\\"]+')
+        self.assertIn("DEVFLOW_CODEX_GUARD_REQUIRED:-1", command)
+        self.assertRegex(command, r'= [\\"]+0[\\"]+')
         self.assertRegex(command, r"then\s+exit 0;")
 
-    def test_inactive_command_exits_silently(self) -> None:
+    def test_explicit_opt_out_exits_silently(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             result = self._run_command(
                 Path(temporary_directory), guard_required=False
@@ -94,6 +104,37 @@ class CodexHookRegistrationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "")
+
+    def test_unset_variable_means_required(self) -> None:
+        # Previously an unset variable silently disabled the guard (fail-open).
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            result = self._run_command(Path(temporary_directory), guard_required=None)
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stderr, f"{BOOTSTRAP_DENIAL}\n")
+
+    def test_unset_variable_blocks_when_adapter_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            subprocess.run(["git", "init", "--quiet"], cwd=temporary_path, check=True)
+            result = self._run_command(temporary_path, guard_required=None)
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stderr, f"{BOOTSTRAP_DENIAL}\n")
+
+    def test_default_guard_uses_repo_root_when_no_managed_worktree(self) -> None:
+        # Outside a managed run the repo root is the boundary, so ordinary
+        # commands pass and dangerous ones are still refused.
+        safe = json.dumps({"tool_name": "Bash", "tool_input": {"command": "git status"}})
+        unsafe = json.dumps({"tool_name": "Bash", "tool_input": {"command": "git push origin +main"}})
+        allowed = self._run_command(REPO_ROOT, guard_required=None, stdin=safe)
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        self.assertEqual(allowed.stdout, "")
+        denied = self._run_command(REPO_ROOT, guard_required=None, stdin=unsafe)
+        self.assertEqual(denied.returncode, 0, denied.stderr)
+        self.assertEqual(
+            json.loads(denied.stdout)["hookSpecificOutput"]["permissionDecision"], "deny"
+        )
 
     def test_active_command_blocks_silently_on_git_root_bootstrap_failure(
         self,
@@ -170,14 +211,13 @@ class CodexHookRegistrationTests(unittest.TestCase):
     def test_referenced_adapter_exists(self) -> None:
         self.assertTrue(ADAPTER_PATH.is_file())
 
-    def test_claude_hook_registration_is_unchanged(self) -> None:
+    def test_claude_hook_registration_stays_separate(self) -> None:
+        # The Claude plugin keeps its own guard; the Codex adapter is not
+        # registered there.
         self.assertTrue(CLAUDE_HOOK_PATH.is_file())
-        result = subprocess.run(
-            ["git", "diff", "--quiet", "HEAD", "--", "hooks/hooks.json"],
-            cwd=REPO_ROOT,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 0)
+        content = CLAUDE_HOOK_PATH.read_text(encoding="utf-8")
+        self.assertIn("devflow_target_guard.py", content)
+        self.assertNotIn("devflow_codex_target_guard.py", content)
 
 
 if __name__ == "__main__":

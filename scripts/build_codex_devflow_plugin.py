@@ -168,7 +168,7 @@ def _manifest() -> dict[str, object]:
 
 def _hooks() -> dict[str, object]:
     command = (
-        'if [ "${DEVFLOW_CODEX_GUARD_REQUIRED:-}" != "1" ]; then exit 0; fi; '
+        'if [ "${DEVFLOW_CODEX_GUARD_REQUIRED:-1}" = "0" ]; then exit 0; fi; '
         f"denial='{BOOTSTRAP_DENIAL}'; "
         'if [ -z "${PLUGIN_ROOT:-}" ]; then printf \'%s\\n\' "$denial" >&2; exit 2; fi; '
         'adapter="$PLUGIN_ROOT/scripts/devflow_codex_target_guard.py"; '

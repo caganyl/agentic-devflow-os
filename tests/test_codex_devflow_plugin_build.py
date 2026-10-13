@@ -94,8 +94,8 @@ class CodexPluginBuildTests(unittest.TestCase):
         env = os.environ.copy()
         env.pop("DEVFLOW_CODEX_GUARD_REQUIRED", None)
         env.pop("PLUGIN_ROOT", None)
-        if active:
-            env["DEVFLOW_CODEX_GUARD_REQUIRED"] = "1"
+        if not active:
+            env["DEVFLOW_CODEX_GUARD_REQUIRED"] = "0"
         if plugin_root is not None:
             env["PLUGIN_ROOT"] = str(plugin_root)
         return subprocess.run(
@@ -199,6 +199,13 @@ class CodexPluginBuildTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "")
+
+    def test_guard_is_on_by_default(self) -> None:
+        # Unset DEVFLOW_CODEX_GUARD_REQUIRED means required: with no plugin
+        # root the bootstrap denies instead of silently allowing.
+        result = self.run_hook()
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stderr, f"{BOOTSTRAP_DENIAL}\n")
 
     def test_missing_plugin_root_fails_closed(self) -> None:
         result = self.run_hook()
@@ -376,7 +383,7 @@ class CodexPluginBuildTests(unittest.TestCase):
         # guards the Claude build from unintended Codex-side edits.
         expected = {
             REPO_ROOT / "scripts" / "build_devflow_plugin.py": "0457cad55caa833fc20828ecac8bb71fa3caec9e1d6d80fe0c6640de3c47e543",
-            REPO_ROOT / "hooks" / "hooks.json": "baf288402c0c8d3264b47502cca4578f831fcd5f3796a84aeafc227f0827925e",
+            REPO_ROOT / "hooks" / "hooks.json": "cfbc054948bc03eeae26bcb21caeff9b858a9c0d99aa93e0304bbe7780c2b78e",
         }
         for path, digest in expected.items():
             with self.subTest(path=path):

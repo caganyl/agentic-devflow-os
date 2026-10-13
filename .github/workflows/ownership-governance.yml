@@ -163,7 +163,29 @@ jobs:
         run: |
           set -euo pipefail
           python --version
-          python -m unittest discover -s tests -p 'test_*.py'
+          status=0
+          python -m unittest discover -s tests -p 'test_*.py' 2>&1 | tee unittest.log || status=$?
+          if [ "$status" -ne 0 ]; then
+            # Surface failing tests and their last assertion line as
+            # annotations so they are readable without downloading logs.
+            # One annotation per failure (GitHub keeps at most 10 per step):
+            # the test id plus the last lines of its traceback.
+            python - <<'PYANN'
+          import re
+          text = open("unittest.log", encoding="utf-8", errors="replace").read()
+          blocks = re.split(r"\n(?==+\n(?:FAIL|ERROR): )", text)
+          shown = 0
+          for block in blocks:
+              m = re.search(r"^(FAIL|ERROR): (.+)$", block, re.M)
+              if not m or shown >= 10:
+                  continue
+              tail = [l for l in block.strip().splitlines() if l.strip() and not l.startswith(("=", "-"))][-4:]
+              msg = " | ".join(tail).replace("%", "%25").replace("\r", "").replace("\n", " ")
+              print(f"::error title={m.group(1)} {m.group(2)[:120]}::{msg[:900]}")
+              shown += 1
+          PYANN
+          fi
+          exit "$status"
 
   ownership-diff-gate:
     name: Ownership Diff Gate
