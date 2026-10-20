@@ -110,6 +110,14 @@ class RecorderTest(_TargetCase):
         self.assertEqual(result.returncode, 0)
         self.assertFalse((bare / ".devflow").exists())
 
+    def test_subfolder_cwd_writes_to_workspace_root(self):
+        sub = self.target / "src" / "Api"
+        sub.mkdir(parents=True)
+        self.record({"cwd": str(sub), "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                     "tool_input": {"command": "dotnet build"}}, cwd=sub)
+        self.assertEqual([e["kind"] for e in _events(self.target)], ["tool"])
+        self.assertFalse((sub / ".devflow").exists())
+
     def test_deny_note(self):
         self.record({"cwd": str(self.target), "agent_type": "frontend-engineer", "tool_name": "Write",
                      "tool_input": {"file_path": "src/Api/Dto.cs", "content": "x"}},
@@ -247,6 +255,20 @@ class ServerTest(_TargetCase):
             snap = json.loads(urllib.request.urlopen(base + "/api/snapshot").read())
             self.assertEqual(snap["target"], "proj")
             self.assertIsNone(snap["run"])
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_stream_sends_snapshot_then_named_ping(self):
+        state = office.OfficeState(self.target)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), office.make_handler(state))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            resp = urllib.request.urlopen(f"http://127.0.0.1:{server.server_address[1]}/api/stream", timeout=15)
+            self.assertTrue(resp.readline().startswith(b"data: {"))
+            lines = [resp.readline() for _ in range(3)]
+            self.assertIn(b"event: ping\n", lines)
+            resp.close()
         finally:
             server.shutdown()
             server.server_close()
