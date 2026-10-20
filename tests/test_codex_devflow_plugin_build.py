@@ -374,7 +374,9 @@ class CodexPluginBuildTests(unittest.TestCase):
                 self.assertIsNone(re.search(pattern, raw))
 
     def test_claude_builder_and_hook_registration_are_unchanged(self) -> None:
-        # Updated when the Claude plugin started shipping the async office
+        # Updated when the office recorder was registered for attention events
+        # (Notification, Stop, UserPromptSubmit, PostToolUse, AskUserQuestion).
+        # Before that, updated when the Claude plugin started shipping the async office
         # telemetry recorder (devflow_office_recorder.py, registered in
         # hooks.json for the live office view). Before that, updated
         # when the Claude plugin build started shipping the read-only
@@ -386,7 +388,7 @@ class CodexPluginBuildTests(unittest.TestCase):
         # guards the Claude build from unintended Codex-side edits.
         expected = {
             REPO_ROOT / "scripts" / "build_devflow_plugin.py": "c914482dfd2a56b67c7d76f50b474b47d1948c2ec90236315b890aea53d19067",
-            REPO_ROOT / "hooks" / "hooks.json": "dc19dbc63f7f5dff5e7ccb860d0f56c475dd2e0b31c433bb34e7dd3f70853888",
+            REPO_ROOT / "hooks" / "hooks.json": "4610097c5f09d224d391355e069d6b9a41affa793c9dc7b213be73e17e8aa767",
         }
         for path, digest in expected.items():
             with self.subTest(path=path):

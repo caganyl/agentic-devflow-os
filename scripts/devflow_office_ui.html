@@ -142,16 +142,77 @@ function describe(e){
     case 'gate': return {log:`✓ ${e.gate}`, cap:`Onay kapısı açıldı: ${e.gate}.`};
     case 'task': return {log:`${e.title} → ${STATUS_TR[e.status]||e.status}`, cap: e.status==='awaiting_human_approval' ? `Sıra sende: ${e.title} insan onayını bekliyor.` : `${nm(e.role||'')}: ${e.title} ${STATUS_TR[e.status]||e.status}.`};
     case 'run': return {log:`yeni run: ${e.run}`, cap:`Yeni run başladı: ${e.run}.`};
+    case 'attention': return {log:`🔔 ${attentionText(e)}`, cap:`Sıra sende: ${attentionText(e)}.`};
+    case 'resume': return {log:'devam ediliyor', cap:null, quiet:true};
   }
   return {log:e.kind, cap:null};
 }
+
+function attentionText(a){
+  switch(a && a.reason){
+    case 'permission': return `Claude onayını bekliyor${a.tool?' ('+a.tool+')':''}`;
+    case 'question': return 'Claude sana bir soru sordu';
+    case 'plan': return 'Claude planını onaylamanı bekliyor';
+    case 'idle': return 'Claude senden yanıt bekliyor';
+    case 'turn_end': return 'Claude işini bitirdi, sıradaki talimatını bekliyor';
+  }
+  return 'Claude senden bir işlem bekliyor';
+}
+function rosterSkills(id){ const r=((snap&&snap.roster)||[]).find(x=>x.id===id); return (r&&r.skills)||[]; }
+function deskSkills(id){ const info=snap&&snap.agents&&snap.agents[id]; const list=rosterSkills(id).slice(); if (info&&info.last_skill&&!list.includes(info.last_skill)) list.push(info.last_skill); return list.slice(0,3); }
+
+// ---------- attention: banner, title, sound, desktop notification ----------
+const BASE_TITLE = document.title;
+let attention = null, attentionSince = 0, notifiedId = null, audioCtx = null;
+function beep(){
+  try {
+    if (!audioCtx || audioCtx.state !== 'running') return;
+    [0, 0.22].forEach((d,i)=>{ const o=audioCtx.createOscillator(), g=audioCtx.createGain(); o.type='sine'; o.frequency.value = i? 1046 : 784;
+      g.gain.setValueAtTime(0.0001, audioCtx.currentTime+d); g.gain.exponentialRampToValueAtTime(0.25, audioCtx.currentTime+d+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime+d+0.2); o.connect(g).connect(audioCtx.destination); o.start(audioCtx.currentTime+d); o.stop(audioCtx.currentTime+d+0.22); });
+  } catch(err) {}
+}
+function notifyAttention(a){
+  beep();
+  try {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      const n = new Notification('DevFlow Ofis · Sıra sende', {body: attentionText(a), tag: 'devflow-attention', renotify: true, requireInteraction: a.reason !== 'turn_end'});
+      n.onclick = () => { window.focus(); n.close(); };
+    }
+  } catch(err) {}
+}
+function updateAttention(s){
+  const a = s.attention || null;
+  if (a && (!attention || attention.id !== a.id)) {
+    attentionSince = now();
+    if (!firstSnap || (Date.now() - new Date(a.ts).getTime()) < 120000) { if (notifiedId !== a.id) { notifiedId = a.id; notifyAttention(a); } }
+  }
+  attention = a;
+  updateEnableButton();
+}
+setInterval(()=>{ document.title = attention && Math.floor(Date.now()/1000)%2===0 ? '🔔 Sıra sende · ' + BASE_TITLE : BASE_TITLE; }, 1000);
+const enableBtn = document.createElement('button');
+enableBtn.textContent = '🔔 Uyarıları aç (ses + masaüstü bildirimi)';
+enableBtn.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:5;padding:10px 14px;border-radius:10px;border:1px solid #ffb547;background:#3d321a;color:#ffe3a3;font:600 13px Inter,"Segoe UI",system-ui,sans-serif;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.4)';
+enableBtn.onclick = async () => {
+  try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); await audioCtx.resume(); } catch(err) {}
+  try { if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission(); } catch(err) {}
+  beep(); updateEnableButton();
+};
+function updateEnableButton(){
+  const notifOk = !('Notification' in window) || Notification.permission !== 'default';
+  const audioOk = !!audioCtx && audioCtx.state === 'running';
+  enableBtn.style.display = (notifOk && audioOk) ? 'none' : 'block';
+}
+document.body.appendChild(enableBtn); updateEnableButton();
 
 function onEvent(e){
   const t = now();
   const agent = e.agent || MAIN;
   const d = describe(e);
   if (d.cap) lastCaption = {text:d.cap, t};
-  if (e.kind==='agent_start' && desks[agent]){ const task=taskFor(agent); anims.push({kind:'paper', t0:t, dur:1.3, from:MAIN, to:agent, label: task? fitText(task.title,9,150,700) : 'görev'}); }
+  if (e.kind==='agent_start' && desks[agent]){ const task=taskFor(agent); anims.push({kind:'paper', t0:t, dur:1.3, from:MAIN, to:agent, label: task? fitText(task.title,9,150,700) : 'görev'});
+    rosterSkills(agent).slice(0,3).forEach((sk,i)=>{ anims.push({kind:'book', t0:t+0.6+i*0.35, dur:0.95, to:agent, idx:skillIndex(sk), label:sk, slot:i}); }); }
   if (e.kind==='agent_stop' && desks[agent]){ popAt[agent]=t; anims.push({kind:'paper', t0:t, dur:1.0, from:agent, to:MAIN, label:'sonuç'}); }
   if (e.kind==='skill'){ const i=skillIndex(e.skill); anims.push({kind:'book', t0:t, dur:0.95, to: desks[agent]?agent:MAIN, idx:i, label:e.skill}); recentAction[agent]={text:`skill: ${e.skill}`, t}; }
   if (e.kind==='tool'){ recentAction[agent]={text:`${e.tool}${e.path?' · '+e.path:''}`, t}; }
@@ -163,6 +224,7 @@ function onEvent(e){
 function onSnapshot(s){
   snap = s; lastMsg = now(); connected = true;
   layoutDesks();
+  updateAttention(s);
   const gates = (s.run && s.run.approval_gates) || {};
   for (const [g,v] of Object.entries(gates)) if (v && gatePrev[g]===false) gatePrev[g+'@']=now();
   for (const [g,v] of Object.entries(gates)) gatePrev[g]=v;
@@ -289,7 +351,7 @@ function drawDesk(d,t){
   rr(cx-15,cy-26,30,7,2); ctx.fillStyle='#d6dde8'; ctx.fill();
   ctx.beginPath(); ctx.arc(cx-38,cy-30,4,0,Math.PI*2); ctx.fillStyle='#e9eef5'; ctx.fill();
   // skill book on desk while working
-  if (working && info && info.last_skill){ const i=skillIndex(info.last_skill); if (!anims.some(a=>a.kind==='book'&&a.to===id&&t<a.t0+a.dur)) drawBook(cx+38,cy-28,i<0?hashStr(info.last_skill):i,1); }
+  if (working){ deskSkills(id).forEach((sk,k)=>{ if (anims.some(a=>a.kind==='book'&&a.to===id&&a.label===sk&&t<a.t0+a.dur)) return; const i=skillIndex(sk); drawBook(cx+38-k*7,cy-28-k*3,i<0?hashStr(sk):i,1); }); }
   ctx.fillStyle='#1a2130'; ctx.fillRect(cx-3,cy-40,6,6);
   rr(cx-27,cy-70,54,32,4); ctx.fillStyle='#0a0e15'; ctx.fill();
   const sx=cx-24, sy=cy-67, sw=48, sh=26;
@@ -327,7 +389,7 @@ function drawLibrary(t){
   rr(x,y,166,98,6); ctx.fillStyle='#3a2a1e'; ctx.fill();
   for (let r=0;r<3;r++){ ctx.fillStyle='#5a4230'; ctx.fillRect(x+4,y+30+r*30,158,4); }
   const out = new Set();
-  for (const [id,info] of Object.entries((snap&&snap.agents)||{})) if (info.working && info.last_skill) out.add(skillIndex(info.last_skill));
+  for (const [id,info] of Object.entries((snap&&snap.agents)||{})) if (info.working) deskSkills(id).forEach(sk=>out.add(skillIndex(sk)));
   for (const a of anims) if (a.kind==='book' && t<a.t0+a.dur) out.add(a.idx);
   skills.slice(0,30).forEach((s,i)=>{ if (out.has(i)) return; const p=bookPos(i); const hue=(i*47)%360; const h=20+rand(i)*4;
     rr(p.x,p.y+(24-h),p.w,h,2); ctx.fillStyle=`hsl(${hue} 55% 55%)`; ctx.fill(); ctx.fillStyle='rgba(255,255,255,.35)'; ctx.fillRect(p.x+2,p.y+(24-h)+4,p.w-4,1.5); });
@@ -356,7 +418,7 @@ function drawGuards(t){
 
 function drawHuman(t){
   const {cx,cy}=HUMAN; const run=snap&&snap.run;
-  const waiting = !!(run && run.tasks.some(x=>x.status==='awaiting_human_approval'));
+  const waiting = !!attention || !!(run && run.tasks.some(x=>x.status==='awaiting_human_approval'));
   const merge = anims.find(a=>a.kind==='merge' && t>=a.t0 && t<a.t0+a.dur);
   if (waiting || merge){ const g=ctx.createRadialGradient(cx,cy-50,4,cx,cy-40,85); g.addColorStop(0,'#f5c54255'); g.addColorStop(1,'#f5c54200'); ctx.fillStyle=g; ctx.fillRect(cx-90,cy-120,180,170); }
   rr(cx-46,cy-42,92,28,5); ctx.fillStyle='#8d6a4c'; ctx.fill(); ctx.fillStyle=COL.woodEdge; ctx.fillRect(cx-46,cy-17,92,4);
@@ -365,7 +427,7 @@ function drawHuman(t){
   rr(cx-24,cy-38,48,6,2); ctx.fillStyle='#c9d1dc'; ctx.fill();
   drawPerson(cx,cy,{body:'#f5c542',skin:'#e8b996',hair:'#2b1d16',working:waiting,t});
   labelQueue.push(()=>{ T('sen (insan)',cx,cy+40,9.6,'#fff2c8',700,'center'); const s='MERGE YETKİSİ'; const bw=tw(s,7.5,700)+12; rr(cx-bw/2,cy+48,bw,12,6); ctx.fillStyle='#f5c54226'; ctx.fill(); ctx.strokeStyle='#f5c542aa'; ctx.lineWidth=1; ctx.stroke(); T(s,cx,cy+54.3,7.5,'#f5c542',700,'center'); });
-  if (waiting){ const pu=0.75+0.25*Math.sin(t*4); bubble(cx,cy-66,'Onayını bekliyor',pu,'warn','#ffb547'); }
+  if (waiting){ const pu=0.75+0.25*Math.sin(t*4); bubble(cx,cy-66, attention? attentionText(attention) : 'Onayını bekliyor',pu,'warn','#ffb547'); }
   if (merge){ const t0=merge.t0; const k=easeOutBack(seg(t,t0,t0+0.35)); const al=1-seg(t,t0+2.5,t0+3.0);
     ctx.save(); ctx.globalAlpha=al; ctx.translate(cx-118,cy-36); ctx.rotate(-0.12); ctx.scale(k,k); rr(-62,-17,124,34,6); ctx.strokeStyle=COL.good; ctx.lineWidth=3; ctx.stroke(); ctx.fillStyle='rgba(20,56,42,.92)'; ctx.fill(); T('ONAYLANDI ✓',0,1,13,'#8ff0c4',800,'center'); ctx.restore();
     for (let i=0;i<70;i++){ const tt=t-t0; const x=cx+(rand(i)-0.5)*260*tt, y=cy-40+(-160-rand(i+9)*170)*tt+260*tt*tt; if (y>LZ.y+LZ.h) continue; ctx.save(); ctx.globalAlpha=1-seg(t,t0+2.2,t0+3); ctx.translate(x,y); ctx.rotate(tt*8+i); ctx.fillStyle=['#3ecf8e','#f5c542','#5b9dff','#ff7ac6','#a77bff'][i%5]; ctx.fillRect(-3,-1.5,6,3); ctx.restore(); } }
@@ -381,7 +443,7 @@ function drawFlights(t){
   for (const a of anims){ if (t<a.t0 || t>=a.t0+a.dur) continue; const k=ease(seg(t,a.t0,a.t0+a.dur)); const al=Math.min(seg(t,a.t0,a.t0+0.12),1-seg(t,a.t0+a.dur-0.12,a.t0+a.dur));
     if (a.kind==='paper'){ if (!desks[a.from]||!desks[a.to]) continue; const A=deskPoint(a.from), B=deskPoint(a.to); const p=arc(A,B,k,60); const accent=(desks[a.from===MAIN?a.to:a.from]||{}).accent||'#f5c542';
       ctx.save(); ctx.globalAlpha=al; for (let i=1;i<7;i++){ const q=arc(A,B,Math.max(0,k-i*0.03),60); ctx.beginPath(); ctx.arc(q.x,q.y,3-i*0.35,0,Math.PI*2); ctx.fillStyle=accent; ctx.fill(); } drawPaper(p.x,p.y,a.label,accent); ctx.restore(); }
-    if (a.kind==='book'){ const d=desks[a.to]; if (!d) continue; const lib = a.idx>=0? bookPos(a.idx) : {x:LZ.x+90,y:LZ.y+60}; const L={x:lib.x+6.5,y:lib.y+12}, D={x:d.cx+38,y:d.cy-28}; const p=arc(L,D,k,70);
+    if (a.kind==='book'){ const d=desks[a.to]; if (!d) continue; const lib = a.idx>=0? bookPos(a.idx) : {x:LZ.x+90,y:LZ.y+60}; const L={x:lib.x+6.5,y:lib.y+12}, D={x:d.cx+38-(a.slot||0)*7,y:d.cy-28-(a.slot||0)*3}; const p=arc(L,D,k,70);
       ctx.save(); ctx.globalAlpha=al; drawBook(p.x,p.y,a.idx<0?hashStr(a.label):a.idx,1.25); const bw=tw(a.label,8.5,600)+10; rr(p.x-bw/2,p.y+13,bw,14,7); ctx.fillStyle='#f5c542'; ctx.fill(); T(a.label,p.x,p.y+20.5,8.5,'#1b1404',700,'center'); ctx.restore(); }
   }
 }
@@ -429,10 +491,27 @@ function drawSidebar(t){
 function drawCaption(t){
   rr(16,652,1248,56,12); ctx.fillStyle='#0e1420'; ctx.fill(); ctx.strokeStyle=COL.panelLine; ctx.lineWidth=1.2; ctx.stroke();
   const stale = t-lastCaption.t > 45;
-  const text = stale ? idleText() : lastCaption.text;
-  const al = stale ? 1 : seg(t,lastCaption.t,lastCaption.t+0.3);
+  const text = attention ? `Sıra sende: ${attentionText(attention)}. Claude terminalde seni bekliyor.` : stale ? idleText() : lastCaption.text;
+  const al = (stale || attention) ? 1 : seg(t,lastCaption.t,lastCaption.t+0.3);
   ctx.save(); ctx.globalAlpha=al; const lines=wrap(text,15,1180,500).slice(0,2);
-  lines.forEach((l,i)=>T(l,640,680+(i-(lines.length-1)/2)*19,15,COL.text,500,'center')); ctx.restore();
+  lines.forEach((l,i)=>T(l,640,680+(i-(lines.length-1)/2)*19,15,attention?'#ffe3a3':COL.text,attention?600:500,'center')); ctx.restore();
+}
+
+function drawAttention(t){
+  if (!attention) return;
+  const pu = 0.5 + 0.5*Math.sin(t*5);
+  // pulsing frame around the whole office
+  ctx.save(); ctx.globalAlpha = 0.35 + 0.45*pu; ctx.strokeStyle = '#ffb547'; ctx.lineWidth = 6; ctx.strokeRect(3,3,W-6,H-6); ctx.restore();
+  // banner over the task strip
+  const x=292, y=10, w=804, h=38;
+  ctx.save(); ctx.shadowColor='rgba(255,181,71,.6)'; ctx.shadowBlur=18*pu;
+  rr(x,y,w,h,19); ctx.fillStyle='#3d2a0c'; ctx.fill(); ctx.restore();
+  rr(x,y,w,h,19); ctx.strokeStyle='#ffb547'; ctx.lineWidth=2; ctx.stroke();
+  const secs = Math.max(0, Math.floor((Date.now() - new Date(attention.ts).getTime())/1000));
+  const ago = secs < 60 ? `${secs} sn` : `${Math.floor(secs/60)} dk`;
+  T('🔔', x+22, y+h/2+0.5, 16, '#ffb547', 700, 'center');
+  T(fitText(`SIRA SENDE · ${attentionText(attention)}`, 14, w-150, 700), x+42, y+h/2+0.5, 14, '#ffe3a3', 700);
+  T(ago, x+w-18, y+h/2+0.5, 12, '#ffb547', 600, 'right', M);
 }
 
 function frame(){
@@ -442,7 +521,7 @@ function frame(){
   for (const d of Object.values(desks)) drawDesk(d,t);
   drawHuman(t);
   for (const f of labelQueue) f(); labelQueue.length=0;
-  drawGuards(t); drawSidebar(t); drawFlights(t); drawBubbles(); drawCaption(t);
+  drawGuards(t); drawSidebar(t); drawFlights(t); drawBubbles(); drawCaption(t); drawAttention(t);
   for (let i=anims.length-1;i>=0;i--) if (t>anims[i].t0+anims[i].dur+1) anims.splice(i,1);
   requestAnimationFrame(frame);
 }

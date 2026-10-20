@@ -88,7 +88,7 @@
         ]
       },
       {
-        "matcher": "Skill|Agent|Task|Edit|Write|NotebookEdit|Bash|Read|Grep|Glob",
+        "matcher": "Skill|Agent|Task|Edit|Write|NotebookEdit|Bash|Read|Grep|Glob|AskUserQuestion|ExitPlanMode",
         "hooks": [
           {
             "type": "command",
@@ -124,6 +124,55 @@
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/devflow_delegation_recorder.py\"",
             "timeout": 10
           },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/devflow_office_recorder.py\"",
+            "timeout": 5,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Agent|Task|AskUserQuestion|ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/devflow_office_recorder.py\"",
+            "timeout": 5,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/devflow_office_recorder.py\"",
+            "timeout": 5,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/devflow_office_recorder.py\"",
+            "timeout": 5,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/devflow_office_recorder.py\"",

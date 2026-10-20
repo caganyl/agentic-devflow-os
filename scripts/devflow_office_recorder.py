@@ -11,6 +11,12 @@ Hook events handled (read from stdin):
     PreToolUse  tool_name=Skill    -> skill
     PreToolUse  tool_name=Agent|Task -> delegate (subagent_type only)
     PreToolUse  Edit|Write|NotebookEdit|Bash|Read|Grep|Glob -> tool
+    PreToolUse  AskUserQuestion|ExitPlanMode -> attention (question / plan)
+    PostToolUse Agent|Task          -> delegate_done (subagent returned)
+    PostToolUse AskUserQuestion|ExitPlanMode -> resume
+    Notification                    -> attention (permission / idle / question)
+    Stop                            -> attention (turn_end: waiting for the user)
+    UserPromptSubmit                -> resume
 
 Deny notes are written by the enforcement hooks themselves:
     devflow_office_recorder.py --deny <hook-name> <reason>   (hook input on stdin)
@@ -27,6 +33,7 @@ written unless the working directory already has a .devflow/ workspace.
 import hashlib
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +42,8 @@ MAX_LOG_BYTES = 2 * 1024 * 1024
 ACTIVITY_TOOLS = frozenset({"Edit", "Write", "NotebookEdit", "Bash", "Read", "Grep", "Glob"})
 PATH_TOOLS = frozenset({"Edit", "Write", "NotebookEdit", "Read"})
 DELEGATION_TOOLS = frozenset({"Agent", "Task"})
+ATTENTION_TOOLS = {"AskUserQuestion": "question", "ExitPlanMode": "plan"}
+_PERMISSION_TOOL = re.compile(r"\buse ([A-Za-z_][\w:.-]{0,63})")
 _FORBIDDEN_NAME_PARTS = ("token", "secret", "password", "credential", "api_key", "apikey")
 
 
@@ -81,6 +90,21 @@ def _skill_name(tool_input: dict) -> str:
     return ""
 
 
+def _notification_reason(raw: dict) -> tuple[str, str]:
+    """Classify a Notification payload; only the category and a tool name are kept."""
+    kind = raw.get("notification_type") if isinstance(raw.get("notification_type"), str) else ""
+    message = raw.get("message") if isinstance(raw.get("message"), str) else ""
+    tool_match = _PERMISSION_TOOL.search(message)
+    tool = _clean_name(tool_match.group(1)) if tool_match else ""
+    if kind == "permission_prompt" or "permission" in message.lower():
+        return "permission", tool
+    if kind == "idle_prompt" or "waiting for your input" in message.lower():
+        return "idle", ""
+    if kind.startswith("elicitation") or "question" in message.lower():
+        return "question", ""
+    return "other", ""
+
+
 def build_event(raw: dict, cwd: Path, deny_hook: str = "", deny_reason: str = ""):
     """Return the sanitized event dict for one hook payload, or None to skip."""
     if not isinstance(raw, dict):
@@ -113,8 +137,27 @@ def build_event(raw: dict, cwd: Path, deny_hook: str = "", deny_reason: str = ""
         return dict(base, kind="agent_start")
     if hook_event == "SubagentStop":
         return dict(base, kind="agent_stop")
+    if hook_event == "Notification":
+        reason, ntool = _notification_reason(raw)
+        event = dict(base, kind="attention", reason=reason)
+        if ntool:
+            event["tool"] = ntool
+        return event
+    if hook_event == "Stop":
+        return dict(base, kind="attention", reason="turn_end")
+    if hook_event == "UserPromptSubmit":
+        return dict(base, kind="resume")
+    if hook_event == "PostToolUse":
+        if tool in DELEGATION_TOOLS:
+            sub = _clean_name(tool_input.get("subagent_type"))
+            return dict(base, kind="delegate_done", subagent=sub) if sub else None
+        if tool in ATTENTION_TOOLS:
+            return dict(base, kind="resume", tool=tool)
+        return None
     if hook_event != "PreToolUse":
         return None
+    if tool in ATTENTION_TOOLS:
+        return dict(base, kind="attention", reason=ATTENTION_TOOLS[tool], tool=tool)
     if tool == "Skill":
         skill = _skill_name(tool_input)
         return dict(base, kind="skill", skill=skill) if skill else None
@@ -175,7 +218,9 @@ def main(argv=None) -> int:
         if argv[:1] == ["--deny"]:
             deny_hook = argv[1] if len(argv) > 1 else "hook"
             deny_reason = argv[2] if len(argv) > 2 else ""
-        text = sys.stdin.read() if not sys.stdin.isatty() else ""
+        # Read bytes: on Windows the locale codec (cp1254) cannot decode every
+        # UTF-8 payload (e.g. "Ş" = C5 9E) and the event would be lost.
+        text = "" if sys.stdin.isatty() else sys.stdin.buffer.read().decode("utf-8", errors="replace")
         raw = json.loads(text) if text.strip() else {}
         cwd = Path(raw.get("cwd") or os.getcwd()) if isinstance(raw, dict) else Path.cwd()
         cwd = find_workspace_root(cwd, os.environ.get("CLAUDE_PROJECT_DIR"))
