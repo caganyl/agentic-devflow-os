@@ -76,16 +76,21 @@ def read_roster(*agent_dirs: Path) -> list[dict]:
             match = _FRONTMATTER.match(md.read_text(encoding="utf-8", errors="replace"))
             if not match:
                 continue
-            fields = {}
+            fields, skills, in_skills = {}, [], False
             for line in match.group(1).splitlines():
                 if ":" in line and not line.startswith((" ", "-")):
                     k, v = line.split(":", 1)
                     fields[k.strip()] = v.strip().strip("\"'")
+                    in_skills = k.strip() == "skills"
+                elif in_skills and line.strip().startswith("- "):
+                    skills.append(line.strip()[2:].strip().strip("\"'"))
             name = fields.get("name") or md.stem
             roster[name] = {
                 "id": name,
                 "model": (fields.get("model") or "inherit").lower(),
                 "color": (fields.get("color") or "").lower(),
+                # Preloaded at subagent start; they never show up as Skill calls.
+                "skills": [x for x in skills if x],
             }
     return list(roster.values())
 
@@ -183,11 +188,15 @@ def normalize_name(value) -> str | None:
 def resolve_events(events: list[dict]) -> list[dict]:
     """Normalize names and give every agent_stop the agent it closes.
 
-    SubagentStop hook input carries no agent_type, so a stop is matched to its
-    start by agent_key (hashed agent_id) or, failing that, to the oldest
-    still-open start (the delegation-events fallback has no key at all).
+    SubagentStop input carries no agent_type and arrives more often than
+    SubagentStart (seen in pairs on a real Windows session), so a stop closes a
+    start only when it matches by agent_key (hashed agent_id) or agent name;
+    anonymous or unmatched stops are dropped. delegate_done (PostToolUse on the
+    Agent tool, i.e. the subagent returned to the main session) closes the
+    oldest open start of that agent type and is reported as an agent_stop.
     """
     open_starts: list[dict] = []
+    kept: list[dict] = []
     for event in events:
         for field in ("agent", "subagent", "skill", "role"):
             if field in event:
@@ -200,22 +209,42 @@ def resolve_events(events: list[dict]) -> list[dict]:
         if kind == "agent_start":
             event.setdefault("agent", "alt-ajan")
             open_starts.append(event)
-        elif kind == "agent_stop":
+        elif kind in ("agent_stop", "delegate_done"):
             match = None
-            key = event.get("agent_key")
+            key = event.get("agent_key") if kind == "agent_stop" else None
+            name = event.get("agent") if kind == "agent_stop" else event.get("subagent")
             if key:
                 match = next((s for s in open_starts if s.get("agent_key") == key), None)
-            if match is None and event.get("agent"):
-                match = next((s for s in open_starts if s["agent"] == event["agent"]), None)
-            if match is None and not event.get("agent") and open_starts:
-                match = open_starts[0]
-            if match is not None:
-                open_starts.remove(match)
-                event["agent"] = match["agent"]
-                if match.get("agent_key"):
-                    event["agent_key"] = match["agent_key"]
-            event.setdefault("agent", "alt-ajan")
-    return events
+            if match is None and name:
+                match = next((s for s in open_starts if s["agent"] == name), None)
+            if match is None:
+                continue
+            open_starts.remove(match)
+            event["kind"] = "agent_stop"
+            event["agent"] = match["agent"]
+            event.pop("subagent", None)
+            if match.get("agent_key"):
+                event["agent_key"] = match["agent_key"]
+        kept.append(event)
+    return kept
+
+
+ATTENTION_CLEARS = frozenset({"resume", "tool", "skill", "delegate", "agent_start", "agent_stop", "deny"})
+ATTENTION_MAX_AGE = 6 * 3600
+
+
+def derive_attention(events: list[dict], now: float) -> dict | None:
+    """The open request for the human, if Claude is waiting on them."""
+    current = None
+    for event in events:
+        kind = event.get("kind")
+        if kind == "attention":
+            current = event
+        elif kind in ATTENTION_CLEARS:
+            current = None
+    if current is None or now - _parse_ts(current.get("ts")) > ATTENTION_MAX_AGE:
+        return None
+    return {k: current.get(k) for k in ("id", "reason", "tool", "agent", "ts") if current.get(k)}
 
 
 def derive_agents(events: list[dict], now: float) -> dict:
@@ -314,6 +343,7 @@ class OfficeState:
             "roster": self.roster,
             "skills": self.skills,
             "agents": derive_agents(events, time.time()),
+            "attention": derive_attention(events, time.time()),
             "events": events[-120:],
         }
         digest = hashlib.sha1(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()
@@ -427,6 +457,7 @@ DEMO_SCRIPT = [
     (22.6, "tool", "frontend-engineer", "Write", "web/app/profile/page.tsx"),
     (24.0, "deny", "frontend-engineer", "enforce-role-boundaries", "src/Api/Profile/ProfileDto.cs",
      "Ownership-manifest protection: path is outside frontend-engineer's write paths"),
+    (25.0, "attention", "permission", "Bash"), (28.6, "resume"),
     (25.4, "tool", "backend-engineer", "Bash", ""), (26.4, "tool", "frontend-engineer", "Edit", "web/app/profile/ProfileForm.tsx"),
     (28.0, "stop", "backend-engineer"), (28.2, "task", "005", "completed"),
     (29.0, "stop", "frontend-engineer"), (29.2, "task", "006", "completed"), (29.4, "gate", "tests_passing"),
@@ -442,6 +473,7 @@ DEMO_SCRIPT = [
     (46.0, "task", "009", "in_progress"), (46.2, "delegate", "integration-release"), (46.6, "start", "integration-release"),
     (47.4, "skill", "integration-release", "release-scorecard"), (48.6, "tool", "integration-release", "Write", ".devflow/reports/RUN-042-scorecard.md"),
     (50.6, "stop", "integration-release"), (50.8, "task", "009", "awaiting_human_approval"),
+    (51.0, "attention", "turn_end", ""), (54.8, "resume"),
     (55.0, "gate", "human_approval"), (55.2, "task", "009", "verified"),
 ]
 DEMO_LOOP_SECONDS = 64.0
@@ -512,6 +544,13 @@ class Demo:
             if args[2]:
                 fields["path"] = args[2]
             self._event(**fields)
+        elif action == "attention":
+            fields = dict(kind="attention", reason=args[0])
+            if args[1]:
+                fields["tool"] = args[1]
+            self._event(**fields)
+        elif action == "resume":
+            self._event(kind="resume")
         elif action == "deny":
             self._event(kind="deny", agent=args[0], agent_key=self._key(args[0]), hook=args[1],
                         tool="Write", path=args[2], reason=args[3])

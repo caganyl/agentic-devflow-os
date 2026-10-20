@@ -98,7 +98,7 @@ class RecorderTest(_TargetCase):
         self.assertNotIn("body", json.dumps(_events(self.target)))
 
     def test_ignores_unrelated_events_and_bad_input(self):
-        self.record({"cwd": str(self.target), "hook_event_name": "UserPromptSubmit", "prompt": "hi"})
+        self.record({"cwd": str(self.target), "hook_event_name": "PreCompact", "trigger": "auto"})
         result = subprocess.run([sys.executable, str(RECORDER)], input="not json", capture_output=True,
                                 text=True, cwd=str(self.target))
         self.assertEqual(result.returncode, 0)
@@ -118,6 +118,38 @@ class RecorderTest(_TargetCase):
                      "tool_input": {"command": "dotnet build"}}, cwd=sub)
         self.assertEqual([e["kind"] for e in _events(self.target)], ["tool"])
         self.assertFalse((sub / ".devflow").exists())
+
+    def test_attention_events(self):
+        base = {"cwd": str(self.target)}
+        self.record(dict(base, hook_event_name="Notification", notification_type="permission_prompt",
+                         message="Claude needs your permission to use Bash"))
+        self.record(dict(base, hook_event_name="Notification", message="Claude is waiting for your input"))
+        self.record(dict(base, hook_event_name="PreToolUse", tool_name="AskUserQuestion",
+                         tool_input={"questions": [{"question": "gizli soru?"}]}))
+        self.record(dict(base, hook_event_name="PostToolUse", tool_name="AskUserQuestion", tool_input={}))
+        self.record(dict(base, hook_event_name="Stop", last_assistant_message="bitti"))
+        self.record(dict(base, hook_event_name="UserPromptSubmit", prompt="şimdi şunu yap"))
+        self.record(dict(base, hook_event_name="PostToolUse", tool_name="Agent",
+                         tool_input={"subagent_type": "devflow-plugin:docs-writer", "prompt": "x"}))
+        events = _events(self.target)
+        self.assertEqual([(e["kind"], e.get("reason"), e.get("tool")) for e in events], [
+            ("attention", "permission", "Bash"), ("attention", "idle", None),
+            ("attention", "question", "AskUserQuestion"), ("resume", None, "AskUserQuestion"),
+            ("attention", "turn_end", None), ("resume", None, None), ("delegate_done", None, None)])
+        self.assertEqual(events[-1]["subagent"], "devflow-plugin:docs-writer")
+        dump = json.dumps(events, ensure_ascii=False)
+        for secret in ("gizli", "bitti", "şimdi", "needs your permission"):
+            self.assertNotIn(secret, dump)
+
+    def test_utf8_payload_with_turkish_letters(self):
+        payload = {"cwd": str(self.target), "hook_event_name": "SubagentStart", "agent_type": "qa-automation",
+                   "prompt": "Şirket İçi Ğ testleri"}
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+        env["PYTHONIOENCODING"] = "cp1254"
+        env["PYTHONUTF8"] = "0"
+        subprocess.run([sys.executable, str(RECORDER)], input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                       capture_output=True, cwd=str(self.target), env=env)
+        self.assertEqual([e["kind"] for e in _events(self.target)], ["agent_start"])
 
     def test_deny_note(self):
         self.record({"cwd": str(self.target), "agent_type": "frontend-engineer", "tool_name": "Write",
@@ -244,11 +276,14 @@ class SnapshotTest(_TargetCase):
             (folder / f"{i}.json").write_text(json.dumps({"evidence_id": str(i), "timestamp": ts,
                                                           "lifecycle_state": state, "agent_type": agent}))
         snap = office.OfficeState(self.target).snapshot
-        names = [e["agent"] for e in snap["events"]]
-        self.assertEqual(names, ["product-analyst", "solution-architect", "product-analyst", "solution-architect"])
-        self.assertFalse(any(v["working"] for v in snap["agents"].values()))
-        self.assertEqual(snap["agents"]["product-analyst"]["runs"], 1)
+        # Anonymous stops outnumber starts on real sessions; they must not close
+        # running agents or invent an "alt-ajan" desk.
+        self.assertEqual([(e["kind"], e["agent"]) for e in snap["events"]],
+                         [("agent_start", "product-analyst"), ("agent_start", "solution-architect")])
+        self.assertTrue(snap["agents"]["product-analyst"]["working"])
+        self.assertTrue(snap["agents"]["solution-architect"]["working"])
         self.assertNotIn("unknown", json.dumps(snap["agents"]))
+        self.assertNotIn("alt-ajan", json.dumps(snap))
 
     def test_stop_without_agent_type_pairs_by_agent_key(self):
         now = office.datetime.now(office.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.00Z")
@@ -261,6 +296,50 @@ class SnapshotTest(_TargetCase):
         self.assertEqual(snap["events"][-2]["skill"], "documentation-sync")
         self.assertTrue(snap["agents"]["qa-automation"]["working"])
         self.assertFalse(snap["agents"]["docs-writer"]["working"])
+
+    def test_duplicate_stop_closes_only_once_and_extra_is_dropped(self):
+        now = office.datetime.now(office.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.00Z")
+        self.append(ts=now, kind="agent_start", agent="contract-broker", agent_key="k1")
+        self.append(ts=now, kind="agent_start", agent="solution-architect", agent_key="k2")
+        self.append(ts=now, kind="agent_stop", agent_key="k1")
+        self.append(ts=now, kind="agent_stop", agent_key="k1")
+        self.append(ts=now, kind="agent_stop")
+        snap = office.OfficeState(self.target).snapshot
+        self.assertEqual([e["kind"] for e in snap["events"]], ["agent_start", "agent_start", "agent_stop"])
+        self.assertTrue(snap["agents"]["solution-architect"]["working"])
+        self.assertFalse(snap["agents"]["contract-broker"]["working"])
+
+    def test_delegate_done_closes_agent_without_stop_event(self):
+        now = office.datetime.now(office.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.00Z")
+        self.append(ts=now, kind="agent_start", agent="devflow-plugin:docs-writer")
+        self.append(ts=now, kind="delegate_done", subagent="devflow-plugin:docs-writer")
+        snap = office.OfficeState(self.target).snapshot
+        self.assertEqual(snap["events"][-1]["kind"], "agent_stop")
+        self.assertEqual(snap["events"][-1]["agent"], "docs-writer")
+        self.assertFalse(snap["agents"]["docs-writer"]["working"])
+
+    def test_attention_opens_and_clears(self):
+        now = office.datetime.now(office.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.00Z")
+        self.append(ts=now, kind="tool", tool="Bash")
+        self.append(ts=now, kind="attention", reason="permission", tool="Bash")
+        snap = office.OfficeState(self.target).snapshot
+        self.assertEqual((snap["attention"]["reason"], snap["attention"]["tool"]), ("permission", "Bash"))
+        self.append(ts=now, kind="resume")
+        self.assertIsNone(office.OfficeState(self.target).snapshot["attention"])
+        self.append(ts=now, kind="attention", reason="turn_end")
+        self.assertEqual(office.OfficeState(self.target).snapshot["attention"]["reason"], "turn_end")
+        self.append(ts=now, kind="tool", tool="Read")
+        self.assertIsNone(office.OfficeState(self.target).snapshot["attention"])
+
+    def test_old_attention_is_ignored(self):
+        self.append(ts="2020-01-01T00:00:00.00Z", kind="attention", reason="turn_end")
+        self.assertIsNone(office.OfficeState(self.target).snapshot["attention"])
+
+    def test_roster_lists_preloaded_skills(self):
+        roster = {r["id"]: r for r in office.OfficeState(self.target).snapshot["roster"]}
+        self.assertIn("tdd-vertical-slice", roster["backend-engineer"]["skills"])
+        self.assertEqual(roster["contract-broker"]["skills"], ["api-contract-design"])
+        self.assertEqual(roster["governance-operations-author"]["skills"], [])
 
     def test_gate_and_task_changes_become_events(self):
         self.write_run()
@@ -334,8 +413,12 @@ class PluginWiringTest(unittest.TestCase):
             self.assertTrue(entries[0].get("async"), event)
         matcher = next(g["matcher"] for g in hooks["PreToolUse"]
                        if any("devflow_office_recorder.py" in h["command"] for h in g["hooks"]))
-        for tool in ("Skill", "Agent", "Task", "Edit", "Write", "Bash"):
+        for tool in ("Skill", "Agent", "Task", "Edit", "Write", "Bash", "AskUserQuestion", "ExitPlanMode"):
             self.assertIn(tool, matcher.split("|"))
+        for event in ("PostToolUse", "Notification", "Stop", "UserPromptSubmit"):
+            entries = recorder_entries(event)
+            self.assertEqual(len(entries), 1, event)
+            self.assertTrue(entries[0].get("async"), event)
 
     def test_plugin_build_ships_recorder(self):
         tmp = tempfile.mkdtemp()
