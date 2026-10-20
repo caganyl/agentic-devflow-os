@@ -13,7 +13,9 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
+import urllib.error
 import urllib.request
 from datetime import timedelta
 from http.server import ThreadingHTTPServer
@@ -35,6 +37,25 @@ def _load(path: Path, name: str):
 
 
 office = _load(OFFICE, "devflow_office_under_test")
+recorder = _load(RECORDER, "devflow_office_recorder_under_test")
+
+_HOME = tempfile.TemporaryDirectory()
+
+
+def setUpModule():
+    # Never touch the real ~/.devflow-office registry from tests (subprocesses inherit it).
+    os.environ["DEVFLOW_OFFICE_HOME"] = _HOME.name
+
+
+def tearDownModule():
+    os.environ.pop("DEVFLOW_OFFICE_HOME", None)
+    _HOME.cleanup()
+
+
+def _serve(handler):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}"
 
 
 def _events(target: Path) -> list[dict]:
@@ -150,6 +171,23 @@ class RecorderTest(_TargetCase):
         subprocess.run([sys.executable, str(RECORDER)], input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                        capture_output=True, cwd=str(self.target), env=env)
         self.assertEqual([e["kind"] for e in _events(self.target)], ["agent_start"])
+
+    def test_events_note_the_project_in_the_registry(self):
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+        env["TERM_PROGRAM"] = "vscode"
+        env.pop("VisualStudioVersion", None)
+        subprocess.run([sys.executable, str(RECORDER)], input=json.dumps(
+            {"cwd": str(self.target), "hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {}}),
+            capture_output=True, text=True, cwd=str(self.target), env=env)
+        registry = json.loads((Path(os.environ["DEVFLOW_OFFICE_HOME"]) / "projects.json").read_text(encoding="utf-8"))
+        entry = registry["projects"][str(self.target.resolve())]
+        self.assertEqual((entry["name"], entry["ide"]), ("proj", "VS Code"))
+
+    def test_ide_label(self):
+        self.assertEqual(recorder.ide_label({"VisualStudioVersion": "18.0"}), "VS")
+        self.assertEqual(recorder.ide_label({"TERM_PROGRAM": "vscode"}), "VS Code")
+        self.assertEqual(recorder.ide_label({"TERMINAL_EMULATOR": "JetBrains-JediTerm"}), "JetBrains")
+        self.assertEqual(recorder.ide_label({}), "")
 
     def test_deny_note(self):
         self.record({"cwd": str(self.target), "agent_type": "frontend-engineer", "tool_name": "Write",
@@ -354,27 +392,26 @@ class SnapshotTest(_TargetCase):
 
 class ServerTest(_TargetCase):
     def test_serves_page_and_snapshot(self):
-        state = office.OfficeState(self.target)
-        server = ThreadingHTTPServer(("127.0.0.1", 0), office.make_handler(state))
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+        multi = office.MultiOffice([self.target], use_registry=False, use_remotes=False)
+        server, base = _serve(office.make_handler(multi))
         try:
-            base = f"http://127.0.0.1:{server.server_address[1]}"
             page = urllib.request.urlopen(base + "/").read().decode("utf-8")
             self.assertIn("DevFlow Ofis", page)
             self.assertIn("api/stream", page)
             snap = json.loads(urllib.request.urlopen(base + "/api/snapshot").read())
-            self.assertEqual(snap["target"], "proj")
-            self.assertIsNone(snap["run"])
+            (project,) = snap["projects"]
+            self.assertEqual((project["name"], project["remote"], project["reachable"]), ("proj", False, True))
+            self.assertEqual(snap["offices"][project["id"]]["target"], "proj")
+            self.assertIsNone(snap["offices"][project["id"]]["run"])
         finally:
             server.shutdown()
             server.server_close()
 
     def test_stream_sends_snapshot_then_named_ping(self):
-        state = office.OfficeState(self.target)
-        server = ThreadingHTTPServer(("127.0.0.1", 0), office.make_handler(state))
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+        multi = office.MultiOffice([self.target], use_registry=False, use_remotes=False)
+        server, base = _serve(office.make_handler(multi))
         try:
-            resp = urllib.request.urlopen(f"http://127.0.0.1:{server.server_address[1]}/api/stream", timeout=15)
+            resp = urllib.request.urlopen(base + "/api/stream", timeout=15)
             self.assertTrue(resp.readline().startswith(b"data: {"))
             lines = [resp.readline() for _ in range(3)]
             self.assertIn(b"event: ping\n", lines)
@@ -385,6 +422,103 @@ class ServerTest(_TargetCase):
 
     def test_refuses_non_local_host(self):
         self.assertEqual(office.main(["--host", "0.0.0.0", "--no-open"]), 2)
+
+    def test_share_endpoint_requires_token_and_shares_local_offices_only(self):
+        multi = office.MultiOffice([self.target], use_registry=False, use_remotes=False)
+        server, base = _serve(office.make_handler(multi, token="s3cret-token-value-123"))
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(base + office.SHARE_PATH)
+            self.assertEqual(ctx.exception.code, 401)
+            bad = urllib.request.Request(base + office.SHARE_PATH, headers={"X-DevFlow-Token": "wrong"})
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(bad)
+            self.assertEqual(ctx.exception.code, 401)
+            good = urllib.request.Request(base + office.SHARE_PATH, headers={"X-DevFlow-Token": "s3cret-token-value-123"})
+            data = json.loads(urllib.request.urlopen(good).read())
+            self.assertEqual([o["name"] for o in data["offices"]], ["proj"])
+            self.assertIn("events", data["offices"][0]["snapshot"])
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_share_endpoint_closed_without_share_mode(self):
+        multi = office.MultiOffice([self.target], use_registry=False, use_remotes=False)
+        server, base = _serve(office.make_handler(multi))
+        try:
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(base + office.SHARE_PATH)
+            self.assertEqual(ctx.exception.code, 403)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_lan_and_loopback_checks(self):
+        for address in ("127.0.0.1", "::1", "192.168.1.20", "10.0.0.5", "172.16.4.1", "::ffff:192.168.1.9",
+                        "fe80::1%en0", "169.254.10.1"):
+            self.assertTrue(office.is_lan_client(address), address)
+        for address in ("8.8.8.8", "1.1.1.1", "2606:4700::1111", "not-an-ip"):
+            self.assertFalse(office.is_lan_client(address), address)
+        self.assertTrue(office.is_loopback_client("::ffff:127.0.0.1"))
+        self.assertFalse(office.is_loopback_client("192.168.1.20"))
+
+    def test_remote_url(self):
+        self.assertEqual(office.remote_url("mac.local"), "http://mac.local:4646/api/share")
+        self.assertEqual(office.remote_url("192.168.1.5:4700"), "http://192.168.1.5:4700/api/share")
+        self.assertEqual(office.remote_url("http://mac.local/"), "http://mac.local:4646/api/share")
+
+    def test_remote_office_becomes_tabs_and_marks_unreachable(self):
+        sharer = office.MultiOffice([self.target], use_registry=False, use_remotes=False)
+        server, base = _serve(office.make_handler(sharer, token="tok-tok-tok-tok-tok-1"))
+        port = server.server_address[1]
+        office.save_remote(f"127.0.0.1:{port}", "tok-tok-tok-tok-tok-1")
+        try:
+            watcher = office.MultiOffice([], use_registry=False)
+            for feed in watcher.feeds.values():
+                feed.poll()
+            watcher.refresh()
+            remote = [p for p in watcher.snapshot["projects"] if p["remote"]]
+            self.assertEqual([(p["name"], p["reachable"]) for p in remote], [("proj", True)])
+            self.assertIn(remote[0]["id"], watcher.snapshot["offices"])
+        finally:
+            server.shutdown()
+            server.server_close()
+        for feed in watcher.feeds.values():
+            feed.poll()
+        watcher.refresh()
+        remote = [p for p in watcher.snapshot["projects"] if p["remote"]]
+        self.assertEqual([(p["reachable"], p["error"]) for p in remote], [(False, "ulaşılamıyor")])
+        self.assertTrue(office.forget_remote(f"127.0.0.1:{port}"))
+        self.assertEqual(office.read_remotes(), [])
+
+    def test_wrong_token_is_reported(self):
+        sharer = office.MultiOffice([self.target], use_registry=False, use_remotes=False)
+        server, base = _serve(office.make_handler(sharer, token="right-token-right-token"))
+        try:
+            feed = office.RemoteFeed(f"127.0.0.1:{server.server_address[1]}", "wrong-token")
+            feed.poll()
+            self.assertEqual((feed.ok, feed.error), (False, "token geçersiz"))
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_registry_projects_become_tabs(self):
+        other = self.target.parent / "Z-PmApp"
+        (other / ".devflow").mkdir(parents=True)
+        stale = self.target.parent / "eski"
+        (stale / ".devflow").mkdir(parents=True)
+        recorder.note_project(other)
+        recorder.note_project(stale, now=time.time() - 13 * 3600)
+        multi = office.MultiOffice([self.target], use_remotes=False)
+        names = [p["name"] for p in multi.snapshot["projects"]]
+        self.assertEqual(names[0], "proj")
+        self.assertIn("Z-PmApp", names)
+        self.assertNotIn("eski", names)
+
+    def test_share_token_is_kept_until_renewed(self):
+        first = office.share_token()
+        self.assertEqual(office.share_token(), first)
+        self.assertNotEqual(office.share_token(new=True), first)
 
     def test_demo_script_runs_to_completion(self):
         demo = office.Demo()

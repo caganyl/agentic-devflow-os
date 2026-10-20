@@ -26,6 +26,11 @@ subagent, hook, reason. Never stored: prompts, tool input bodies, Bash
 commands, file contents, transcripts, session ids, raw agent ids (agent_key
 is a short one-way hash used only to pair start/stop of the same subagent).
 
+Each project that records an event is also noted (path, name, IDE label, last
+time) in ~/.devflow-office/projects.json so a single `claude-devflow office`
+can show every recently active project as a tab. Override the folder with
+DEVFLOW_OFFICE_HOME.
+
 Telemetry only: it never gates anything and every failure exits 0. Nothing is
 written unless the working directory already has a .devflow/ workspace.
 """
@@ -35,6 +40,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -211,6 +217,51 @@ def append_event(cwd: Path, event: dict) -> None:
         os.close(fd)
 
 
+REGISTRY_TOUCH_SECONDS = 60
+REGISTRY_KEEP_SECONDS = 7 * 24 * 3600
+
+
+def office_home() -> Path:
+    return Path(os.environ.get("DEVFLOW_OFFICE_HOME") or (Path.home() / ".devflow-office"))
+
+
+def ide_label(env=None) -> str:
+    """Best guess of where the session was started; a label only, never a path."""
+    env = os.environ if env is None else env
+    if env.get("VisualStudioVersion") or env.get("VSAPPIDNAME"):
+        return "VS"
+    if env.get("TERM_PROGRAM") == "vscode" or env.get("VSCODE_PID"):
+        return "VS Code"
+    if "JetBrains" in env.get("TERMINAL_EMULATOR", ""):
+        return "JetBrains"
+    return ""
+
+
+def note_project(root: Path, now=None) -> None:
+    """Record that this project is active; at most once a minute per project."""
+    now = time.time() if now is None else now
+    home = office_home()
+    registry = home / "projects.json"
+    try:
+        data = json.loads(registry.read_text(encoding="utf-8"))
+        projects = data.get("projects") if isinstance(data.get("projects"), dict) else {}
+    except (OSError, ValueError):
+        data, projects = {}, {}
+    key = str(root.resolve())
+    entry = projects.get(key) if isinstance(projects.get(key), dict) else {}
+    label = ide_label()
+    if now - float(entry.get("last", 0) or 0) < REGISTRY_TOUCH_SECONDS and entry.get("ide", "") == label:
+        return
+    projects[key] = {"name": root.name, "ide": label or entry.get("ide", ""), "last": round(now, 1)}
+    projects = {k: v for k, v in projects.items()
+                if isinstance(v, dict) and now - float(v.get("last", 0) or 0) < REGISTRY_KEEP_SECONDS}
+    data["projects"] = projects
+    home.mkdir(parents=True, exist_ok=True)
+    tmp = registry.with_name(f"projects.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(registry)
+
+
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
@@ -225,8 +276,12 @@ def main(argv=None) -> int:
         cwd = Path(raw.get("cwd") or os.getcwd()) if isinstance(raw, dict) else Path.cwd()
         cwd = find_workspace_root(cwd, os.environ.get("CLAUDE_PROJECT_DIR"))
         event = build_event(raw, cwd, deny_hook, deny_reason)
-        if event:
+        if event and (cwd / ".devflow").is_dir():
             append_event(cwd, event)
+            try:
+                note_project(cwd)
+            except Exception:
+                pass
     except Exception:
         pass
     return 0

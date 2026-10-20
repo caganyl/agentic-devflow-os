@@ -12,8 +12,10 @@
 #       (scripts/devflow_operations.py launch --target "$PWD" ...).
 #
 #   claude-devflow office [--demo] [--port N] [--no-open]
-#       Bulunulan projenin .devflow/ durumunu canlı ofis görünümünde açar
+#       Aktif DevFlow projelerini canlı ofis görünümünde sekmeler halinde açar
 #       (scripts/devflow_office.py; yalnızca 127.0.0.1, salt okunur).
+#       --share: bu bilgisayarın ofislerini yerel ağda token'la paylaşır;
+#       --remote HOST --token T: paylaşılan ofisi uzak sekme olarak ekler.
 #
 #   claude-devflow doctor     Ön koşulları ve kurulumu kontrol eder.
 #   claude-devflow --help     Bu yardımı gösterir.
@@ -48,7 +50,7 @@ die() {
 }
 
 usage() {
-  sed -n '2,23p' "$DEVFLOW_HOME/bin/claude-devflow" | sed 's/^# \{0,1\}//'
+  sed -n '2,25p' "$DEVFLOW_HOME/bin/claude-devflow" | sed 's/^# \{0,1\}//'
   printf '\nDEVFLOW_HOME: %s\n' "$DEVFLOW_HOME"
 }
 
