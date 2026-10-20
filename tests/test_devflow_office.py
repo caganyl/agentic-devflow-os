@@ -15,6 +15,7 @@ import tempfile
 import threading
 import unittest
 import urllib.request
+from datetime import timedelta
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -230,6 +231,36 @@ class SnapshotTest(_TargetCase):
         snap = office.OfficeState(self.target).snapshot
         self.assertTrue(snap["agents"]["contract-broker"]["working"])
         self.assertFalse(snap["telemetry"])
+
+    def test_real_windows_delegation_events(self):
+        """Shape seen on a real session: namespaced agent_type, stops without agent_type."""
+        folder = self.target / ".devflow" / "delegation-events"
+        folder.mkdir()
+        now = office.datetime.now(office.timezone.utc)
+        rows = [("started", "devflow-plugin:product-analyst", 0), ("started", "devflow-plugin:solution-architect", 1),
+                ("stopped", "unknown", 2), ("stopped", "unknown", 3)]
+        for i, (state, agent, offset) in enumerate(rows):
+            ts = (now + timedelta(seconds=offset)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            (folder / f"{i}.json").write_text(json.dumps({"evidence_id": str(i), "timestamp": ts,
+                                                          "lifecycle_state": state, "agent_type": agent}))
+        snap = office.OfficeState(self.target).snapshot
+        names = [e["agent"] for e in snap["events"]]
+        self.assertEqual(names, ["product-analyst", "solution-architect", "product-analyst", "solution-architect"])
+        self.assertFalse(any(v["working"] for v in snap["agents"].values()))
+        self.assertEqual(snap["agents"]["product-analyst"]["runs"], 1)
+        self.assertNotIn("unknown", json.dumps(snap["agents"]))
+
+    def test_stop_without_agent_type_pairs_by_agent_key(self):
+        now = office.datetime.now(office.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.00Z")
+        self.append(ts=now, kind="agent_start", agent="devflow-plugin:qa-automation", agent_key="a")
+        self.append(ts=now, kind="agent_start", agent="devflow-plugin:docs-writer", agent_key="b")
+        self.append(ts=now, kind="skill", agent="devflow-plugin:docs-writer", skill="devflow-plugin:documentation-sync")
+        self.append(ts=now, kind="agent_stop", agent_key="b")
+        snap = office.OfficeState(self.target).snapshot
+        self.assertEqual(snap["events"][-1]["agent"], "docs-writer")
+        self.assertEqual(snap["events"][-2]["skill"], "documentation-sync")
+        self.assertTrue(snap["agents"]["qa-automation"]["working"])
+        self.assertFalse(snap["agents"]["docs-writer"]["working"])
 
     def test_gate_and_task_changes_become_events(self):
         self.write_run()

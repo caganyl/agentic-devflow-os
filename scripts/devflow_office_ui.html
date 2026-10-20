@@ -173,7 +173,9 @@ function onSnapshot(s){
   if (firstSnap){ firstSnap=false; const last=[...(s.events||[])].reverse().find(e=>describe(e).cap); lastCaption = {text: last? describe(last).cap : idleText(), t: now()}; }
 }
 function idleText(){ if (!snap) return 'Bağlanıyor…'; if (!snap.initialized) return `${snap.target} içinde .devflow/ yok. claude-devflow ile bir oturum başlatınca ofis canlanır.`;
-  if (!snap.telemetry) return 'Henüz olay gelmedi. Bu projedeki Claude oturumunu kapatıp claude-devflow ile yeniden başlat; yeni hook o zaman yüklenir.';
+  const any = (snap.events||[]).length > 0;
+  if (!snap.telemetry && !any) return 'Henüz olay gelmedi. Claude oturumunu güncel DevFlow plugin\u2019iyle yeniden başlat; yeni hook o zaman yüklenir.';
+  if (!snap.telemetry) return 'Yalnızca ajan başla/bitir olayları geliyor. Skill, araç ve hook engelleri için plugin\u2019i yeniden derleyip oturumu yeniden aç.';
   if (!snap.run) return 'Run yok; ana oturum ve ajanlar çalıştıkça burada görünür.'; return 'Ofis sakin. Yeni bir delegasyon bekleniyor.'; }
 
 function connect(){
@@ -392,7 +394,7 @@ function drawSidebar(t){
   if (allDone) status='tamamlandı';
   const sc = !run? COL.dim : allDone? COL.good : run.tasks.some(x=>x.status==='awaiting_human_approval')? COL.warn : '#5b9dff';
   const sw=Math.min(tw(status,9.5,700)+16,110); rr(x+w-14-sw,75,sw,18,9); ctx.fillStyle=sc+'2a'; ctx.fill(); ctx.strokeStyle=sc; ctx.lineWidth=1; ctx.stroke(); T(fitText(status,9.5,sw-10,700),x+w-14-sw/2,84.5,9.5,sc,700,'center');
-  T('Hedef',x+14,108,9,COL.dim,600); T(fitText(run? (run.objective||'—') : idleText(),12,w-28,600),x+14,124,12,COL.text,600);
+  T('Hedef',x+14,108,9,COL.dim,600); T(fitText(run? (run.objective||'—') : 'Run yok · serbest çalışma',12,w-28,600),x+14,124,12,COL.text,600);
   const active = Object.entries((snap&&snap.agents)||{}).filter(([k,v])=>v.working && k!==MAIN).length;
   T('Şu an çalışan',x+14,148,9,COL.dim,600);
   for (let i=0;i<9;i++){ ctx.beginPath(); ctx.arc(x+18+i*13,163,4.5,0,Math.PI*2); ctx.fillStyle = i<active ? '#5b9dff' : '#243049'; ctx.fill(); }
