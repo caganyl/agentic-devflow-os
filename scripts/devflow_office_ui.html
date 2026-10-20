@@ -91,7 +91,7 @@ function hhmmss(iso){ const d = iso? new Date(iso) : new Date(); if (isNaN(d)) r
 const nm = id => id===MAIN ? 'ana oturum' : id;
 
 // ---------- live state ----------
-let snap = null, connected = false, lastMsg = 0;
+let snap = null, connected = false, lastMsg = 0, es = null;
 const seen = new Set();
 let firstSnap = true;
 const anims = [];          // {kind, t0, dur, ...}
@@ -173,10 +173,12 @@ function onSnapshot(s){
   if (firstSnap){ firstSnap=false; const last=[...(s.events||[])].reverse().find(e=>describe(e).cap); lastCaption = {text: last? describe(last).cap : idleText(), t: now()}; }
 }
 function idleText(){ if (!snap) return 'Bağlanıyor…'; if (!snap.initialized) return `${snap.target} içinde .devflow/ yok. claude-devflow ile bir oturum başlatınca ofis canlanır.`;
-  if (!snap.run) return 'Aktif run yok. claude-devflow launch ile bir run başlatınca ekip işe koyulur.'; return 'Ofis sakin. Yeni bir delegasyon bekleniyor.'; }
+  if (!snap.telemetry) return 'Henüz olay gelmedi. Bu projedeki Claude oturumunu kapatıp claude-devflow ile yeniden başlat; yeni hook o zaman yüklenir.';
+  if (!snap.run) return 'Run yok; ana oturum ve ajanlar çalıştıkça burada görünür.'; return 'Ofis sakin. Yeni bir delegasyon bekleniyor.'; }
 
 function connect(){
-  const es = new EventSource('api/stream');
+  es = new EventSource('api/stream');
+  es.addEventListener('ping', () => { lastMsg = now(); });
   es.onmessage = ev => { try { onSnapshot(JSON.parse(ev.data)); } catch(err) { console.error(err); } };
   es.onerror = () => { connected = false; };
   es.onopen = () => { connected = true; };
@@ -229,7 +231,7 @@ function drawTopBar(t){
     T(label, x+pw/2, y+12.5, 10, done?'#8ff0c4':active?'#e6efff':human?'#ffe3a3':bad?'#ffb3b3':COL.dim, 600, 'center');
   });
   T(new Date().toLocaleTimeString('tr-TR'),1264,25,20,COL.text,600,'right',M);
-  const live = connected && now()-lastMsg < 30;
+  const live = !!es && es.readyState === 1 && now()-lastMsg < 30;
   ctx.beginPath(); ctx.arc(1196,43,3.5,0,Math.PI*2); ctx.fillStyle = live? COL.good : COL.bad; ctx.fill();
   T(live?'canlı':'bağlantı yok',1264,43,9,live?COL.sub:COL.bad,600,'right');
 }

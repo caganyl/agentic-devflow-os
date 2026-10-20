@@ -131,6 +131,23 @@ def build_event(raw: dict, cwd: Path, deny_hook: str = "", deny_reason: str = ""
     return None
 
 
+def find_workspace_root(cwd: Path, project_dir=None) -> Path:
+    """The project dir, or the nearest ancestor of cwd, that has .devflow/.
+
+    The session's cwd follows `cd` in Bash (e.g. into src/), so the target
+    root is searched upwards; cwd itself is returned when none is found.
+    """
+    candidates = [Path(project_dir)] if project_dir else []
+    candidates += [cwd, *list(cwd.parents)[:8]]
+    for candidate in candidates:
+        try:
+            if (candidate / ".devflow").is_dir():
+                return candidate
+        except OSError:
+            continue
+    return cwd
+
+
 def append_event(cwd: Path, event: dict) -> None:
     devflow = cwd / ".devflow"
     if not devflow.is_dir():
@@ -161,9 +178,7 @@ def main(argv=None) -> int:
         text = sys.stdin.read() if not sys.stdin.isatty() else ""
         raw = json.loads(text) if text.strip() else {}
         cwd = Path(raw.get("cwd") or os.getcwd()) if isinstance(raw, dict) else Path.cwd()
-        project = os.environ.get("CLAUDE_PROJECT_DIR")
-        if project and (Path(project) / ".devflow").is_dir():
-            cwd = Path(project)
+        cwd = find_workspace_root(cwd, os.environ.get("CLAUDE_PROJECT_DIR"))
         event = build_event(raw, cwd, deny_hook, deny_reason)
         if event:
             append_event(cwd, event)

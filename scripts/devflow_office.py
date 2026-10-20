@@ -338,7 +338,7 @@ def make_handler(state: OfficeState):
                         payload = json.dumps(snap, ensure_ascii=False)
                         self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
                     else:
-                        self.wfile.write(b": ping\n\n")
+                        self.wfile.write(b"event: ping\ndata: {}\n\n")
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return
