@@ -11,6 +11,10 @@
 #       Bulunulan proje için managed run başlatır
 #       (scripts/devflow_operations.py launch --target "$PWD" ...).
 #
+#   claude-devflow office [--demo] [--port N] [--no-open]
+#       Bulunulan projenin .devflow/ durumunu canlı ofis görünümünde açar
+#       (scripts/devflow_office.py; yalnızca 127.0.0.1, salt okunur).
+#
 #   claude-devflow doctor     Ön koşulları ve kurulumu kontrol eder.
 #   claude-devflow --help     Bu yardımı gösterir.
 #
@@ -44,7 +48,7 @@ die() {
 }
 
 usage() {
-  sed -n '2,19p' "$DEVFLOW_HOME/bin/claude-devflow" | sed 's/^# \{0,1\}//'
+  sed -n '2,23p' "$DEVFLOW_HOME/bin/claude-devflow" | sed 's/^# \{0,1\}//'
   printf '\nDEVFLOW_HOME: %s\n' "$DEVFLOW_HOME"
 }
 
@@ -86,6 +90,11 @@ case "${1:-}" in
       status=1
     fi
     exit "$status"
+    ;;
+  office)
+    shift
+    command -v python3 >/dev/null 2>&1 || die "eksik araç: python3 (claude-devflow doctor)"
+    exec python3 "$DEVFLOW_HOME/scripts/devflow_office.py" --target "$PWD" "$@"
     ;;
   launch)
     shift

@@ -30,6 +30,20 @@ if ! printf '%s' "$INPUT" | jq -e 'type == "object"' >/dev/null 2>&1; then
   exit 2
 fi
 
+# DevFlow Ofis telemetrisi: reddi canlı ofis görünümüne not düşer. Yalnızca
+# kayıt; karar vermez, çıktı üretmez ve hiçbir hata reddi etkilemez.
+devflow_office_note() {
+  local here recorder
+  here="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)" || return 0
+  for recorder in "$here/../scripts/devflow_office_recorder.py" "$here/../../scripts/devflow_office_recorder.py"; do
+    if [ -f "$recorder" ]; then
+      (printf '%s' "$INPUT" | python3 "$recorder" --deny "$1" "$2") >/dev/null 2>&1 || true
+      return 0
+    fi
+  done
+  return 0
+}
+
 deny() {
   local reason="$1"
 
@@ -40,6 +54,7 @@ deny() {
       permissionDecisionReason: $reason
     }
   }'
+  devflow_office_note "protect-main" "$reason"
 }
 
 # Protected branches: main, master and DEVFLOW_PROTECTED_BRANCHES (comma

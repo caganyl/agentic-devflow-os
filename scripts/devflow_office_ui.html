@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DevFlow Ofis</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0f17;overflow:hidden;}
+  body{display:flex;align-items:center;justify-content:center;}
+  canvas{display:block;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+"use strict";
+// DevFlow Ofis — live view. Data: /api/stream (SSE) served by scripts/devflow_office.py.
+const W = 1280, H = 720;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const F = 'Inter, "Segoe UI", system-ui, -apple-system, "DejaVu Sans", sans-serif';
+const M = 'ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace';
+let SCALE = 1;
+function fit(){
+  const dpr = window.devicePixelRatio || 1;
+  const s = Math.min(innerWidth / W, innerHeight / H);
+  cv.style.width = (W*s)+'px'; cv.style.height = (H*s)+'px';
+  cv.width = Math.round(W*s*dpr); cv.height = Math.round(H*s*dpr);
+  SCALE = s*dpr;
+}
+addEventListener('resize', fit); fit();
+
+const COL = { bg:'#0b0f17', floor:'#141b29', head:'#8ea0bf', text:'#e6edf7', sub:'#9fb0c9', dim:'#5d6b85',
+  wood:'#7a5b43', woodEdge:'#5a4230', good:'#3ecf8e', bad:'#ff5d5d', warn:'#ffb547', panel:'#121927', panelLine:'#26324a' };
+const ACCENT = {blue:'#5b9dff', green:'#3ecf8e', purple:'#a77bff', cyan:'#38d4e8', yellow:'#f5c542',
+  orange:'#ff9b4a', red:'#ff6470', pink:'#ff7ac6'};
+const MODEL = {opus:{label:'OPUS', c:'#a77bff'}, sonnet:{label:'SONNET', c:'#ff9b4a'}, haiku:{label:'HAIKU', c:'#38d4e8'},
+  inherit:{label:'INHERIT', c:'#8ea0bf'}, main:{label:'ORKESTRATÖR', c:'#5b9dff'}};
+const SKIN = ['#f1c7a1','#d9a37a','#a8734f','#e8b996','#c58c64','#f3d2b3'];
+const HAIR = ['#2b1d16','#5a3a22','#121212','#8a5a2b','#3b2f2a','#6b4a2f','#1f2a3a','#9a6b3f'];
+const ZONES = ['Yönetim & Ürün','Mimari Ofisi','Mühendislik','Kalite & Güvenlik','Yayın & Doküman','Lobi · Hook’lar · Skill Kitaplığı'];
+const MAIN = '@main';
+const PLACE = {
+  '@main':[0,3], 'delivery-lead':[0,0], 'product-analyst':[0,1], 'design-reviewer':[0,2],
+  'solution-architect':[1,0], 'adr-reviewer':[1,1], 'architecture-analyst':[1,2], 'contract-broker':[1,3],
+  'frontend-engineer':[2,0], 'backend-engineer':[2,1], 'database-engineer':[2,2], 'ai-data-engineer':[2,3],
+  'qa-automation':[3,0], 'security-red-team':[3,1], 'evalops-reviewer':[3,2],
+  'docs-writer':[4,0], 'integration-release':[4,1], 'governance-operations-author':[4,2],
+};
+const SPARE = [[3,3],[4,3]];
+const GUARDS = [
+  {id:'session-start', l:['session-','start']}, {id:'protect-main', l:['protect-','main']},
+  {id:'protect-sensitive-paths', l:['protect-sensitive-','paths']}, {id:'enforce-role-boundaries', l:['enforce-role-','boundaries']},
+];
+const SHORT = {'Delivery Planning':'Plan','Delivery Planning and Triage':'Plan','Delivery Planning and Baseline':'Plan','Release Planning':'Plan',
+  'Security Planning and Triage':'Plan','Acceptance Criteria Review':'Kabul kriterleri','Architecture Decision':'ADR','Architecture Analysis':'Mimari analiz',
+  'Contract Definition':'Contract','Backend Implementation':'Backend','Frontend Implementation':'Frontend','Backend API':'Backend API',
+  'AI and Data Engineering':'AI/Data','Data Pipeline':'Veri hattı','QA Test Suite':'QA','QA Automation':'QA','QA Bug Reproduction':'Bug repro',
+  'QA Verification':'QA doğrulama','QA Final Review':'QA final','Bug Fix Implementation':'Bug fix','Security Review':'Güvenlik',
+  'Threat Analysis':'Tehdit analizi','Security Patch Implementation':'Güvenlik yaması','Security Fix Verification':'Fix doğrulama',
+  'Security Final Scan':'Güvenlik tarama','EvalOps Review':'EvalOps','Design Review':'Tasarım review','Documentation':'Doküman',
+  'Integration and Release Scorecard':'Release','Release Scorecard':'Release','Benchmark and Release Scorecard':'Release',
+  'Cost Optimization Implementation':'Maliyet optimizasyonu'};
+const RUN_TR = {created:'oluşturuldu', in_progress:'devam ediyor', completed:'tamamlandı', failed:'başarısız', blocked:'blokajda'};
+const STATUS_TR = {planned:'planlandı', ready:'hazır', in_progress:'devam ediyor', blocked:'blokajda', completed:'tamamlandı',
+  verified:'doğrulandı', failed:'başarısız', awaiting_human_approval:'insan onayı bekliyor'};
+
+// ---------- geometry ----------
+function zoneRect(z){ const c=z%3, r=Math.floor(z/3); return {x:16+c*330, y:68+r*290, w:324, h:284}; }
+const SLOT = [[82,100],[242,100],[82,224],[242,224]];
+const LZ = zoneRect(5);
+const HUMAN = {cx:LZ.x+258, cy:LZ.y+100};
+GUARDS.forEach((g,i)=>{ g.x = LZ.x+44+i*78; g.y = LZ.y+214; });
+const gById = Object.fromEntries(GUARDS.map(g=>[g.id,g]));
+
+// ---------- helpers ----------
+const clamp01 = v=>Math.max(0,Math.min(1,v));
+const seg = (t,a,b)=>clamp01((t-a)/(b-a));
+const ease = x=> x<.5 ? 4*x*x*x : 1-Math.pow(-2*x+2,3)/2;
+const easeOutBack = x=>{ const c1=1.70158,c3=c1+1; return 1+c3*Math.pow(x-1,3)+c1*Math.pow(x-1,2); };
+function fadeIO(t,a,b,f=0.25){ return Math.min(seg(t,a,a+f), 1-seg(t,b-f,b)); }
+function rr(x,y,w,h,r){ ctx.beginPath(); ctx.roundRect(x,y,w,h,r); }
+function T(s,x,y,size,color,weight=500,align='left',font=F){ ctx.font=`${weight} ${size}px ${font}`; ctx.fillStyle=color; ctx.textAlign=align; ctx.textBaseline='middle'; ctx.fillText(s,x,y); }
+function tw(s,size,weight=500,font=F){ ctx.font=`${weight} ${size}px ${font}`; return ctx.measureText(s).width; }
+function fitText(s,size,maxW,weight=500,font=F){ if (tw(s,size,weight,font)<=maxW) return s; while (s.length>1 && tw(s+'…',size,weight,font)>maxW) s=s.slice(0,-1); return s+'…'; }
+function rand(i){ const x=Math.sin(i*127.1+311.7)*43758.5453; return x-Math.floor(x); }
+function hashStr(s){ let h=0; for (const ch of s) h=(h*31+ch.charCodeAt(0))|0; return Math.abs(h); }
+function wrap(s,size,maxW,weight=500){ const words=s.split(' '); const lines=[]; let cur=''; for(const w of words){ const tst=cur?cur+' '+w:w; if(tw(tst,size,weight)>maxW && cur){ lines.push(cur); cur=w; } else cur=tst; } if(cur) lines.push(cur); return lines; }
+function arc(A,B,k,lift){ const mx=(A.x+B.x)/2, my=Math.min(A.y,B.y)-lift; return {x:(1-k)*(1-k)*A.x+2*(1-k)*k*mx+k*k*B.x, y:(1-k)*(1-k)*A.y+2*(1-k)*k*my+k*k*B.y}; }
+function hhmmss(iso){ const d = iso? new Date(iso) : new Date(); if (isNaN(d)) return '--:--'; return d.toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+const nm = id => id===MAIN ? 'ana oturum' : id;
+
+// ---------- live state ----------
+let snap = null, connected = false, lastMsg = 0;
+const seen = new Set();
+let firstSnap = true;
+const anims = [];          // {kind, t0, dur, ...}
+const recentAction = {};   // agent -> {text, t}
+const popAt = {};          // agent -> t
+let lastCaption = {text:'Bağlanıyor…', t:0};
+let desks = {};            // id -> {cx, cy, accent, model, skin, hair, known}
+let gatePrev = {};
+
+function now(){ return performance.now()/1000; }
+
+function layoutDesks(){
+  const out = {};
+  const roster = (snap && snap.roster) || [];
+  const ids = new Set(roster.map(r=>r.id));
+  const extra = [];
+  for (const e of (snap && snap.events) || []) if (e.agent && !ids.has(e.agent) && e.agent!==MAIN && e.agent!=='unknown') { ids.add(e.agent); extra.push({id:e.agent, model:'inherit', color:''}); }
+  const spare = SPARE.slice();
+  const all = [{id:MAIN, model:'main', color:'blue'}, ...roster, ...extra];
+  all.forEach((r,i)=>{
+    let place = PLACE[r.id];
+    if (!place) { if (!spare.length) return; place = spare.shift(); }
+    const z = zoneRect(place[0]); const h = hashStr(r.id);
+    out[r.id] = { id:r.id, cx:z.x+SLOT[place[1]][0], cy:z.y+SLOT[place[1]][1], accent: ACCENT[r.color] || ['#5b9dff','#3ecf8e','#a77bff','#38d4e8','#f5c542','#ff9b4a'][h%6],
+      model: MODEL[r.model] ? r.model : 'inherit', skin: SKIN[h%SKIN.length], hair: HAIR[(h>>3)%HAIR.length], known: !!PLACE[r.id] };
+  });
+  desks = out;
+}
+function deskPoint(id){ if (id==='@human') return {x:HUMAN.cx, y:HUMAN.cy-40}; const d = desks[id] || desks[MAIN]; return {x:d.cx, y:d.cy-40}; }
+function bookPos(i){ const n=(snap&&snap.skills||[]).length; const per = n>24 ? 10 : 8; const w = n>24 ? 15 : 19; const r=Math.floor(i/per), c=i%per; return {x:LZ.x+22+c*w, y:LZ.y+40+r*30, w: n>24?11:13}; }
+function skillIndex(name){ const list=(snap&&snap.skills)||[]; let i=list.indexOf(name); if (i<0) i=list.findIndex(s=>name.endsWith(':'+s)||name.endsWith(s)); return i; }
+
+function taskFor(agent){ const run = snap && snap.run; if (!run) return null; const ts = run.tasks.filter(t=>t.assigned_role===agent);
+  return ts.find(t=>t.status==='in_progress') || ts.find(t=>t.status==='ready') || null; }
+function agentWorking(id){ if (!snap) return false; if (id===MAIN) return !!(recentAction[MAIN] && now()-recentAction[MAIN].t<6); return !!(snap.agents[id] && snap.agents[id].working); }
+function inRun(id){ const run = snap && snap.run; if (!run || !run.tasks.length) return true; if (id===MAIN) return true;
+  return run.tasks.some(t=>t.assigned_role===id) || (snap.events||[]).some(e=>e.agent===id); }
+
+function describe(e){
+  const a = nm(e.agent || MAIN);
+  switch(e.kind){
+    case 'agent_start': return {log:`${a} işe başladı`, cap:`${a} çalışmaya başladı${taskFor(e.agent)?': '+taskFor(e.agent).title:''}.`};
+    case 'agent_stop': return {log:`${a} bitirdi`, cap:`${a} işini bitirip sonucu ana oturuma teslim etti.`};
+    case 'skill': return {log:`${a} ← ${e.skill}`, cap:`${a}, ${e.skill} skill’ini kitaplıktan aldı.`};
+    case 'delegate': return {log:`ana oturum → ${e.subagent}`, cap:`Ana oturum işi ${e.subagent} ajanına devrediyor.`};
+    case 'tool': return {log:`${a} · ${e.tool}${e.path?' '+e.path:''}`, cap:null, quiet: ['Read','Grep','Glob'].includes(e.tool)};
+    case 'deny': return {log:`⛔ ${e.hook}: ${a}`, cap:`${e.hook} bir işlemi engelledi: ${a}${e.path?' → '+e.path:''}.`};
+    case 'gate': return {log:`✓ ${e.gate}`, cap:`Onay kapısı açıldı: ${e.gate}.`};
+    case 'task': return {log:`${e.title} → ${STATUS_TR[e.status]||e.status}`, cap: e.status==='awaiting_human_approval' ? `Sıra sende: ${e.title} insan onayını bekliyor.` : `${nm(e.role||'')}: ${e.title} ${STATUS_TR[e.status]||e.status}.`};
+    case 'run': return {log:`yeni run: ${e.run}`, cap:`Yeni run başladı: ${e.run}.`};
+  }
+  return {log:e.kind, cap:null};
+}
+
+function onEvent(e){
+  const t = now();
+  const agent = e.agent || MAIN;
+  const d = describe(e);
+  if (d.cap) lastCaption = {text:d.cap, t};
+  if (e.kind==='agent_start' && desks[agent]){ const task=taskFor(agent); anims.push({kind:'paper', t0:t, dur:1.3, from:MAIN, to:agent, label: task? fitText(task.title,9,150,700) : 'görev'}); }
+  if (e.kind==='agent_stop' && desks[agent]){ popAt[agent]=t; anims.push({kind:'paper', t0:t, dur:1.0, from:agent, to:MAIN, label:'sonuç'}); }
+  if (e.kind==='skill'){ const i=skillIndex(e.skill); anims.push({kind:'book', t0:t, dur:0.95, to: desks[agent]?agent:MAIN, idx:i, label:e.skill}); recentAction[agent]={text:`skill: ${e.skill}`, t}; }
+  if (e.kind==='tool'){ recentAction[agent]={text:`${e.tool}${e.path?' · '+e.path:''}`, t}; }
+  if (e.kind==='delegate'){ recentAction[MAIN]={text:`→ ${e.subagent}`, t}; }
+  if (e.kind==='deny'){ anims.push({kind:'deny', t0:t, dur:3.2, hook:e.hook, agent: desks[agent]?agent:MAIN, reason:e.path||e.tool||''}); recentAction[agent]={text:`engellendi: ${e.path||e.tool||''}`, t, bad:true}; }
+  if (e.kind==='gate'){ if (e.gate==='human_approval') anims.push({kind:'merge', t0:t, dur:3.0}); }
+}
+
+function onSnapshot(s){
+  snap = s; lastMsg = now(); connected = true;
+  layoutDesks();
+  const gates = (s.run && s.run.approval_gates) || {};
+  for (const [g,v] of Object.entries(gates)) if (v && gatePrev[g]===false) gatePrev[g+'@']=now();
+  for (const [g,v] of Object.entries(gates)) gatePrev[g]=v;
+  for (const e of s.events || []){
+    if (seen.has(e.id)) continue; seen.add(e.id);
+    if (!firstSnap) onEvent(e);
+  }
+  if (firstSnap){ firstSnap=false; const last=[...(s.events||[])].reverse().find(e=>describe(e).cap); lastCaption = {text: last? describe(last).cap : idleText(), t: now()}; }
+}
+function idleText(){ if (!snap) return 'Bağlanıyor…'; if (!snap.initialized) return `${snap.target} içinde .devflow/ yok. claude-devflow ile bir oturum başlatınca ofis canlanır.`;
+  if (!snap.run) return 'Aktif run yok. claude-devflow launch ile bir run başlatınca ekip işe koyulur.'; return 'Ofis sakin. Yeni bir delegasyon bekleniyor.'; }
+
+function connect(){
+  const es = new EventSource('api/stream');
+  es.onmessage = ev => { try { onSnapshot(JSON.parse(ev.data)); } catch(err) { console.error(err); } };
+  es.onerror = () => { connected = false; };
+  es.onopen = () => { connected = true; };
+}
+connect();
+
+// ---------- drawing ----------
+const bubbles=[]; const labelQueue=[];
+function bubble(x,y,text,alpha,style='normal',accent='#5b9dff'){ bubbles.push({x,y,text,alpha,style,accent}); }
+function drawBubbles(){
+  for (const b of bubbles){ if (b.alpha<=0) continue;
+    ctx.save(); ctx.globalAlpha=b.alpha;
+    const size=10.5, lines=wrap(b.text,size,170,600).slice(0,2).map(l=>fitText(l,size,170,600));
+    const w=Math.max(...lines.map(l=>tw(l,size,600)))+18, h=lines.length*14+10;
+    const x=Math.min(Math.max(b.x-w/2, 20), 1000-w), y=b.y-h-7;
+    let bg='#f4f7fc', fg='#121927', bd=b.accent;
+    if (b.style==='muted'){ bg='#2a3448'; fg='#c3cee0'; bd='#3c4964'; }
+    if (b.style==='deny'){ bg='#ff5d5d'; fg='#fff'; bd='#ff5d5d'; }
+    if (b.style==='ok'){ bg='#1f3d33'; fg='#bff3dc'; bd='#3ecf8e'; }
+    if (b.style==='warn'){ bg='#3d321a'; fg='#ffe3a3'; bd='#ffb547'; }
+    ctx.shadowColor='rgba(0,0,0,.45)'; ctx.shadowBlur=10; ctx.shadowOffsetY=3;
+    rr(x,y,w,h,8); ctx.fillStyle=bg; ctx.fill(); ctx.shadowColor='transparent';
+    ctx.lineWidth=1.5; ctx.strokeStyle=bd; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(b.x-6,y+h-0.5); ctx.lineTo(b.x,y+h+7); ctx.lineTo(b.x+6,y+h-0.5); ctx.closePath(); ctx.fillStyle=bg; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(b.x-6,y+h); ctx.lineTo(b.x,y+h+7); ctx.lineTo(b.x+6,y+h); ctx.strokeStyle=bd; ctx.stroke();
+    lines.forEach((l,i)=>T(l, x+w/2, y+12+i*14, size, fg, 600, 'center'));
+    ctx.restore();
+  }
+  bubbles.length=0;
+}
+
+function drawTopBar(t){
+  ctx.fillStyle='#0e1420'; ctx.fillRect(0,0,W,58); ctx.fillStyle=COL.panelLine; ctx.fillRect(0,58,W,1);
+  rr(16,14,30,30,8); ctx.fillStyle='#5b9dff'; ctx.fill(); T('D',31,29.5,17,'#0b0f17',800,'center');
+  T('DevFlow Ofis',56,23,17,COL.text,700);
+  T(fitText(snap? `${snap.target} · canlı görünüm` : 'canlı görünüm',10.5,220),56,40,10.5,COL.sub,500);
+  const tasks = (snap && snap.run && snap.run.tasks) || [];
+  const x0=292, total=804;
+  if (!tasks.length){ rr(x0,17,total,24,12); ctx.strokeStyle='#2b3852'; ctx.lineWidth=1; ctx.stroke(); T(snap&&snap.run?'Task graph henüz oluşturulmadı':'Run bekleniyor',x0+total/2,29.5,10.5,COL.dim,600,'center'); }
+  const gap=5, pw=(total-gap*(tasks.length-1))/Math.max(1,tasks.length);
+  tasks.forEach((task,i)=>{
+    const x=x0+i*(pw+gap), y=17, st=task.status;
+    const done = st==='completed'||st==='verified', active = st==='in_progress', human = st==='awaiting_human_approval', bad = st==='failed'||st==='blocked';
+    rr(x,y,pw,24,12);
+    if (done){ ctx.fillStyle='rgba(62,207,142,.16)'; ctx.fill(); ctx.strokeStyle='rgba(62,207,142,.55)'; ctx.lineWidth=1; ctx.stroke(); }
+    else if (active||human){ const pu=0.55+0.45*Math.sin(t*5); const c= human? '255,181,71':'91,157,255'; ctx.fillStyle=`rgba(${c},${0.22+0.12*pu})`; ctx.fill(); ctx.strokeStyle=human?COL.warn:'#5b9dff'; ctx.lineWidth=1.5; ctx.stroke(); }
+    else if (bad){ ctx.fillStyle='rgba(255,93,93,.15)'; ctx.fill(); ctx.strokeStyle=COL.bad; ctx.lineWidth=1.2; ctx.stroke(); }
+    else { ctx.strokeStyle='#2b3852'; ctx.lineWidth=1; ctx.stroke(); }
+    const label = fitText((done?'✓ ':bad?'! ':human?'⏳ ':'')+(SHORT[task.title]||task.title), 10, pw-12, 600);
+    T(label, x+pw/2, y+12.5, 10, done?'#8ff0c4':active?'#e6efff':human?'#ffe3a3':bad?'#ffb3b3':COL.dim, 600, 'center');
+  });
+  T(new Date().toLocaleTimeString('tr-TR'),1264,25,20,COL.text,600,'right',M);
+  const live = connected && now()-lastMsg < 30;
+  ctx.beginPath(); ctx.arc(1196,43,3.5,0,Math.PI*2); ctx.fillStyle = live? COL.good : COL.bad; ctx.fill();
+  T(live?'canlı':'bağlantı yok',1264,43,9,live?COL.sub:COL.bad,600,'right');
+}
+
+function drawZones(t){
+  ctx.fillStyle=COL.bg; ctx.fillRect(0,59,W,H-59);
+  for (let z=0; z<6; z++){
+    const r=zoneRect(z);
+    rr(r.x,r.y,r.w,r.h,12); ctx.fillStyle = z===5?'#121a27':COL.floor; ctx.fill();
+    ctx.save(); rr(r.x,r.y,r.w,r.h,12); ctx.clip(); ctx.strokeStyle='rgba(255,255,255,.025)'; ctx.lineWidth=1;
+    for (let gx=r.x; gx<r.x+r.w; gx+=27){ ctx.beginPath(); ctx.moveTo(gx,r.y); ctx.lineTo(gx,r.y+r.h); ctx.stroke(); }
+    for (let gy=r.y; gy<r.y+r.h; gy+=27){ ctx.beginPath(); ctx.moveTo(r.x,gy); ctx.lineTo(r.x+r.w,gy); ctx.stroke(); }
+    ctx.restore();
+    rr(r.x,r.y,r.w,r.h,12); ctx.strokeStyle='#22304a'; ctx.lineWidth=1.5; ctx.stroke();
+    T(ZONES[z].toUpperCase(), r.x+14, r.y+15, 9.5, COL.head, 700);
+  }
+  const used = new Set(Object.values(desks).map(d=>`${d.cx},${d.cy}`));
+  for (const [z,s] of SPARE){ const r=zoneRect(z); const x=r.x+SLOT[s][0], y=r.y+SLOT[s][1]; if (used.has(`${x},${y}`)) continue; if (z===3) drawPlant(x-20,y-6); else drawCoffee(x,y-10,t); }
+  drawPlant(zoneRect(1).x+300, zoneRect(1).y+258);
+  drawPlant(zoneRect(2).x+300, zoneRect(2).y+30);
+}
+function drawPlant(x,y){
+  rr(x-10,y+4,20,16,4); ctx.fillStyle='#8a5a3c'; ctx.fill(); ctx.fillStyle='#2f8f5b';
+  for (let i=0;i<6;i++){ ctx.beginPath(); const a=-Math.PI/2+(i-2.5)*0.45; ctx.ellipse(x+Math.cos(a)*10,y-2+Math.sin(a)*10,5,11,a+Math.PI/2,0,Math.PI*2); ctx.fill(); }
+  ctx.fillStyle='#3fb170'; ctx.beginPath(); ctx.arc(x,y-4,6,0,Math.PI*2); ctx.fill();
+}
+function drawCoffee(x,y,t){
+  rr(x-26,y-18,52,40,6); ctx.fillStyle='#2b3448'; ctx.fill(); rr(x-20,y-12,40,14,3); ctx.fillStyle='#1a2130'; ctx.fill();
+  T('KAHVE',x,y-5,7.5,COL.sub,700,'center'); rr(x-6,y+6,12,10,2); ctx.fillStyle='#e9eef5'; ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,.35)'; ctx.lineWidth=1.4;
+  for (let i=0;i<2;i++){ ctx.beginPath(); const off=(t*0.9+i*0.5)%1; ctx.moveTo(x-2+i*4,y+3-off*12); ctx.quadraticCurveTo(x+3+i*4,y-2-off*12,x-2+i*4,y-8-off*12); ctx.globalAlpha=1-off; ctx.stroke(); ctx.globalAlpha=1; }
+  T('kahve makinesi',x,y+34,8.5,COL.dim,500,'center');
+}
+function drawPerson(cx,cy,o){
+  const bob = o.working ? Math.sin(o.t*9+cx)*0.8 : Math.sin(o.t*1.5+cx)*0.4;
+  ctx.beginPath(); ctx.ellipse(cx,cy+12+bob*0.3,17,10,0,0,Math.PI*2); ctx.fillStyle=o.body; ctx.fill();
+  rr(cx-14,cy+13,28,17,6); ctx.fillStyle='#2a3346'; ctx.fill(); ctx.strokeStyle='#38445e'; ctx.lineWidth=1; ctx.stroke();
+  const hy=cy-1+bob;
+  ctx.beginPath(); ctx.arc(cx-8.5,hy+1,2.6,0,Math.PI*2); ctx.arc(cx+8.5,hy+1,2.6,0,Math.PI*2); ctx.fillStyle=o.skin; ctx.fill();
+  ctx.beginPath(); ctx.arc(cx,hy,9,0,Math.PI*2); ctx.fillStyle=o.skin; ctx.fill();
+  ctx.save(); ctx.beginPath(); ctx.arc(cx,hy,9.2,0,Math.PI*2); ctx.clip(); ctx.fillStyle=o.hair; ctx.fillRect(cx-10,hy-10,20,14.5); ctx.restore();
+}
+
+function drawDesk(d,t){
+  const id=d.id, {cx,cy}=d;
+  const info = (snap && snap.agents && snap.agents[id]) || null;
+  const working = agentWorking(id);
+  const dim = !inRun(id);
+  const pop = popAt[id]!==undefined && t-popAt[id]<1.1;
+  ctx.save(); ctx.globalAlpha = dim ? 0.36 : 1;
+  if (working){ const g=ctx.createRadialGradient(cx,cy-50,4,cx,cy-40,80); g.addColorStop(0,d.accent+'55'); g.addColorStop(1,d.accent+'00'); ctx.fillStyle=g; ctx.fillRect(cx-90,cy-120,180,170); }
+  rr(cx-50,cy-42,100,28,5); ctx.fillStyle= id===MAIN ? '#6a5a7a' : COL.wood; ctx.fill(); ctx.fillStyle=COL.woodEdge; ctx.fillRect(cx-50,cy-17,100,4);
+  rr(cx-15,cy-26,30,7,2); ctx.fillStyle='#d6dde8'; ctx.fill();
+  ctx.beginPath(); ctx.arc(cx-38,cy-30,4,0,Math.PI*2); ctx.fillStyle='#e9eef5'; ctx.fill();
+  // skill book on desk while working
+  if (working && info && info.last_skill){ const i=skillIndex(info.last_skill); if (!anims.some(a=>a.kind==='book'&&a.to===id&&t<a.t0+a.dur)) drawBook(cx+38,cy-28,i<0?hashStr(info.last_skill):i,1); }
+  ctx.fillStyle='#1a2130'; ctx.fillRect(cx-3,cy-40,6,6);
+  rr(cx-27,cy-70,54,32,4); ctx.fillStyle='#0a0e15'; ctx.fill();
+  const sx=cx-24, sy=cy-67, sw=48, sh=26;
+  if (pop){ rr(sx,sy,sw,sh,2); ctx.fillStyle='#14382a'; ctx.fill(); ctx.strokeStyle=COL.good; ctx.lineWidth=2.4; ctx.beginPath(); ctx.moveTo(cx-7,cy-54); ctx.lineTo(cx-2,cy-49); ctx.lineTo(cx+8,cy-60); ctx.stroke(); }
+  else if (working){
+    ctx.save(); ctx.shadowColor=d.accent; ctx.shadowBlur=16; rr(sx,sy,sw,sh,2); ctx.fillStyle='#0f1d2c'; ctx.fill(); ctx.restore();
+    ctx.save(); rr(sx,sy,sw,sh,2); ctx.clip(); const cols=[d.accent,'#7fdbca','#c792ea','#e6edf7'];
+    for (let i=0;i<9;i++){ const yy = sy+3+((i*5 - t*16) % 45 + 45) % 45; const ww = 10+rand(i+cx)*30; ctx.fillStyle=cols[i%4]; ctx.globalAlpha=(dim?0.36:1)*0.9; ctx.fillRect(sx+4+(i%3)*4,yy,ww,2.2); }
+    ctx.restore();
+  } else { rr(sx,sy,sw,sh,2); ctx.fillStyle='#151d2b'; ctx.fill(); ctx.beginPath(); ctx.arc(cx,cy-54,3,0,Math.PI*2); ctx.fillStyle='#26324a'; ctx.fill(); }
+  drawPerson(cx,cy,{body:d.accent,skin:d.skin,hair:d.hair,working,t});
+  if (working){ for (const s of [-1,1]){ const j=Math.sin(t*22+s*1.7+cx)*1.4; ctx.beginPath(); ctx.arc(cx+s*8,cy-19+j,2.8,0,Math.PI*2); ctx.fillStyle=d.skin; ctx.fill(); } }
+  ctx.restore();
+  labelQueue.push(()=>{ ctx.save(); ctx.globalAlpha = dim ? 0.36 : 1;
+    const name = nm(id); const nsz = name.length>22 ? 8.6 : 9.6;
+    T(fitText(name,nsz,150,600),cx,cy+40,nsz,working?'#ffffff':'#c9d4e5',600,'center');
+    const m=MODEL[d.model]; const bw=tw(m.label,7.5,700)+12;
+    rr(cx-bw/2,cy+48,bw,12,6); ctx.fillStyle=m.c+'26'; ctx.fill(); ctx.strokeStyle=m.c+'aa'; ctx.lineWidth=1; ctx.stroke(); T(m.label,cx,cy+54.3,7.5,m.c,700,'center');
+    if (info && info.runs>0 && !working){ ctx.beginPath(); ctx.arc(cx+bw/2+9,cy+54,5,0,Math.PI*2); ctx.fillStyle=COL.good; ctx.fill(); T(info.runs>1?String(info.runs):'✓',cx+bw/2+9,cy+54.5,7,'#0b0f17',800,'center'); }
+    ctx.restore(); });
+  // deny outline
+  for (const a of anims){ if (a.kind==='deny' && a.agent===id && t>=a.t0 && t<a.t0+a.dur){ const k=fadeIO(t,a.t0,a.t0+a.dur,0.3); const fl=0.5+0.5*Math.sin(t*14);
+    ctx.save(); ctx.globalAlpha=k*(0.5+0.5*fl); rr(cx-60,cy-80,120,146,14); ctx.strokeStyle=COL.bad; ctx.lineWidth=2.5; ctx.stroke(); ctx.restore(); } }
+  // bubble
+  const ra = recentAction[id];
+  if (ra && t-ra.t < 7 && (working || id===MAIN || ra.bad)) bubble(cx,cy-72,ra.text,fadeIO(t,ra.t,ra.t+7,0.25),ra.bad?'deny':'normal',d.accent);
+  else if (working){ const task=taskFor(id); bubble(cx,cy-72,task?task.title:'çalışıyor…',0.92,'normal',d.accent); }
+  if (pop){ const k=seg(t,popAt[id],popAt[id]+0.35); const out=1-seg(t,popAt[id]+0.75,popAt[id]+1.1);
+    ctx.save(); ctx.globalAlpha=out; ctx.translate(cx+34,cy-72); ctx.scale(easeOutBack(k),easeOutBack(k)); ctx.beginPath(); ctx.arc(0,0,11,0,Math.PI*2); ctx.fillStyle=COL.good; ctx.fill(); T('✓',0,1,12,'#08130e',800,'center'); ctx.restore(); }
+}
+
+function drawBook(x,y,i,scale=1){ const hue=(i*47)%360; ctx.save(); ctx.translate(x,y); ctx.scale(scale,scale); rr(-7,-10,14,20,2); ctx.fillStyle=`hsl(${hue} 60% 58%)`; ctx.fill(); ctx.fillStyle='rgba(255,255,255,.45)'; ctx.fillRect(-4,-6,8,1.6); ctx.restore(); }
+function drawLibrary(t){
+  const skills=(snap&&snap.skills)||[]; const x=LZ.x+14, y=LZ.y+30;
+  rr(x,y,166,98,6); ctx.fillStyle='#3a2a1e'; ctx.fill();
+  for (let r=0;r<3;r++){ ctx.fillStyle='#5a4230'; ctx.fillRect(x+4,y+30+r*30,158,4); }
+  const out = new Set();
+  for (const [id,info] of Object.entries((snap&&snap.agents)||{})) if (info.working && info.last_skill) out.add(skillIndex(info.last_skill));
+  for (const a of anims) if (a.kind==='book' && t<a.t0+a.dur) out.add(a.idx);
+  skills.slice(0,30).forEach((s,i)=>{ if (out.has(i)) return; const p=bookPos(i); const hue=(i*47)%360; const h=20+rand(i)*4;
+    rr(p.x,p.y+(24-h),p.w,h,2); ctx.fillStyle=`hsl(${hue} 55% 55%)`; ctx.fill(); ctx.fillStyle='rgba(255,255,255,.35)'; ctx.fillRect(p.x+2,p.y+(24-h)+4,p.w-4,1.5); });
+  T(`skill kitaplığı · ${skills.length} skill`,x+83,y+110,8.5,COL.sub,600,'center');
+}
+
+function drawGuards(t){
+  for (const g of GUARDS){
+    const active = anims.find(a=>a.kind==='deny' && a.hook===g.id && t>=a.t0 && t<a.t0+a.dur);
+    const c = active? COL.bad : '#6d7f9e';
+    if (active){ const pu=0.5+0.5*Math.sin(t*8); ctx.beginPath(); ctx.arc(g.x,g.y,22+pu*4,0,Math.PI*2); ctx.fillStyle=c+'22'; ctx.fill(); }
+    rr(g.x-12,g.y-6,24,24,7); ctx.fillStyle='#2b3a55'; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(g.x,g.y-1); ctx.lineTo(g.x+6,g.y+2); ctx.lineTo(g.x+5,g.y+9); ctx.lineTo(g.x,g.y+13); ctx.lineTo(g.x-5,g.y+9); ctx.lineTo(g.x-6,g.y+2); ctx.closePath(); ctx.fillStyle=c; ctx.fill();
+    ctx.beginPath(); ctx.arc(g.x,g.y-14,7.5,0,Math.PI*2); ctx.fillStyle='#d9a37a'; ctx.fill();
+    ctx.beginPath(); ctx.arc(g.x,g.y-16,8,Math.PI,0); ctx.fillStyle='#1c2740'; ctx.fill(); ctx.fillRect(g.x-9,g.y-17,18,2.5);
+    T(g.l[0],g.x,g.y+29,8,'#b8c5da',600,'center'); T(g.l[1],g.x,g.y+39,8,'#b8c5da',600,'center');
+  }
+  T('HOOK GÖREVLİLERİ',LZ.x+14,LZ.y+170,8,COL.dim,700);
+  for (const a of anims){ if (a.kind!=='deny' || t<a.t0 || t>=a.t0+a.dur) continue;
+    const g = gById[a.hook] || GUARDS[3]; const al=fadeIO(t,a.t0,a.t0+a.dur,0.25); const tp=desks[a.agent]||desks[MAIN];
+    if (tp){ ctx.save(); ctx.globalAlpha=al*0.9; ctx.setLineDash([7,6]); ctx.lineDashOffset=-t*40; ctx.strokeStyle=COL.bad; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(g.x,g.y-24); ctx.quadraticCurveTo((g.x+tp.cx)/2, Math.min(g.y,tp.cy)-60, tp.cx, tp.cy-10); ctx.stroke(); ctx.restore(); }
+    bubble(g.x,g.y-26,`DENY${a.reason?' · '+a.reason:''}`,al,'deny');
+  }
+}
+
+function drawHuman(t){
+  const {cx,cy}=HUMAN; const run=snap&&snap.run;
+  const waiting = !!(run && run.tasks.some(x=>x.status==='awaiting_human_approval'));
+  const merge = anims.find(a=>a.kind==='merge' && t>=a.t0 && t<a.t0+a.dur);
+  if (waiting || merge){ const g=ctx.createRadialGradient(cx,cy-50,4,cx,cy-40,85); g.addColorStop(0,'#f5c54255'); g.addColorStop(1,'#f5c54200'); ctx.fillStyle=g; ctx.fillRect(cx-90,cy-120,180,170); }
+  rr(cx-46,cy-42,92,28,5); ctx.fillStyle='#8d6a4c'; ctx.fill(); ctx.fillStyle=COL.woodEdge; ctx.fillRect(cx-46,cy-17,92,4);
+  rr(cx-20,cy-62,40,24,3); ctx.fillStyle='#0a0e15'; ctx.fill(); rr(cx-17,cy-59,34,18,2); ctx.fillStyle = waiting? '#3d321a' : '#151d2b'; ctx.fill();
+  if (merge) T('MERGE',cx,cy-50,7.5,COL.good,800,'center'); else if (waiting) T('ONAY?',cx,cy-50,7.5,'#ffb547',800,'center');
+  rr(cx-24,cy-38,48,6,2); ctx.fillStyle='#c9d1dc'; ctx.fill();
+  drawPerson(cx,cy,{body:'#f5c542',skin:'#e8b996',hair:'#2b1d16',working:waiting,t});
+  labelQueue.push(()=>{ T('sen (insan)',cx,cy+40,9.6,'#fff2c8',700,'center'); const s='MERGE YETKİSİ'; const bw=tw(s,7.5,700)+12; rr(cx-bw/2,cy+48,bw,12,6); ctx.fillStyle='#f5c54226'; ctx.fill(); ctx.strokeStyle='#f5c542aa'; ctx.lineWidth=1; ctx.stroke(); T(s,cx,cy+54.3,7.5,'#f5c542',700,'center'); });
+  if (waiting){ const pu=0.75+0.25*Math.sin(t*4); bubble(cx,cy-66,'Onayını bekliyor',pu,'warn','#ffb547'); }
+  if (merge){ const t0=merge.t0; const k=easeOutBack(seg(t,t0,t0+0.35)); const al=1-seg(t,t0+2.5,t0+3.0);
+    ctx.save(); ctx.globalAlpha=al; ctx.translate(cx-118,cy-36); ctx.rotate(-0.12); ctx.scale(k,k); rr(-62,-17,124,34,6); ctx.strokeStyle=COL.good; ctx.lineWidth=3; ctx.stroke(); ctx.fillStyle='rgba(20,56,42,.92)'; ctx.fill(); T('ONAYLANDI ✓',0,1,13,'#8ff0c4',800,'center'); ctx.restore();
+    for (let i=0;i<70;i++){ const tt=t-t0; const x=cx+(rand(i)-0.5)*260*tt, y=cy-40+(-160-rand(i+9)*170)*tt+260*tt*tt; if (y>LZ.y+LZ.h) continue; ctx.save(); ctx.globalAlpha=1-seg(t,t0+2.2,t0+3); ctx.translate(x,y); ctx.rotate(tt*8+i); ctx.fillStyle=['#3ecf8e','#f5c542','#5b9dff','#ff7ac6','#a77bff'][i%5]; ctx.fillRect(-3,-1.5,6,3); ctx.restore(); } }
+}
+
+function drawPaper(x,y,label,accent){
+  ctx.save(); ctx.translate(x,y); ctx.shadowColor='rgba(0,0,0,.4)'; ctx.shadowBlur=8; ctx.shadowOffsetY=3;
+  ctx.beginPath(); ctx.moveTo(-9,-12); ctx.lineTo(4,-12); ctx.lineTo(9,-7); ctx.lineTo(9,12); ctx.lineTo(-9,12); ctx.closePath(); ctx.fillStyle='#f7f9fc'; ctx.fill(); ctx.shadowColor='transparent';
+  ctx.fillStyle=accent; ctx.fillRect(-6,-6,10,2); ctx.fillStyle='#c4ccd8'; ctx.fillRect(-6,-1,12,1.6); ctx.fillRect(-6,3,12,1.6); ctx.fillRect(-6,7,8,1.6); ctx.restore();
+  const bw=tw(label,9,700)+12; rr(x-bw/2,y+17,bw,15,7.5); ctx.fillStyle=accent; ctx.fill(); T(label,x,y+25,9,'#0b0f17',700,'center');
+}
+function drawFlights(t){
+  for (const a of anims){ if (t<a.t0 || t>=a.t0+a.dur) continue; const k=ease(seg(t,a.t0,a.t0+a.dur)); const al=Math.min(seg(t,a.t0,a.t0+0.12),1-seg(t,a.t0+a.dur-0.12,a.t0+a.dur));
+    if (a.kind==='paper'){ if (!desks[a.from]||!desks[a.to]) continue; const A=deskPoint(a.from), B=deskPoint(a.to); const p=arc(A,B,k,60); const accent=(desks[a.from===MAIN?a.to:a.from]||{}).accent||'#f5c542';
+      ctx.save(); ctx.globalAlpha=al; for (let i=1;i<7;i++){ const q=arc(A,B,Math.max(0,k-i*0.03),60); ctx.beginPath(); ctx.arc(q.x,q.y,3-i*0.35,0,Math.PI*2); ctx.fillStyle=accent; ctx.fill(); } drawPaper(p.x,p.y,a.label,accent); ctx.restore(); }
+    if (a.kind==='book'){ const d=desks[a.to]; if (!d) continue; const lib = a.idx>=0? bookPos(a.idx) : {x:LZ.x+90,y:LZ.y+60}; const L={x:lib.x+6.5,y:lib.y+12}, D={x:d.cx+38,y:d.cy-28}; const p=arc(L,D,k,70);
+      ctx.save(); ctx.globalAlpha=al; drawBook(p.x,p.y,a.idx<0?hashStr(a.label):a.idx,1.25); const bw=tw(a.label,8.5,600)+10; rr(p.x-bw/2,p.y+13,bw,14,7); ctx.fillStyle='#f5c542'; ctx.fill(); T(a.label,p.x,p.y+20.5,8.5,'#1b1404',700,'center'); ctx.restore(); }
+  }
+}
+
+function panel(x,y,w,h,title){ rr(x,y,w,h,12); ctx.fillStyle=COL.panel; ctx.fill(); ctx.strokeStyle=COL.panelLine; ctx.lineWidth=1.2; ctx.stroke(); T(title,x+14,y+16,9.5,COL.head,700); }
+function drawSidebar(t){
+  const x=1012, w=252; const run=snap&&snap.run;
+  panel(x,68,w,108, run? fitText(`${run.run_id||'RUN'}${run.req_id?' · '+run.req_id:''}`,9.5,130,700) : 'RUN');
+  let status = run ? (RUN_TR[run.status]||run.status||'—') : 'yok'; const allDone = run && run.tasks.length && run.tasks.every(x=>x.status==='verified'||x.status==='completed');
+  if (allDone) status='tamamlandı';
+  const sc = !run? COL.dim : allDone? COL.good : run.tasks.some(x=>x.status==='awaiting_human_approval')? COL.warn : '#5b9dff';
+  const sw=Math.min(tw(status,9.5,700)+16,110); rr(x+w-14-sw,75,sw,18,9); ctx.fillStyle=sc+'2a'; ctx.fill(); ctx.strokeStyle=sc; ctx.lineWidth=1; ctx.stroke(); T(fitText(status,9.5,sw-10,700),x+w-14-sw/2,84.5,9.5,sc,700,'center');
+  T('Hedef',x+14,108,9,COL.dim,600); T(fitText(run? (run.objective||'—') : idleText(),12,w-28,600),x+14,124,12,COL.text,600);
+  const active = Object.entries((snap&&snap.agents)||{}).filter(([k,v])=>v.working && k!==MAIN).length;
+  T('Şu an çalışan',x+14,148,9,COL.dim,600);
+  for (let i=0;i<9;i++){ ctx.beginPath(); ctx.arc(x+18+i*13,163,4.5,0,Math.PI*2); ctx.fillStyle = i<active ? '#5b9dff' : '#243049'; ctx.fill(); }
+  T(`${active} ajan`,x+w-14,163,10.5,COL.text,700,'right');
+
+  panel(x,184,w,150,'ONAY KAPILARI');
+  const gates = Object.entries((run && run.approval_gates) || {contract_approved:false,tests_passing:false,qa_sign_off:false,security_review_complete:false,human_approval:false}).slice(0,5);
+  gates.forEach(([g,on],i)=>{ const y=224+i*23; const t0=gatePrev[g+'@']; const k = t0? seg(t,t0,t0+0.35) : 1;
+    rr(x+14,y-8,16,16,4); ctx.fillStyle= on ? COL.good : '#1b2436'; ctx.fill(); ctx.strokeStyle= on?COL.good:'#34425e'; ctx.lineWidth=1.2; ctx.stroke();
+    if (on){ ctx.save(); ctx.translate(x+22,y); const s=easeOutBack(k); ctx.scale(s,s); T('✓',0,0.5,11,'#08130e',800,'center'); ctx.restore();
+      if (t0 && t-t0<1.5){ ctx.save(); ctx.globalAlpha=1-seg(t,t0,t0+1.5); rr(x+8,y-12,w-16,24,6); ctx.fillStyle='rgba(62,207,142,.25)'; ctx.fill(); ctx.restore(); } }
+    T(fitText(g,10,150,600,M),x+38,y,10,on?'#d8f7e9':COL.sub,600,'left',M);
+    if (g==='human_approval') T(on?'insan ✓':'🔒 insan',x+w-14,y,8.5,on?COL.good:COL.dim,600,'right');
+  });
+
+  panel(x,342,w,218,'OLAY GÜNLÜĞÜ');
+  const evs = ((snap&&snap.events)||[]).filter(e=>!describe(e).quiet).slice(-9);
+  if (!evs.length) T('Henüz olay yok',x+14,380,9.5,COL.dim,500);
+  evs.forEach((e,i)=>{ const y=380+i*20; const s=describe(e).log;
+    T(hhmmss(e.ts).slice(0,5),x+14,y,8.5,COL.dim,500,'left',M);
+    const c = s.startsWith('✓')?'#8ff0c4': s.startsWith('⛔')?'#ff9a9a':'#cdd7e6';
+    T(fitText(s,9.5,w-64),x+50,y,9.5,c,500); });
+
+  panel(x,568,w,74,`KADRO · ${((snap&&snap.roster)||[]).length} AJAN`);
+  const counts={}; for (const m of ['opus','sonnet','haiku']) counts[m]=0; for (const r of (snap&&snap.roster)||[]) counts[r.model]=(counts[r.model]||0)+1; for (const m of Object.keys(counts)) if (!counts[m]) delete counts[m];
+  const total=Object.values(counts).reduce((a,b)=>a+b,0)||1; let bx=x+14; const bwid=w-28;
+  Object.entries(counts).forEach(([m,n])=>{ const ww=bwid*n/total; rr(bx,598,Math.max(2,ww-2),8,4); ctx.fillStyle=(MODEL[m]||MODEL.inherit).c; ctx.fill(); bx+=ww; });
+  let lx=x+14; Object.entries(counts).forEach(([m,n])=>{ const mm=MODEL[m]||MODEL.inherit; ctx.beginPath(); ctx.arc(lx+4,622,4,0,Math.PI*2); ctx.fillStyle=mm.c; ctx.fill(); const s=`${mm.label[0]+mm.label.slice(1).toLowerCase()} ${n}`; T(s,lx+12,622.5,9.5,COL.sub,600); lx+=tw(s,9.5,600)+24; });
+  const tel = snap && snap.telemetry; T(tel?'telemetri açık':'telemetri yok',x+w-14,584,9,tel?COL.good:COL.dim,600,'right');
+}
+
+function drawCaption(t){
+  rr(16,652,1248,56,12); ctx.fillStyle='#0e1420'; ctx.fill(); ctx.strokeStyle=COL.panelLine; ctx.lineWidth=1.2; ctx.stroke();
+  const stale = t-lastCaption.t > 45;
+  const text = stale ? idleText() : lastCaption.text;
+  const al = stale ? 1 : seg(t,lastCaption.t,lastCaption.t+0.3);
+  ctx.save(); ctx.globalAlpha=al; const lines=wrap(text,15,1180,500).slice(0,2);
+  lines.forEach((l,i)=>T(l,640,680+(i-(lines.length-1)/2)*19,15,COL.text,500,'center')); ctx.restore();
+}
+
+function frame(){
+  const t = now();
+  ctx.setTransform(SCALE,0,0,SCALE,0,0); ctx.clearRect(0,0,W,H);
+  drawZones(t); drawTopBar(t); drawLibrary(t);
+  for (const d of Object.values(desks)) drawDesk(d,t);
+  drawHuman(t);
+  for (const f of labelQueue) f(); labelQueue.length=0;
+  drawGuards(t); drawSidebar(t); drawFlights(t); drawBubbles(); drawCaption(t);
+  for (let i=anims.length-1;i>=0;i--) if (t>anims[i].t0+anims[i].dur+1) anims.splice(i,1);
+  requestAnimationFrame(frame);
+}
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(()=>requestAnimationFrame(frame));
+</script>
+</body>
+</html>
