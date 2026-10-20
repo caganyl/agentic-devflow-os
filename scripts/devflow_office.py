@@ -7,8 +7,17 @@ olarak gösteren yerel bir sayfa sunar: kim çalışıyor, hangi skill'i aldı,
 handoff'lar, onay kapıları ve hook engelleri.
 
     python3 scripts/devflow_office.py [--target PATH] [--port 4646] [--no-open]
-    python3 scripts/devflow_office.py --demo        # örnek run'ı canlı oynatır
+    python3 scripts/devflow_office.py --demo        # örnek iki ofisi canlı oynatır
     claude-devflow office [--demo] [--port N]       # aynı şey, bulunulan proje için
+
+Birden fazla ofis (sekmeler):
+    Kayıt aracı her aktif projeyi ~/.devflow-office/projects.json'a not eder;
+    ofis son 12 saatte aktif olan bütün projeleri ayrı sekmelerde gösterir.
+
+Başka bir bilgisayarı izlemek (aynı yerel ağ):
+    claude-devflow office --share                   # paylaşan (ör. Mac): token yazar
+    claude-devflow office --remote mac.local --token <token>   # izleyen (ör. Windows)
+    claude-devflow office --forget-remote mac.local
 
 Veri kaynakları (yalnızca okunur, hiçbir şey yazılmaz):
     .devflow/project.json              current_run_id
@@ -17,20 +26,30 @@ Veri kaynakları (yalnızca okunur, hiçbir şey yazılmaz):
     .devflow/office/events.jsonl       devflow_office_recorder.py telemetrisi
     .devflow/delegation-events/*.json  office telemetrisi yoksa start/stop yedeği
 
-Sunucu yalnızca 127.0.0.1'e bağlanır ve yalnızca standart kütüphane kullanır.
+Sunucu varsayılan olarak yalnızca 127.0.0.1'e bağlanır. --share verilirse yerel
+ağa açılır ama yerel olmayan isteklere yalnızca /api/share ucunu, yalnızca özel
+ağ adreslerinden ve yalnızca geçerli token'la, salt okunur olarak sunar.
+Yalnızca standart kütüphane kullanır.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
+import ipaddress
 import json
+import os
 import re
+import secrets
 import shutil
+import socket
 import sys
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 import webbrowser
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -366,49 +385,344 @@ class OfficeState:
 
 
 # ---------------------------------------------------------------------------
+# several offices: local projects from the registry + remote shared offices
+# ---------------------------------------------------------------------------
+
+ACTIVE_SECONDS = 12 * 3600
+REMOTE_POLL_SECONDS = 2.0
+SHARE_PATH = "/api/share"
+DEFAULT_PORT = 4646
+
+
+def office_home() -> Path:
+    return Path(os.environ.get("DEVFLOW_OFFICE_HOME") or (Path.home() / ".devflow-office"))
+
+
+def _write_private_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.stem}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
+    tmp.replace(path)
+
+
+def norm_key(path: Path) -> str:
+    return os.path.normcase(os.path.normpath(str(path)))
+
+
+def project_id(prefix: str, key: str) -> str:
+    return prefix + hashlib.sha1(key.encode("utf-8")).hexdigest()[:10]
+
+
+def read_registry_projects(now: float | None = None) -> list[dict]:
+    """Projects the recorder noted as active in the last ACTIVE_SECONDS."""
+    now = time.time() if now is None else now
+    data = _read_json(office_home() / "projects.json")
+    projects = data.get("projects") if isinstance(data, dict) and isinstance(data.get("projects"), dict) else {}
+    found = []
+    for key, entry in projects.items():
+        if not isinstance(entry, dict):
+            continue
+        if now - float(entry.get("last", 0) or 0) > ACTIVE_SECONDS:
+            continue
+        path = Path(key)
+        if (path / ".devflow").is_dir():
+            found.append({"path": path, "name": entry.get("name") or path.name, "ide": entry.get("ide") or ""})
+    return sorted(found, key=lambda e: e["name"].lower())
+
+
+def read_remotes() -> list[dict]:
+    data = _read_json(office_home() / "remotes.json")
+    remotes = data.get("remotes") if isinstance(data, dict) else None
+    return [r for r in remotes or [] if isinstance(r, dict) and r.get("host") and r.get("token")]
+
+
+def save_remote(host: str, token: str) -> None:
+    remotes = [r for r in read_remotes() if r["host"] != host] + [{"host": host, "token": token}]
+    _write_private_json(office_home() / "remotes.json", {"remotes": remotes})
+
+
+def forget_remote(host: str) -> bool:
+    remotes = read_remotes()
+    kept = [r for r in remotes if r["host"] != host]
+    _write_private_json(office_home() / "remotes.json", {"remotes": kept})
+    return len(kept) != len(remotes)
+
+
+def share_token(new: bool = False) -> str:
+    path = office_home() / "share.json"
+    data = _read_json(path)
+    token = data.get("token") if isinstance(data, dict) else None
+    if new or not isinstance(token, str) or len(token) < 16:
+        token = secrets.token_urlsafe(18)
+        _write_private_json(path, {"token": token})
+    return token
+
+
+def is_lan_client(address: str) -> bool:
+    """Loopback or a private (RFC 1918 / link-local / ULA) address."""
+    try:
+        ip = ipaddress.ip_address(address.split("%")[0])
+    except ValueError:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return ip.is_loopback or ip.is_private or ip.is_link_local
+
+
+def is_loopback_client(address: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(address.split("%")[0])
+    except ValueError:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return ip.is_loopback
+
+
+def remote_url(host: str) -> str:
+    host = host.strip().removeprefix("http://").rstrip("/")
+    has_port = host.rsplit("]", 1)[-1].count(":") == 1
+    return f"http://{host if has_port else f'{host}:{DEFAULT_PORT}'}{SHARE_PATH}"
+
+
+class RemoteFeed:
+    """Polls another computer's shared office over the local network."""
+
+    def __init__(self, host: str, token: str):
+        self.host, self.token = host, token
+        self.url = remote_url(host)
+        # LAN request: never through a corporate proxy from HTTP(S)_PROXY.
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        self.data: dict | None = None
+        self.ok = False
+        self.error = "bağlanıyor"
+        self.digest = ""
+
+    def poll(self) -> None:
+        request = urllib.request.Request(self.url, headers={"X-DevFlow-Token": self.token})
+        try:
+            with self.opener.open(request, timeout=3) as response:
+                body = response.read()
+            data = json.loads(body.decode("utf-8"))
+            if not isinstance(data, dict) or not isinstance(data.get("offices"), list):
+                raise ValueError("bad share payload")
+            self.data, self.ok, self.error = data, True, ""
+            self.digest = hashlib.sha1(body).hexdigest()
+        except urllib.error.HTTPError as exc:
+            self.ok, self.error = False, "token geçersiz" if exc.code == 401 else f"HTTP {exc.code}"
+        except Exception:
+            self.ok, self.error = False, "ulaşılamıyor"
+
+    def run(self, stop: threading.Event) -> None:
+        while not stop.is_set():
+            self.poll()
+            stop.wait(REMOTE_POLL_SECONDS)
+
+
+def office_summary(snap: dict) -> dict:
+    agents = snap.get("agents") or {}
+    return {"working": sum(1 for v in agents.values() if isinstance(v, dict) and v.get("working")),
+            "attention": snap.get("attention")}
+
+
+class MultiOffice:
+    """All offices shown as tabs: pinned targets, recently active projects, remotes."""
+
+    def __init__(self, pinned: list[Path], use_registry: bool = True, use_remotes: bool = True):
+        self.pinned = [Path(p) for p in pinned]
+        self.use_registry = use_registry
+        self.use_remotes = use_remotes
+        self.states: dict[str, OfficeState] = {}
+        self.meta: dict[str, dict] = {}
+        self.feeds: dict[str, RemoteFeed] = {}
+        self._feed_stop: threading.Event | None = None
+        self.cond = threading.Condition()
+        self.version = 0
+        self.snapshot: dict = {}
+        self._digest = ""
+        self.refresh()
+
+    def _local_entries(self) -> list[dict]:
+        entries, seen = [], set()
+        for path in self.pinned:
+            seen.add(norm_key(path))
+            entries.append({"path": path, "name": path.name, "ide": ""})
+        if self.use_registry:
+            for entry in read_registry_projects():
+                key = norm_key(entry["path"])
+                if key in seen:
+                    for e in entries:
+                        if norm_key(e["path"]) == key and entry["ide"]:
+                            e["ide"] = entry["ide"]
+                    continue
+                seen.add(key)
+                entries.append(entry)
+        return entries
+
+    def _sync_feeds(self) -> None:
+        if not self.use_remotes:
+            return
+        wanted = {r["host"]: r["token"] for r in read_remotes()}
+        for host in list(self.feeds):
+            if host not in wanted or self.feeds[host].token != wanted[host]:
+                self.feeds.pop(host)
+        for host, token in wanted.items():
+            if host not in self.feeds:
+                feed = RemoteFeed(host, token)
+                self.feeds[host] = feed
+                if self._feed_stop is not None:
+                    threading.Thread(target=feed.run, args=(self._feed_stop,), daemon=True).start()
+
+    def local_offices(self) -> list[dict]:
+        return [dict(self.meta[i], id=i, snapshot=self.states[i].snapshot) for i in self.meta if i in self.states]
+
+    def refresh(self) -> bool:
+        entries = self._local_entries()
+        live = set()
+        for entry in entries:
+            oid = project_id("p-", norm_key(entry["path"]))
+            live.add(oid)
+            if oid not in self.states:
+                self.states[oid] = OfficeState(entry["path"])
+            else:
+                self.states[oid].refresh()
+            self.meta[oid] = {"name": entry["name"], "ide": entry["ide"], "host": "", "remote": False}
+        for oid in list(self.states):
+            if oid not in live:
+                self.states.pop(oid)
+                self.meta.pop(oid, None)
+        self._sync_feeds()
+
+        projects, offices, parts = [], {}, []
+        for oid in [i for i in self.meta if i in self.states]:
+            snap = self.states[oid].snapshot
+            offices[oid] = snap
+            projects.append(dict(self.meta[oid], id=oid, reachable=True, error="", **office_summary(snap)))
+            parts.append((oid, snap.get("version")))
+        for host, feed in self.feeds.items():
+            remote_offices = (feed.data or {}).get("offices") or []
+            label = (feed.data or {}).get("host") or host
+            if not remote_offices:
+                rid = project_id("r-", host)
+                projects.append({"id": rid, "name": host, "ide": "", "host": label, "remote": True,
+                                 "reachable": feed.ok, "error": feed.error or "aktif proje yok",
+                                 "working": 0, "attention": None})
+            for office in remote_offices:
+                if not isinstance(office, dict) or not isinstance(office.get("snapshot"), dict):
+                    continue
+                rid = project_id("r-", f"{host}|{office.get('id')}")
+                snap = office["snapshot"]
+                offices[rid] = snap
+                summary = office_summary(snap) if feed.ok else {"working": 0, "attention": None}
+                projects.append({"id": rid, "name": str(office.get("name") or "?")[:64],
+                                 "ide": str(office.get("ide") or "")[:16], "host": str(label)[:64],
+                                 "remote": True, "reachable": feed.ok, "error": feed.error, **summary})
+            parts.append((host, feed.ok, feed.error, feed.digest))
+        digest = hashlib.sha1(json.dumps([parts, projects], sort_keys=True, default=str).encode()).hexdigest()
+        if digest == self._digest:
+            return False
+        with self.cond:
+            self._digest = digest
+            self.version += 1
+            self.snapshot = {"version": self.version, "projects": projects, "offices": offices}
+            self.cond.notify_all()
+        return True
+
+    def share_payload(self) -> dict:
+        return {"host": socket.gethostname().split(".")[0][:64],
+                "offices": [{"id": o["id"], "name": o["name"], "ide": o["ide"], "snapshot": o["snapshot"]}
+                            for o in self.local_offices()]}
+
+    def watch(self, stop: threading.Event) -> None:
+        self._feed_stop = stop
+        for feed in self.feeds.values():
+            threading.Thread(target=feed.run, args=(stop,), daemon=True).start()
+        while not stop.is_set():
+            try:
+                self.refresh()
+            except Exception as exc:  # keep serving the last good snapshot
+                print(f"devflow-office: okuma hatası: {exc}", file=sys.stderr)
+            stop.wait(POLL_SECONDS)
+
+
+# ---------------------------------------------------------------------------
 # HTTP
 # ---------------------------------------------------------------------------
 
-def make_handler(state: OfficeState):
+
+class OfficeServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        # A browser that reloads or closes mid-response is not an error worth a traceback.
+        if isinstance(sys.exc_info()[1], ConnectionError):
+            return
+        super().handle_error(request, client_address)
+
+def make_handler(office: MultiOffice, token: str | None = None):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "DevFlowOffice/1"
+        server_version = "DevFlowOffice/2"
 
         def log_message(self, *args):  # quiet
             pass
 
         def _send(self, code: int, body: bytes, ctype: str) -> None:
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+            except ConnectionError:
+                pass
+
+        def _json(self, data: dict) -> None:
+            self._send(200, json.dumps(data, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+
+        def _token_ok(self) -> bool:
+            given = self.headers.get("X-DevFlow-Token", "")
+            return bool(token) and hmac.compare_digest(given.encode("utf-8"), token.encode("utf-8"))
 
         def do_GET(self):  # noqa: N802
             path = self.path.split("?", 1)[0]
+            client = self.client_address[0]
+            if path == SHARE_PATH:
+                if not token or not is_lan_client(client):
+                    return self._send(403, b"forbidden", "text/plain")
+                if not self._token_ok():
+                    return self._send(401, b"token required", "text/plain")
+                return self._json(office.share_payload())
+            if not is_loopback_client(client):
+                # Shared mode exposes the read-only share endpoint only.
+                return self._send(403, b"forbidden", "text/plain")
             if path in ("/", "/index.html"):
                 self._send(200, UI_FILE.read_bytes(), "text/html; charset=utf-8")
             elif path == "/api/snapshot":
-                with state.cond:
-                    body = json.dumps(state.snapshot, ensure_ascii=False).encode("utf-8")
-                self._send(200, body, "application/json; charset=utf-8")
+                with office.cond:
+                    snap = office.snapshot
+                self._json(snap)
             elif path == "/api/stream":
                 self._stream()
             else:
                 self._send(404, b"not found", "text/plain")
 
         def _stream(self) -> None:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            seen = -1
             try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                seen = -1
                 while True:
-                    with state.cond:
-                        if state.version == seen:
-                            state.cond.wait(timeout=10)
-                        version, snap = state.version, state.snapshot
+                    with office.cond:
+                        if office.version == seen:
+                            office.cond.wait(timeout=10)
+                        version, snap = office.version, office.snapshot
                     if version != seen:
                         seen = version
                         payload = json.dumps(snap, ensure_ascii=False)
@@ -416,7 +730,7 @@ def make_handler(state: OfficeState):
                     else:
                         self.wfile.write(b"event: ping\ndata: {}\n\n")
                     self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError, OSError):
+            except (ConnectionError, OSError):
                 return
 
     return Handler
@@ -480,9 +794,10 @@ DEMO_LOOP_SECONDS = 64.0
 
 
 class Demo:
-    def __init__(self):
+    def __init__(self, name: str = "ornek-proje", offset: float = 0.0):
         self.root = Path(tempfile.mkdtemp(prefix="devflow-office-demo-"))
-        self.target = self.root / "ornek-proje"
+        self.target = self.root / name
+        self.offset = offset
         self.devflow = self.target / ".devflow"
         self._keys: dict[str, str] = {}
 
@@ -556,6 +871,8 @@ class Demo:
                         tool="Write", path=args[2], reason=args[3])
 
     def run_forever(self, stop: threading.Event) -> None:
+        if stop.wait(self.offset):
+            return
         while not stop.is_set():
             self.reset()
             start = time.time()
@@ -573,43 +890,82 @@ class Demo:
 # main
 # ---------------------------------------------------------------------------
 
+def lan_addresses() -> list[str]:
+    found = set()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("192.0.2.1", 9))  # no packet is sent; picks the LAN interface
+            found.add(probe.getsockname()[0])
+    except OSError:
+        pass
+    return sorted(a for a in found if is_lan_client(a) and not a.startswith("127."))
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="DevFlow Ofis — canlı ofis görünümü")
-    parser.add_argument("--target", default=".", help="Target proje kökü (varsayılan: bulunulan klasör)")
-    parser.add_argument("--port", type=int, default=4646)
+    parser.add_argument("--target", default=None, help="Her zaman gösterilecek proje (varsayılan: bulunulan klasör)")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--demo", action="store_true", help="Örnek bir run'ı canlı oynat")
+    parser.add_argument("--demo", action="store_true", help="Örnek iki ofisi canlı oynat")
     parser.add_argument("--no-open", action="store_true", help="Tarayıcıyı otomatik açma")
+    parser.add_argument("--share", action="store_true",
+                        help="Bu bilgisayarın ofislerini yerel ağda salt okunur, token'la paylaş")
+    parser.add_argument("--new-token", action="store_true", help="--share için yeni token üret (eskisi geçersiz)")
+    parser.add_argument("--remote", metavar="HOST[:PORT]", help="Paylaşılan bir ofisi uzak sekme olarak ekle")
+    parser.add_argument("--token", help="--remote için paylaşan bilgisayarın token'ı")
+    parser.add_argument("--forget-remote", metavar="HOST", help="Kayıtlı uzak ofisi kaldır ve çık")
     args = parser.parse_args(argv)
 
     if args.host not in ("127.0.0.1", "localhost", "::1"):
-        print("devflow-office: yalnızca yerel adrese bağlanır (127.0.0.1).", file=sys.stderr)
+        print("devflow-office: --host yalnızca yerel adres olabilir; ağa açmak için --share kullanın.", file=sys.stderr)
         return 2
+    if args.forget_remote:
+        removed = forget_remote(args.forget_remote)
+        print(f"Uzak ofis {'kaldırıldı' if removed else 'kayıtlı değildi'}: {args.forget_remote}")
+        return 0
+    if args.remote:
+        if not args.token:
+            print("devflow-office: --remote için --token gerekli (paylaşan bilgisayarda --share çıktısında).",
+                  file=sys.stderr)
+            return 2
+        save_remote(args.remote, args.token)
+        print(f"Uzak ofis kaydedildi: {args.remote}. Bundan sonra her açılışta sekme olarak gelir.")
 
     stop = threading.Event()
-    demo = None
+    demos: list[Demo] = []
     if args.demo:
-        demo = Demo()
-        demo.reset()
-        target = demo.target
-        threading.Thread(target=demo.run_forever, args=(stop,), daemon=True).start()
+        demos = [Demo("ornek-proje"), Demo("ikinci-proje", offset=24.0)]
+        for demo in demos:
+            demo.reset()
+            threading.Thread(target=demo.run_forever, args=(stop,), daemon=True).start()
+        office = MultiOffice([d.target for d in demos], use_registry=False)
     else:
-        target = Path(args.target).resolve()
-        if not (target / ".devflow").is_dir():
-            print(f"Uyarı: {target} içinde .devflow/ yok. DevFlow bu projede başlatıldığında ofis canlanır.",
-                  file=sys.stderr)
+        target = Path(args.target or ".").resolve()
+        # claude-devflow always passes --target $PWD; pin it only when it is a DevFlow project.
+        pinned = [target] if (target / ".devflow").is_dir() else []
+        office = MultiOffice(pinned)
+        if not office.snapshot.get("projects"):
+            print(f"Uyarı: aktif DevFlow projesi bulunamadı ({target}). claude-devflow ile bir oturum "
+                  "başlatınca ofis kendiliğinden gelir.", file=sys.stderr)
+            office = MultiOffice([target])
 
-    state = OfficeState(target)
-    threading.Thread(target=state.watch, args=(stop,), daemon=True).start()
+    token = share_token(new=args.new_token) if args.share else None
+    bind = "0.0.0.0" if args.share else args.host
+    threading.Thread(target=office.watch, args=(stop,), daemon=True).start()
     try:
-        server = ThreadingHTTPServer((args.host, args.port), make_handler(state))
+        server = OfficeServer((bind, args.port), make_handler(office, token))
     except OSError as exc:
-        print(f"devflow-office: {args.host}:{args.port} açılamadı ({exc}). --port ile başka port deneyin.",
+        print(f"devflow-office: {bind}:{args.port} açılamadı ({exc}). --port ile başka port deneyin.",
               file=sys.stderr)
         return 1
-    server.daemon_threads = True
-    url = f"http://{args.host}:{args.port}/"
-    print(f"DevFlow Ofis: {url}  ({'demo' if demo else target})  — durdurmak için Ctrl+C")
+    url = f"http://127.0.0.1:{args.port}/"
+    print(f"DevFlow Ofis: {url}  — durdurmak için Ctrl+C")
+    if token:
+        name = socket.gethostname().split(".")[0]
+        print("Paylaşım açık (salt okunur, yalnızca yerel ağ). İzleyen bilgisayarda şunu çalıştırın:")
+        print(f"  claude-devflow office --remote {name}.local --token {token}")
+        for address in lan_addresses():
+            print(f"  (ad çözülmezse: --remote {address}:{args.port})")
     if not args.no_open:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
@@ -619,7 +975,7 @@ def main(argv=None) -> int:
     finally:
         stop.set()
         server.server_close()
-        if demo:
+        for demo in demos:
             demo.cleanup()
     return 0
 
