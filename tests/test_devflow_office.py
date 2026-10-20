@@ -1,0 +1,305 @@
+"""
+Tests for the live office view: telemetry recorder, deny notes from the
+enforcement hooks, the snapshot server and plugin wiring.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import unittest
+import urllib.request
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS = REPO_ROOT / "scripts"
+RECORDER = SCRIPTS / "devflow_office_recorder.py"
+OFFICE = SCRIPTS / "devflow_office.py"
+HOOKS_DIR = REPO_ROOT / ".claude" / "hooks"
+PLUGIN_HOOKS = REPO_ROOT / "hooks" / "hooks.json"
+
+
+def _load(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+office = _load(OFFICE, "devflow_office_under_test")
+
+
+def _events(target: Path) -> list[dict]:
+    log = target / ".devflow" / "office" / "events.jsonl"
+    if not log.exists():
+        return []
+    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+class _TargetCase(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name).resolve() / "proj"
+        (self.target / ".devflow").mkdir(parents=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def record(self, payload, *args, cwd=None):
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+        return subprocess.run([sys.executable, str(RECORDER), *args], input=json.dumps(payload),
+                              capture_output=True, text=True, cwd=str(cwd or self.target), env=env)
+
+
+class RecorderTest(_TargetCase):
+    def test_subagent_lifecycle_hashes_agent_id(self):
+        base = {"cwd": str(self.target), "agent_type": "backend-engineer", "agent_id": "agent-raw-123",
+                "session_id": "sess-1", "transcript_path": "/x/t.jsonl", "prompt": "do the thing"}
+        self.record(dict(base, hook_event_name="SubagentStart"))
+        self.record(dict(base, hook_event_name="SubagentStop", last_assistant_message="done"))
+        start, stop = _events(self.target)
+        self.assertEqual((start["kind"], stop["kind"]), ("agent_start", "agent_stop"))
+        self.assertEqual(start["agent"], "backend-engineer")
+        self.assertEqual(start["agent_key"], stop["agent_key"])
+        dump = json.dumps(_events(self.target))
+        for secret in ("agent-raw-123", "sess-1", "t.jsonl", "do the thing", "done"):
+            self.assertNotIn(secret, dump)
+
+    def test_skill_and_delegation(self):
+        self.record({"cwd": str(self.target), "hook_event_name": "PreToolUse", "agent_type": "qa-automation",
+                     "tool_name": "Skill", "tool_input": {"skill": "qa-acceptance-verification"}})
+        self.record({"cwd": str(self.target), "hook_event_name": "PreToolUse", "tool_name": "Agent",
+                     "tool_input": {"subagent_type": "docs-writer", "prompt": "secret plan"}})
+        skill, delegate = _events(self.target)
+        self.assertEqual((skill["kind"], skill["skill"], skill["agent"]), ("skill", "qa-acceptance-verification", "qa-automation"))
+        self.assertEqual((delegate["kind"], delegate["subagent"]), ("delegate", "docs-writer"))
+        self.assertNotIn("agent", delegate)
+        self.assertNotIn("secret plan", json.dumps(delegate))
+
+    def test_tool_events_keep_only_tool_and_relative_path(self):
+        self.record({"cwd": str(self.target), "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                     "tool_input": {"command": "export API_TOKEN=abc && make test"}})
+        self.record({"cwd": str(self.target), "hook_event_name": "PreToolUse", "tool_name": "Write",
+                     "tool_input": {"file_path": str(self.target / "src" / "app.ts"), "content": "body"}})
+        self.record({"cwd": str(self.target), "hook_event_name": "PreToolUse", "tool_name": "Edit",
+                     "tool_input": {"file_path": str(self.target / ".env"), "old_string": "a", "new_string": "b"}})
+        bash, write, env_edit = _events(self.target)
+        self.assertEqual(bash, {"ts": bash["ts"], "kind": "tool", "tool": "Bash"})
+        self.assertEqual(write["path"], "src/app.ts")
+        self.assertNotIn("path", env_edit)
+        self.assertNotIn("body", json.dumps(_events(self.target)))
+
+    def test_ignores_unrelated_events_and_bad_input(self):
+        self.record({"cwd": str(self.target), "hook_event_name": "UserPromptSubmit", "prompt": "hi"})
+        result = subprocess.run([sys.executable, str(RECORDER)], input="not json", capture_output=True,
+                                text=True, cwd=str(self.target))
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(_events(self.target), [])
+
+    def test_no_devflow_workspace_writes_nothing(self):
+        bare = self.target.parent / "bare"
+        bare.mkdir()
+        result = self.record({"cwd": str(bare), "hook_event_name": "SubagentStart", "agent_type": "x"}, cwd=bare)
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse((bare / ".devflow").exists())
+
+    def test_deny_note(self):
+        self.record({"cwd": str(self.target), "agent_type": "frontend-engineer", "tool_name": "Write",
+                     "tool_input": {"file_path": "src/Api/Dto.cs", "content": "x"}},
+                    "--deny", "enforce-role-boundaries", "Ownership-manifest protection: outside write paths")
+        (event,) = _events(self.target)
+        self.assertEqual(event["kind"], "deny")
+        self.assertEqual(event["hook"], "enforce-role-boundaries")
+        self.assertEqual(event["path"], "src/Api/Dto.cs")
+        self.assertIn("Ownership-manifest", event["reason"])
+
+
+class HookDenyNoteTest(unittest.TestCase):
+    """protect-main still emits exactly one deny JSON and also leaves an office note."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self.tmp.name).resolve() / "repo"
+        self.repo.mkdir()
+        for args in (["init", "-q", "-b", "main"], ["config", "user.email", "t@example.com"],
+                     ["config", "user.name", "T"]):
+            subprocess.run(["git", "-C", str(self.repo), *args], check=True)
+        (self.repo / "README.md").write_text("x\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.repo), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "commit", "-q", "-m", "init"], check=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_main_hook(self):
+        payload = {"cwd": str(self.repo), "tool_name": "Write",
+                   "tool_input": {"file_path": str(self.repo / "README.md"), "content": "y"}}
+        env = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")}
+        return subprocess.run(["bash", str(HOOKS_DIR / "protect-main.sh")], input=json.dumps(payload),
+                              capture_output=True, text=True, env=env)
+
+    def test_deny_output_unchanged_and_note_written(self):
+        (self.repo / ".devflow").mkdir()
+        result = self.run_main_hook()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)["hookSpecificOutput"]
+        self.assertEqual(decision["permissionDecision"], "deny")
+        (event,) = _events(self.repo)
+        self.assertEqual((event["kind"], event["hook"], event["path"]), ("deny", "protect-main", "README.md"))
+
+    def test_deny_without_devflow_workspace_still_denies(self):
+        result = self.run_main_hook()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertFalse((self.repo / ".devflow").exists())
+
+    def test_every_guard_deny_helper_notes_the_office(self):
+        for name in ("protect-main", "protect-sensitive-paths", "enforce-role-boundaries"):
+            text = (HOOKS_DIR / f"{name}.sh").read_text(encoding="utf-8")
+            self.assertIn(f'devflow_office_note "{name}" "$reason"', text, name)
+            self.assertIn(">/dev/null 2>&1 || true", text, name)
+
+
+class SnapshotTest(_TargetCase):
+    def write_run(self, gates=None, statuses=None):
+        devflow = self.target / ".devflow"
+        (devflow / "runs").mkdir(exist_ok=True)
+        (devflow / "project.json").write_text(json.dumps({"current_run_id": "RUN-007"}), encoding="utf-8")
+        tasks = [{"id": "RUN-007-TASK-001", "title": "Delivery Planning", "assigned_role": "delivery-lead",
+                  "task_type": "planning", "status": (statuses or {}).get("001", "planned"), "prompt": "x"}]
+        run = {"run_id": "RUN-007", "req_id": "REQ-007", "objective": "REQ-007: test", "status": "in_progress",
+               "tasks": tasks, "approval_gates": dict({"contract_approved": False}, **(gates or {})),
+               "_signature": "abc"}
+        (devflow / "runs" / "RUN-007.json").write_text(json.dumps(run), encoding="utf-8")
+
+    def append(self, **event):
+        log = self.target / ".devflow" / "office" / "events.jsonl"
+        log.parent.mkdir(exist_ok=True)
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(dict({"ts": "2026-10-20T10:00:00.00Z"}, **event)) + "\n")
+
+    def test_snapshot_reads_run_and_roster(self):
+        self.write_run()
+        snap = office.OfficeState(self.target).snapshot
+        self.assertEqual(snap["run"]["run_id"], "RUN-007")
+        self.assertEqual(snap["run"]["tasks"][0], {"id": "RUN-007-TASK-001", "title": "Delivery Planning",
+                                                   "assigned_role": "delivery-lead", "status": "planned",
+                                                   "task_type": "planning"})
+        self.assertNotIn("_signature", json.dumps(snap))
+        roster = {r["id"]: r for r in snap["roster"]}
+        self.assertEqual(roster["security-red-team"]["model"], "opus")
+        self.assertIn("task-routing", snap["skills"])
+
+    def test_working_state_from_events(self):
+        now = office.datetime.now(office.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.00Z")
+        self.append(ts=now, kind="agent_start", agent="backend-engineer", agent_key="k1")
+        self.append(ts=now, kind="skill", agent="backend-engineer", agent_key="k1", skill="tdd-vertical-slice")
+        self.append(ts=now, kind="agent_start", agent="qa-automation", agent_key="k2")
+        self.append(ts=now, kind="agent_stop", agent="qa-automation", agent_key="k2")
+        agents = office.OfficeState(self.target).snapshot["agents"]
+        self.assertTrue(agents["backend-engineer"]["working"])
+        self.assertEqual(agents["backend-engineer"]["last_skill"], "tdd-vertical-slice")
+        self.assertFalse(agents["qa-automation"]["working"])
+        self.assertEqual(agents["qa-automation"]["runs"], 1)
+
+    def test_stale_agent_is_not_working(self):
+        self.append(ts="2020-01-01T00:00:00.00Z", kind="agent_start", agent="docs-writer", agent_key="k")
+        self.assertFalse(office.OfficeState(self.target).snapshot["agents"]["docs-writer"]["working"])
+
+    def test_delegation_events_fallback(self):
+        folder = self.target / ".devflow" / "delegation-events"
+        folder.mkdir()
+        now = office.datetime.now(office.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        (folder / "a.json").write_text(json.dumps({"evidence_id": "a", "timestamp": now, "hook_event": "SubagentStart",
+                                                   "lifecycle_state": "started", "agent_type": "contract-broker"}))
+        snap = office.OfficeState(self.target).snapshot
+        self.assertTrue(snap["agents"]["contract-broker"]["working"])
+        self.assertFalse(snap["telemetry"])
+
+    def test_gate_and_task_changes_become_events(self):
+        self.write_run()
+        state = office.OfficeState(self.target)
+        self.write_run(gates={"contract_approved": True}, statuses={"001": "in_progress"})
+        self.assertTrue(state.refresh())
+        kinds = {e["kind"]: e for e in state.snapshot["events"]}
+        self.assertEqual(kinds["gate"]["gate"], "contract_approved")
+        self.assertEqual((kinds["task"]["from"], kinds["task"]["status"]), ("planned", "in_progress"))
+        self.assertFalse(state.refresh())
+
+
+class ServerTest(_TargetCase):
+    def test_serves_page_and_snapshot(self):
+        state = office.OfficeState(self.target)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), office.make_handler(state))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+            page = urllib.request.urlopen(base + "/").read().decode("utf-8")
+            self.assertIn("DevFlow Ofis", page)
+            self.assertIn("api/stream", page)
+            snap = json.loads(urllib.request.urlopen(base + "/api/snapshot").read())
+            self.assertEqual(snap["target"], "proj")
+            self.assertIsNone(snap["run"])
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_refuses_non_local_host(self):
+        self.assertEqual(office.main(["--host", "0.0.0.0", "--no-open"]), 2)
+
+    def test_demo_script_runs_to_completion(self):
+        demo = office.Demo()
+        try:
+            demo.reset()
+            for step in office.DEMO_SCRIPT:
+                demo.apply(step)
+            snap = office.OfficeState(demo.target).snapshot
+            self.assertTrue(all(snap["run"]["approval_gates"].values()))
+            self.assertFalse(any(v["working"] for v in snap["agents"].values()))
+            self.assertTrue(any(e["kind"] == "deny" for e in snap["events"]))
+        finally:
+            demo.cleanup()
+
+
+class PluginWiringTest(unittest.TestCase):
+    def test_recorder_registered_async(self):
+        hooks = json.loads(PLUGIN_HOOKS.read_text(encoding="utf-8"))["hooks"]
+
+        def recorder_entries(event):
+            return [h for group in hooks[event] for h in group["hooks"] if "devflow_office_recorder.py" in h["command"]]
+
+        for event in ("SubagentStart", "SubagentStop", "PreToolUse"):
+            entries = recorder_entries(event)
+            self.assertEqual(len(entries), 1, event)
+            self.assertTrue(entries[0].get("async"), event)
+        matcher = next(g["matcher"] for g in hooks["PreToolUse"]
+                       if any("devflow_office_recorder.py" in h["command"] for h in g["hooks"]))
+        for tool in ("Skill", "Agent", "Task", "Edit", "Write", "Bash"):
+            self.assertIn(tool, matcher.split("|"))
+
+    def test_plugin_build_ships_recorder(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            subprocess.run([sys.executable, str(SCRIPTS / "build_devflow_plugin.py"), "--output-dir", tmp],
+                           check=True, capture_output=True, cwd=str(REPO_ROOT))
+            self.assertTrue((Path(tmp) / "devflow-plugin" / "scripts" / "devflow_office_recorder.py").is_file())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_cli_has_office_command(self):
+        text = (REPO_ROOT / "bin" / "claude-devflow").read_text(encoding="utf-8")
+        self.assertIn("devflow_office.py", text)
+        result = subprocess.run(["sh", str(REPO_ROOT / "bin" / "claude-devflow"), "--help"],
+                                capture_output=True, text=True, env=dict(os.environ, DEVFLOW_HOME=str(REPO_ROOT)))
+        self.assertIn("claude-devflow office", result.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()

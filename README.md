@@ -36,6 +36,9 @@ devflow-manifest 002
 
 # 5. Onaylı manifeste bağlı managed run başlat (önce --dry-run ile bak)
 claude-devflow launch --objective "REQ-002: kısa açıklama" --req-id REQ-002
+
+# 6. (İsteğe bağlı) Ayrı bir terminalde ekibi canlı ofis olarak izle
+claude-devflow office            # örnek run için: claude-devflow office --demo
 ```
 
 Gereken: Python 3.9+, Bash, `jq`, Git ve Claude Code CLI (bkz. [Bağımlılıklar](#bagimliliklar)).
@@ -284,6 +287,7 @@ Hook'lar iki yerde kayıtlıdır: framework repo'nun kendisi için
 | `enforce-role-boundaries.sh` | PreToolUse Bash/Write/Edit | Rol bazlı yazma yolları; implementer'lar için manifest yetkilendirmesi; doküman rollerine Bash yasağı; ADR loop breaker; mimari profil kapısı (`confirmed` yalnızca insan, onaylı profil dondurulur); docs-writer kapısı (kaynak dosyada yalnızca yorum değiştiren Edit); dış sisteme yazma ve aktif saldırı aracı yasağı |
 | `session-start.sh` | SessionStart | Repo, branch, çalışma ağacı durumu, main koruması, mimari profil durumu ve en güncel handoff'u bağlama ekler; plugin oturumlarında `DEVFLOW_ARCH_SCAN_SCRIPT` yolunu tanımlar |
 | `devflow_delegation_recorder.py` (yalnızca plugin) | SubagentStart/Stop | `.devflow/delegation-events/` altına içeriksiz yaşam döngüsü kaydı yazar; hata alsa bile teslimatı bloklamaz |
+| `devflow_office_recorder.py` (yalnızca plugin, async) | SubagentStart/Stop, PreToolUse Skill/Agent/Edit/Write/Bash… | Canlı ofis görünümü için `.devflow/office/events.jsonl` telemetrisi: ajan başla/bitir, skill adı, araç adı ve göreli dosya yolu. Prompt, komut, dosya içeriği, transcript veya ham `agent_id` yazmaz; karar vermez. Guard hook'ları reddettiklerinde aynı dosyaya `deny` notu düşer |
 
 Ek olarak `.claude/settings.json` izin katmanı `.env*`, `secrets/**`, `*.pem`, `*.key`
 okumasını reddeder ve `git push`, `gh pr merge`, sert `git reset`, `terraform apply`,
@@ -383,7 +387,7 @@ claude-devflow launch --objective "..." --req-id REQ-NNN
 | Komut | Ne yapar |
 |---|---|
 | [`bin/install`](bin/install) | Komutları `~/.local/bin`'e (`DEVFLOW_BIN_DIR`) symlink'ler; klasör PATH'te değilse shell dosyasına işaretli blok ekler; eski `claude-devflow` fonksiyon/alias tanımlarını raporlar. `--no-path`, `--uninstall` |
-| [`bin/claude-devflow`](bin/claude-devflow) | `scripts/devflow_bootstrap.sh` + `claude --plugin-dir`; `launch …` alt komutu `scripts/devflow_operations.py launch --target "$PWD"` çağırır; `doctor` ön koşulları kontrol eder. Symlink'ten çağrılsa da framework kökünü kendisi bulur |
+| [`bin/claude-devflow`](bin/claude-devflow) | `scripts/devflow_bootstrap.sh` + `claude --plugin-dir`; `launch …` alt komutu `scripts/devflow_operations.py launch --target "$PWD"` çağırır; `office` alt komutu `scripts/devflow_office.py` ile bulunulan projenin `.devflow/` durumunu canlı ofis görünümünde açar (yalnızca `127.0.0.1`, salt okunur, `--demo` örnek run oynatır); `doctor` ön koşulları kontrol eder. Symlink'ten çağrılsa da framework kökünü kendisi bulur |
 | [`bin/devflow-manifest`](bin/devflow-manifest) | `scripts/devflow_new_manifest.sh` ile `draft` ownership manifesti üretir |
 
 Bootstrap adımları (hepsi idempotent): framework repo içindeyse çıkar · plugin eskiyse yeniden

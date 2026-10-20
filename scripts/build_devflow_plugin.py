@@ -38,6 +38,8 @@ INCLUDED_SCRIPTS = frozenset({
     "devflow_operations.py",
     "devflow_target_guard.py",
     "devflow_delegation_recorder.py",
+    # Async telemetry for the live office view (claude-devflow office).
+    "devflow_office_recorder.py",
     # Shipped so enforce-role-boundaries.sh can authorize implementer writes in
     # a target project (it resolves the validator from the plugin root).
     "validate_ownership_manifest.py",
