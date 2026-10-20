@@ -172,6 +172,52 @@ def read_run(devflow: Path) -> dict | None:
 # derived state
 # ---------------------------------------------------------------------------
 
+def normalize_name(value) -> str | None:
+    """Plugin agents/skills arrive namespaced ("devflow-plugin:backend-engineer")."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    name = value.strip().split(":")[-1]
+    return None if name in ("", "unknown") else name
+
+
+def resolve_events(events: list[dict]) -> list[dict]:
+    """Normalize names and give every agent_stop the agent it closes.
+
+    SubagentStop hook input carries no agent_type, so a stop is matched to its
+    start by agent_key (hashed agent_id) or, failing that, to the oldest
+    still-open start (the delegation-events fallback has no key at all).
+    """
+    open_starts: list[dict] = []
+    for event in events:
+        for field in ("agent", "subagent", "skill", "role"):
+            if field in event:
+                name = normalize_name(event.get(field))
+                if name:
+                    event[field] = name
+                else:
+                    event.pop(field, None)
+        kind = event.get("kind")
+        if kind == "agent_start":
+            event.setdefault("agent", "alt-ajan")
+            open_starts.append(event)
+        elif kind == "agent_stop":
+            match = None
+            key = event.get("agent_key")
+            if key:
+                match = next((s for s in open_starts if s.get("agent_key") == key), None)
+            if match is None and event.get("agent"):
+                match = next((s for s in open_starts if s["agent"] == event["agent"]), None)
+            if match is None and not event.get("agent") and open_starts:
+                match = open_starts[0]
+            if match is not None:
+                open_starts.remove(match)
+                event["agent"] = match["agent"]
+                if match.get("agent_key"):
+                    event["agent_key"] = match["agent_key"]
+            event.setdefault("agent", "alt-ajan")
+    return events
+
+
 def derive_agents(events: list[dict], now: float) -> dict:
     """Per-agent live state from the ordered event stream."""
     active: dict[str, dict] = {}
@@ -259,7 +305,7 @@ class OfficeState:
         has_lifecycle = any(e.get("kind") in ("agent_start", "agent_stop") for e in office)
         events = office + ([] if has_lifecycle else read_delegation_events(self.devflow)) + list(self._synthetic)
         events.sort(key=lambda e: _parse_ts(e.get("ts")))
-        events = events[-MAX_EVENTS:]
+        events = resolve_events(events)[-MAX_EVENTS:]
         body = {
             "target": self.target.name,
             "initialized": self.devflow.is_dir(),
