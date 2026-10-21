@@ -69,10 +69,19 @@ Esin kaynağı: affaan-m/everything-claude-code `iterative-retrieval` fikri.
 
 ### 4c. Yerel Kod Haritası (pilot, opsiyonel)
 
-Büyük repolarda (özellikle .NET çözümleri) yerel bir kod haritası aracı
-pilot olarak denenebilir: yalnızca yerel AST/kod modu; içerik onaysız dış
-LLM'e gönderilmez; çıktı `confidence: draft` kaydedilir; context pack'e
-yalnızca ilgili modülün özeti girer.
+Büyük repolarda (özellikle .NET çözümleri) Graphify tabanlı yerel kod
+haritası kullanılabilir (`agent-common.md` "Kod Haritası"). İnsan bir kez
+`claude-devflow map` ile kurar; araç yalnızca yerel AST modunda çalışır,
+içerik dış LLM'e gönderilmez.
+
+- Context pack'e haritanın tamamı veya GRAPH_REPORT girmez. Göreve dokunan
+  sembol için `affected` ve gerekirse `explain` çıktısının ilgili satırları
+  girer, kaynak olarak `code-map` ve `confidence: draft` ile.
+- `status` "eski" diyorsa context pack'e bunu yaz veya önce insandan
+  `claude-devflow map` iste.
+- Bir CONTEXT_REQUEST "X'i kim çağırıyor?" türündeyse dosya eklemeden önce
+  `affected`/`path` ile cevapla; yalnızca gerçekten okunması gereken
+  dosyaları ekle.
 
 ## Notlar
 

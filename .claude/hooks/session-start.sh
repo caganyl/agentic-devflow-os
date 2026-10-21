@@ -46,6 +46,17 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -z "${DEVFLOW_ARCH_SCAN_SCRIPT:-}" ] && [ 
   printf 'export DEVFLOW_ARCH_SCAN_SCRIPT=%q\n' "${CLAUDE_PLUGIN_ROOT}/scripts/devflow_arch_scan.py" >> "$CLAUDE_ENV_FILE" || true
 fi
 
+if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -z "${DEVFLOW_CODE_MAP_SCRIPT:-}" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] \
+   && [ -f "${CLAUDE_PLUGIN_ROOT}/scripts/devflow_code_map.py" ]; then
+  printf 'export DEVFLOW_CODE_MAP_SCRIPT=%q\n' "${CLAUDE_PLUGIN_ROOT}/scripts/devflow_code_map.py" >> "$CLAUDE_ENV_FILE" || true
+fi
+
+# Optional Graphify code map (scripts/devflow_code_map.py). Existence only;
+# freshness is reported by the script's own status command.
+if [ -f "$ROOT/.devflow/cache/code-map/graph.json" ]; then
+  echo '- Code map: available (python3 "$DEVFLOW_CODE_MAP_SCRIPT" affected|explain|path|query ...; evidence, not source of truth)'
+fi
+
 if [ -n "$LATEST_HANDOFF" ]; then
   echo "- Latest handoff: ${LATEST_HANDOFF#$ROOT/}"
 else

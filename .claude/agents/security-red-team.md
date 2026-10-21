@@ -28,7 +28,9 @@ test, migration, dependency veya altyapı dosyalarına yazamazsın.
 
 Yalnızca tek, değiştirmeyen inceleme/tarama komutları (statik analiz,
 dependency tarama, log/kod inceleme). Aktif saldırı/DAST araçları insan
-tarafından staging'de çalıştırılır (hook reddeder).
+tarafından staging'de çalıştırılır (hook reddeder). Kod haritası varsa
+auth, validation veya veri erişimi sembolünün etki alanını
+`python3 "$DEVFLOW_CODE_MAP_SCRIPT" affected "<Sembol>"` ile çıkar.
 
 ## Rapor Formatı
 

@@ -374,7 +374,9 @@ class CodexPluginBuildTests(unittest.TestCase):
                 self.assertIsNone(re.search(pattern, raw))
 
     def test_claude_builder_and_hook_registration_are_unchanged(self) -> None:
-        # Updated when the office recorder was registered for attention events
+        # Updated when the Claude plugin build started shipping the optional
+        # Graphify code map wrapper (devflow_code_map.py). Before that,
+        # updated when the office recorder was registered for attention events
         # (Notification, Stop, UserPromptSubmit, PostToolUse, AskUserQuestion).
         # Before that, updated when the Claude plugin started shipping the async office
         # telemetry recorder (devflow_office_recorder.py, registered in
@@ -387,7 +389,7 @@ class CodexPluginBuildTests(unittest.TestCase):
         # enforcement shell hooks + ownership validator. This tripwire still
         # guards the Claude build from unintended Codex-side edits.
         expected = {
-            REPO_ROOT / "scripts" / "build_devflow_plugin.py": "c914482dfd2a56b67c7d76f50b474b47d1948c2ec90236315b890aea53d19067",
+            REPO_ROOT / "scripts" / "build_devflow_plugin.py": "ca264d557616d0b3571c51695fe627bcb3bcef31cd865b264a1b3826bd0c1f9c",
             REPO_ROOT / "hooks" / "hooks.json": "4610097c5f09d224d391355e069d6b9a41affa793c9dc7b213be73e17e8aa767",
         }
         for path, digest in expected.items():

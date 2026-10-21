@@ -32,7 +32,9 @@ H2: ...
 ```
 
 Her hipotez tek bir gözlemle test edilir: bir log satırı, bir breakpoint
-yerine geçen hedefli test, bir sorgu çıktısı. Kodu "deneme amaçlı"
+yerine geçen hedefli test, bir sorgu çıktısı. Kod haritası varsa
+(`agent-common.md` "Kod Haritası") giriş noktasından hatalı sembole
+`path`, hatalı sembolün başka çağıranları için `affected` tek gözlem sayılır. Kodu "deneme amaçlı"
 değiştirip sonuca bakmak hipotez testi değildir.
 
 ### 3. Sınır

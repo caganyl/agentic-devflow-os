@@ -146,6 +146,21 @@ class CliInstallTest(unittest.TestCase):
         self.assertIn(f"FAKE-CLAUDE --plugin-dir {plugin_dir} --plugin-dir {ponytail}", result.stdout)
         self.assertIn("MODE=full MATCH=backend-engineer|", result.stdout)
 
+    def test_map_command_reaches_code_map_wrapper(self):
+        self.run_install()
+        project = self.base / "my-project"
+        project.mkdir()
+        env = self.env(path_extra=[self.bin_dir])
+        result = subprocess.run(["claude-devflow", "map", "status"], capture_output=True,
+                                text=True, env=env, cwd=project)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("Kod haritası: yok", result.stdout)
+        env["DEVFLOW_GRAPHIFY_BIN"] = str(self.base / "missing-graphify")
+        result = subprocess.run(["claude-devflow", "map"], capture_output=True,
+                                text=True, env=env, cwd=project)
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("graphifyy==0.9.93", result.stderr)
+
     def test_doctor_reports_ponytail(self):
         self.run_install()
         node = self.tools / "node"

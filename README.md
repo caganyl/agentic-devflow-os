@@ -407,6 +407,18 @@ backend, frontend, database, ai-data ve qa-automation alt ajanlarına gider
 Kapatmak: `DEVFLOW_PONYTAIL=0 claude-devflow`. Güncellemek:
 `scripts/sync_ponytail.sh <commit>`, sonra testler.
 
+**Kod haritası (opsiyonel, Graphify):** `claude-devflow map` bulunulan projede
+[Graphify](https://github.com/Graphify-Labs/graphify) (Apache-2.0) ile yerel bir sembol grafiği
+kurar: kim kimi çağırıyor, hangi sınıf hangi interface'i uyguluyor, DI kayıtları, `@/` alias'lı
+import'lar. Sarmalayıcı `scripts/devflow_code_map.py` Graphify'ı yalnızca AST modunda çalıştırır
+(`GRAPHIFY_BACKEND=none`, `*_API_KEY` değişkenleri verilmez); kod dışarı gönderilmez, `~/.claude`
+veya git hook'larına dokunulmaz, çıktı `.devflow/cache/code-map/` altındadır (gitignore'da).
+Ajanlar `python3 "$DEVFLOW_CODE_MAP_SCRIPT" affected|explain|path|query ...` ile sorgular
+(security-red-team ve architecture-analyst için hook yalnızca bu salt-okunur komutlara izin verir;
+`build` yalnızca insan/ana oturum). Harita kanıttır, gerçeğin kaynağı değildir:
+`.claude/rules/agent-common.md`. Kurulum: `uv tool install graphifyy==0.9.93`; kod değişince
+`claude-devflow map` ile güncellenir (`claude-devflow map status` eskiyi gösterir).
+
 **Windows notu:** Hook'lar `bash` (Git Bash), `jq` ve `python3` gerektirir ve bunlar Claude
 Code sürecinin PATH'inde olmalıdır; biri eksikse tüm Bash/Write/Edit çağrıları fail-closed
 reddedilir. `jq` kurulumu: `winget install jqlang.jq` — kurulumdan sonra Claude oturumunu
@@ -440,6 +452,7 @@ PATH'te olmalıdır.
 | Claude Code | `--plugin-dir` ve hook desteği olan sürüm | Çalışma ortamı |
 | GitHub CLI (`gh`) | opsiyonel | PR işlemleri (ajanlar için yalnızca okuma) |
 | Node.js | opsiyonel (Claude Code ile gelir) | Ponytail hook'ları; yoksa Ponytail yüklenmez |
+| Graphify (`graphifyy`) | opsiyonel, 0.9.93 | Kod haritası (`claude-devflow map`); Python 3.10+ ve PyPI erişimi ister |
 
 Üçüncü parti Python paketi yoktur. Hedef projede `agent-reviews` ve `impeccable` gibi araçlar
 yalnızca sabit sürümlü devDependency olarak kuruluysa `npx --no-install` ile kullanılır.
