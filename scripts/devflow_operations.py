@@ -2512,6 +2512,32 @@ def find_claude_binary() -> str | None:
     return None
 
 
+# Ponytail: vendored plugin with lean-implementation rules, loaded as a second
+# --plugin-dir and scoped to implementer/QA subagents. Same logic as
+# bin/claude-devflow; DEVFLOW_PONYTAIL=0 turns it off.
+PONYTAIL_PLUGIN_DIR = FRAMEWORK_REPO / ".claude" / "vendor" / "ponytail"
+PONYTAIL_ROLES = "backend-engineer|frontend-engineer|database-engineer|ai-data-engineer|qa-automation"
+
+
+def ponytail_launch_config(env: dict) -> tuple[Path | None, dict]:
+    """Return (plugin dir, env vars to set), or (None, {}) when Ponytail is off."""
+    if env.get("DEVFLOW_PONYTAIL", "1") == "0":
+        return None, {}
+    if not (PONYTAIL_PLUGIN_DIR / ".claude-plugin" / "plugin.json").is_file():
+        return None, {}
+    # Ponytail hooks run on node; without it they would fail on every event.
+    if not shutil.which("node", path=env.get("PATH")):
+        return None, {}
+    # ultra questions the request itself; DevFlow scope is fixed by REQ/AC.
+    mode = env.get("PONYTAIL_DEFAULT_MODE", "")
+    if mode not in ("lite", "off"):
+        mode = "full"
+    return PONYTAIL_PLUGIN_DIR, {
+        "PONYTAIL_DEFAULT_MODE": mode,
+        "PONYTAIL_SUBAGENT_MATCHER": env.get("PONYTAIL_SUBAGENT_MATCHER") or PONYTAIL_ROLES,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Subcommands
 # ---------------------------------------------------------------------------
@@ -2731,6 +2757,10 @@ def cmd_launch(args) -> int:
     build_script = FRAMEWORK_REPO / "scripts" / "build_devflow_plugin.py"
     is_framework_copy = build_script.exists()
     plugin_dir = FRAMEWORK_REPO / "dist" / "devflow-plugin"
+    ponytail_dir, ponytail_env = ponytail_launch_config(os.environ)
+    plugin_args = ["--plugin-dir", str(plugin_dir)]
+    if ponytail_dir:
+        plugin_args += ["--plugin-dir", str(ponytail_dir)]
 
     claude_binary = find_claude_binary()
 
@@ -2751,13 +2781,18 @@ def cmd_launch(args) -> int:
         print(f"  execution mode: {execution_mode}")
         print(f"  agent teams:    {agent_teams_label}")
         print(f"  env (planned):  {env_plan}")
+        if ponytail_dir:
+            print(f"  ponytail:       {ponytail_dir} (mode {ponytail_env['PONYTAIL_DEFAULT_MODE']})")
+            print(f"  ponytail roles: {ponytail_env['PONYTAIL_SUBAGENT_MATCHER']}")
+        else:
+            print("  ponytail:       off (DEVFLOW_PONYTAIL=0, node yok veya vendor eksik)")
         if claude_binary:
             print(f"  claude:         {claude_binary}")
         else:
             print("  claude:         [not found — install Claude Code CLI]")
         binary_label = claude_binary or "claude"
         print(
-            f"  claude cmd:     {binary_label} --plugin-dir {plugin_dir} \"<supervisor prompt>\""
+            f"  claude cmd:     {binary_label} {' '.join(plugin_args)} \"<supervisor prompt>\""
         )
         print(
             f"  git cmd:        git worktree add -b {branch_name} {worktree_path} HEAD"
@@ -2897,6 +2932,8 @@ def cmd_launch(args) -> int:
     print("Claude Code supervisor başlatılıyor (interaktif)...")
     print(f"  worktree:       {worktree_path}")
     print(f"  plugin-dir:     {plugin_dir}")
+    if ponytail_dir:
+        print(f"  ponytail:       {ponytail_dir}")
     print(f"  binary:         {claude_binary}")
     print(f"  execution mode: {execution_mode}")
 
@@ -2914,12 +2951,13 @@ def cmd_launch(args) -> int:
     child_env["DEVFLOW_RUN_BRANCH"] = branch_name
     child_env["DEVFLOW_OPERATIONS_SCRIPT"] = str(plugin_dir / "scripts" / "devflow_operations.py")
     child_env["DEVFLOW_ARCH_SCAN_SCRIPT"] = str(plugin_dir / "scripts" / "devflow_arch_scan.py")
+    child_env.update(ponytail_env)
 
     # Change CWD to run worktree before replacing process
     os.chdir(str(worktree_path))
     os.execve(claude_binary, [
         claude_binary,
-        "--plugin-dir", str(plugin_dir),
+        *plugin_args,
         supervisor_prompt,
     ], child_env)
     # execve replaces this process; this line is unreachable
