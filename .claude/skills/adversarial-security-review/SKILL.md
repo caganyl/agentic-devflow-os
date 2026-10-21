@@ -23,6 +23,9 @@ Saldırgan bakış açısıyla düşün; sadece "normal kullanım" değil.
 - [ ] Cross-tenant veri erişimi engellenmiş mi?
 ```
 
+Değişiklik login, token, oturum, rol/izin, tenant ayrımı veya hesap
+kurtarma akışına dokunuyorsa `auth-checklist.md` (bu klasörde) uygulanır.
+
 ### 2. Input Validation & Injection
 
 ```
@@ -42,6 +45,7 @@ Saldırgan bakış açısıyla düşün; sadece "normal kullanım" değil.
 - [ ] LLM çıktısı parse edilirken injection riski var mı?
 - [ ] Tool/function call parametreleri validate ediliyor mu?
 - [ ] Kötü niyetli prompt "ignore previous instructions" denendi mi?
+- [ ] Aynı LLM çağrısı hem güvenilmeyen girdi alıp hem tool çağırabiliyor mu? (High)
 ```
 
 ### 4. Secret Exposure
@@ -51,7 +55,13 @@ Saldırgan bakış açısıyla düşün; sadece "normal kullanım" değil.
 - [ ] Secret log'a düşüyor mu?
 - [ ] Secret response body'de dönüyor mu?
 - [ ] .env dosyası .gitignore'da mı?
+- [ ] Sır tarayıcıya ulaşıyor mu? ("use client", NEXT_PUBLIC_/VITE_/REACT_APP_)
 ```
+
+Frontend kodu, ortam değişkeni veya LLM çağrısı içeren değişiklikte
+`client-boundary.md` (bu klasörde) uygulanır. Sızmış sırrın önerisi her
+zaman iki adımdır: koddan kaldır ve sağlayıcıda yenile. Rapora sırrın
+değeri yazılmaz.
 
 ### 5. Data Privacy
 

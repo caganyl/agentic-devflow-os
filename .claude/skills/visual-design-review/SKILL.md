@@ -54,6 +54,11 @@ ama kullanılması zor veya görsel açıdan tutarsız arayüzleri tespit et.
 - [ ] Hata mesajları ekran okuyucuya açık mı?
 ```
 
+Değişiklik yeni veya değişen etkileşimli bileşen (form, modal, menü, sekme,
+tablo) içeriyorsa `wcag-audit.md` (bu klasörde) uygulanır: her bulgu bir
+WCAG 2.2 kriterine bağlanır, klavye listesi bileşen bileşen denenir.
+Otomatik tarayıcının temiz çıkması erişilebilirlik kanıtı değildir.
+
 ### 5. Durum Yönetimi (State Coverage)
 
 ```
@@ -91,6 +96,7 @@ LLM ile üretilen UI'larda özellikle şunlara dikkat et:
 
 **Severity:** Blocker / Major / Minor / Suggestion
 **Kategori:** a11y / Responsive / Tipografi / Spacing / State / Interaction / Tutarlılık
+**WCAG kriteri:** [yalnızca a11y: numara ve ad, ör. 2.4.7 Focus Visible]
 **Etkilenen bileşen:** [sayfa veya component adı]
 **Açıklama:** [sorun ve neden önemli]
 **Ekran görüntüsü/referans:** [varsa]
