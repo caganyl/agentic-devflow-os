@@ -2951,6 +2951,7 @@ def cmd_launch(args) -> int:
     child_env["DEVFLOW_RUN_BRANCH"] = branch_name
     child_env["DEVFLOW_OPERATIONS_SCRIPT"] = str(plugin_dir / "scripts" / "devflow_operations.py")
     child_env["DEVFLOW_ARCH_SCAN_SCRIPT"] = str(plugin_dir / "scripts" / "devflow_arch_scan.py")
+    child_env["DEVFLOW_CODE_MAP_SCRIPT"] = str(plugin_dir / "scripts" / "devflow_code_map.py")
     child_env.update(ponytail_env)
 
     # Change CWD to run worktree before replacing process

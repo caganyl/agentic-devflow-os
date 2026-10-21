@@ -46,6 +46,8 @@ INCLUDED_SCRIPTS = frozenset({
     # Read-only architecture scanner used by architecture-analyst and
     # stack-verification (profile --check).
     "devflow_arch_scan.py",
+    # Optional Graphify code map wrapper (AST only; queries are read-only).
+    "devflow_code_map.py",
 })
 INCLUDED_HOOKS = frozenset({"hooks.json"})
 

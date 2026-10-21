@@ -1046,6 +1046,43 @@ if strip_comments(old_s) != strip_comments(new_s):
 PYDOCS
 }
 
+# Read-only DevFlow code map queries ($DEVFLOW_CODE_MAP_SCRIPT affected|
+# explain|path|query|status). `build` writes the map and is not allowed here.
+# Single command only, and only the script DEVFLOW_CODE_MAP_SCRIPT names.
+code_map_read_allowed() {
+  local command="$1" sentinel="__DEVFLOW_CODE_MAP__" script sub
+  case "$command" in
+    *$'\n'*|*$'\r'*|*";"*|*"&"*|*"|"*|*'`'*|*'$('*)
+      return 1
+      ;;
+  esac
+  command="${command//\"\$\{DEVFLOW_CODE_MAP_SCRIPT\}\"/$sentinel}"
+  command="${command//\"\$DEVFLOW_CODE_MAP_SCRIPT\"/$sentinel}"
+  command="${command//\$\{DEVFLOW_CODE_MAP_SCRIPT\}/$sentinel}"
+  command="${command//\$DEVFLOW_CODE_MAP_SCRIPT/$sentinel}"
+  if [[ "$command" =~ ^python3[[:space:]]+([^[:space:]]+)[[:space:]]+([a-z]+)([[:space:]]+[^\;\&\|\<\>\`\$]*)?$ ]]; then
+    script="${BASH_REMATCH[1]}"
+    sub="${BASH_REMATCH[2]}"
+    case "$sub" in
+      affected|explain|path|query|status) ;;
+      *) return 1 ;;
+    esac
+    # Only the plugin's own copy: a relative scripts/devflow_code_map.py could
+    # be a file planted in the target repo. The env var is set by
+    # session-start.sh / launch from the plugin root.
+    if [ "$script" = "$sentinel" ]; then
+      return 0
+    fi
+    if [ -n "${DEVFLOW_CODE_MAP_SCRIPT:-}" ] && [ "$script" = "$DEVFLOW_CODE_MAP_SCRIPT" ]; then
+      return 0
+    fi
+    if [ -n "${DEVFLOW_PLUGIN_ROOT:-}" ] && [ "$script" = "$DEVFLOW_PLUGIN_ROOT/scripts/devflow_code_map.py" ]; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
 analyst_command_allowed() {
   local command="$1" sentinel="__DEVFLOW_ARCH_SCAN__" script
   # A single command only: no newline/CR injection, chaining, pipes or
@@ -1214,8 +1251,8 @@ case "$TOOL_NAME" in
         exit 0
         ;;
       architecture-analyst)
-        if ! analyst_command_allowed "$COMMAND"; then
-          deny "Role-boundary protection: architecture-analyst may run only the DevFlow architecture scanner (python3 .../devflow_arch_scan.py ...) or single non-mutating inspection commands."
+        if ! analyst_command_allowed "$COMMAND" && ! code_map_read_allowed "$COMMAND"; then
+          deny "Role-boundary protection: architecture-analyst may run only the DevFlow architecture scanner (python3 .../devflow_arch_scan.py ...), read-only code map queries (python3 .../devflow_code_map.py affected|explain|path|query|status ...) or single non-mutating inspection commands."
         fi
         exit 0
         ;;
@@ -1226,8 +1263,11 @@ case "$TOOL_NAME" in
         exit 0
         ;;
       security-red-team)
+        if code_map_read_allowed "$COMMAND"; then
+          exit 0
+        fi
         if ! security_command_is_non_mutating "$COMMAND"; then
-          deny "Role-boundary protection: security-red-team may run only single, non-mutating inspection or scanning commands. Use Read/Grep/Glob for other inspection."
+          deny "Role-boundary protection: security-red-team may run only single, non-mutating inspection or scanning commands (including read-only code map queries). Use Read/Grep/Glob for other inspection."
           exit 0
         fi
         ;;

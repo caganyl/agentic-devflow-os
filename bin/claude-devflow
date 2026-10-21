@@ -17,6 +17,10 @@
 #       --share: bu bilgisayarın ofislerini yerel ağda token'la paylaşır;
 #       --remote HOST --token T: paylaşılan ofisi uzak sekme olarak ekler.
 #
+#   claude-devflow map [status|affected|explain|path|query ...]
+#       Bulunulan proje için Graphify kod haritasını kurar/günceller
+#       (opsiyonel; graphify kurulu olmalı, yalnızca yerel AST).
+#
 #   claude-devflow doctor     Ön koşulları ve kurulumu kontrol eder.
 #   claude-devflow --help     Bu yardımı gösterir.
 #
@@ -64,7 +68,7 @@ die() {
 }
 
 usage() {
-  sed -n '2,29p' "$DEVFLOW_HOME/bin/claude-devflow" | sed 's/^# \{0,1\}//'
+  sed -n '2,33p' "$DEVFLOW_HOME/bin/claude-devflow" | sed 's/^# \{0,1\}//'
   printf '\nDEVFLOW_HOME: %s\n' "$DEVFLOW_HOME"
 }
 
@@ -108,6 +112,11 @@ case "${1:-}" in
     else
       printf '  [uyarı]  ponytail %s bulunamadı\n' "$PONYTAIL_DIR"
     fi
+    if command -v graphify >/dev/null 2>&1; then
+      printf '  [ok]     graphify %s (opsiyonel kod haritası)\n' "$(graphify --version 2>/dev/null | awk '{print $NF}')"
+    else
+      printf '  [yok]    graphify opsiyonel; kod haritası için: uv tool install graphifyy==0.9.93\n'
+    fi
     if command -v claude-devflow >/dev/null 2>&1; then
       printf '  [ok]     PATH     %s\n' "$(command -v claude-devflow)"
     else
@@ -115,6 +124,14 @@ case "${1:-}" in
       status=1
     fi
     exit "$status"
+    ;;
+  map)
+    shift
+    command -v python3 >/dev/null 2>&1 || die "eksik araç: python3 (claude-devflow doctor)"
+    if [ "$#" -eq 0 ]; then
+      set -- build
+    fi
+    exec python3 "$DEVFLOW_HOME/scripts/devflow_code_map.py" "$@"
     ;;
   office)
     shift

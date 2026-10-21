@@ -49,6 +49,25 @@ implementasyonun tanımıdır. Çelişkide DevFlow kuralı kazanır:
 - `ultra` seviyesi kullanılmaz; kapsam tartışması insan ve product-analyst işidir.
 - `shortcut:` yorumları silinmez; sonuçta ve handoff notunda listelenir.
 
+## Kod Haritası (opsiyonel)
+
+Oturum başında "Code map: available" görünüyorsa projede Graphify ile
+kurulmuş yerel bir sembol grafiği vardır. Grep ile dosya dosya gezmek
+yerine tek sorgu kullan:
+
+- `python3 "$DEVFLOW_CODE_MAP_SCRIPT" affected "<Sembol>"`: bu sembol
+  değişirse etkilenen çağıranlar. Paylaşılan bir sınıf, interface veya
+  fonksiyonun imzasını değiştirmeden önce implementer çalıştırır; reviewer
+  ve security-red-team etki alanını bununla çıkarır.
+- `explain "<Sembol>"`, `path "<A>" "<B>"`, `query "<soru>"` (bütçe ≤1500).
+
+Kurallar: Harita kanıttır, gerçeğin kaynağı değildir (sırası
+`source-of-truth.md`'de); bulgu dosya:satır ile doğrulanmadan sonuca
+yazılmaz. "Harita eski" notu gelirse sonucu doğrula. Haritayı yalnızca
+insan veya ana oturum kurar (`claude-devflow map`); alt ajan `build`
+çalıştırmaz. Frontend → backend bağı HTTP üzerinden olduğu için haritada
+görünmez; o sınır contract'tır.
+
 ## Bağlam ve Sonuç
 
 - Belgeleri yalnızca görevin dokunduğu bölüm kadar oku. Eksik bağlamda
