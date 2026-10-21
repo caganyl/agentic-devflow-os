@@ -53,6 +53,11 @@ tasarıma dönme; blocker'ı ve gereken insan adımını raporla.
 - **Hatalar:** Hata gövdesi profildeki modeldir (tipik: ProblemDetails —
   `Results.Problem`, `ValidationProblem`, `AddProblemDetails`). Stack trace
   veya iç mesaj dışarı sızmaz; exception akış kontrolü için kullanılmaz.
+- **Auth:** Login, token, rol/izin veya tenant ayrımına dokunan işte yetki
+  her istekte sunucuda kontrol edilir; tenant ID istek parametresinden değil
+  doğrulanmış kimlikten alınır; JWT doğrulamasında `ValidAlgorithms`, issuer,
+  audience ve lifetime açıktır; özel token formatı veya parola hash'i icat
+  edilmez. security-red-team aynı kuralları (auth kontrol listesi) inceler.
 - **Validation:** Profildeki mekanizma (FluentValidation, DataAnnotations,
   endpoint filter); girdi sınırda doğrulanır.
 - **EF Core:** `DbContext` yalnızca profildeki veri erişim katmanında
