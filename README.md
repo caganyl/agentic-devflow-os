@@ -396,6 +396,17 @@ geçer · `TARGET_CLAUDE.md` ve rule'ları dağıtır · `docs/`, `backend/`, `f
 iskeletini kurar · yalnızca iskelet dizinlerini kapsayan onaylı `REQ-001` manifestini yazar ·
 `.devflow/` başlatır.
 
+**Ponytail (yalın implementasyon):** `claude-devflow` ve `launch`, sabit bir commit'ten
+kopyalanmış [Ponytail](https://github.com/DietrichGebert/ponytail) plugin'ini
+(`.claude/vendor/ponytail/`, MIT) ikinci `--plugin-dir` olarak yükler. Kuralları yalnızca
+backend, frontend, database, ai-data ve qa-automation alt ajanlarına gider
+(`PONYTAIL_SUBAGENT_MATCHER`), seviye `full`'a sabitlenir (`ultra` kullanılmaz). DevFlow ile
+çelişkide DevFlow kazanır: `.claude/rules/agent-common.md`. Gelen komutlar:
+`/ponytail-review` (diff incelemesi), `/ponytail-audit` (repo denetimi), `/ponytail-debt`
+(`shortcut:` defteri); üçü de salt okunur. Hook'ları `node` ister; node yoksa yüklenmez.
+Kapatmak: `DEVFLOW_PONYTAIL=0 claude-devflow`. Güncellemek:
+`scripts/sync_ponytail.sh <commit>`, sonra testler.
+
 **Windows notu:** Hook'lar `bash` (Git Bash), `jq` ve `python3` gerektirir ve bunlar Claude
 Code sürecinin PATH'inde olmalıdır; biri eksikse tüm Bash/Write/Edit çağrıları fail-closed
 reddedilir. `jq` kurulumu: `winget install jqlang.jq` — kurulumdan sonra Claude oturumunu
@@ -428,6 +439,7 @@ PATH'te olmalıdır.
 | Git | 2.x | Branch/worktree tespiti, diff doğrulama |
 | Claude Code | `--plugin-dir` ve hook desteği olan sürüm | Çalışma ortamı |
 | GitHub CLI (`gh`) | opsiyonel | PR işlemleri (ajanlar için yalnızca okuma) |
+| Node.js | opsiyonel (Claude Code ile gelir) | Ponytail hook'ları; yoksa Ponytail yüklenmez |
 
 Üçüncü parti Python paketi yoktur. Hedef projede `agent-reviews` ve `impeccable` gibi araçlar
 yalnızca sabit sürümlü devDependency olarak kuruluysa `npx --no-install` ile kullanılır.

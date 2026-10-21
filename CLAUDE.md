@@ -44,6 +44,8 @@ Esin kaynağı: Andrej Karpathy'nin LLM kodlama hatalarına dair gözlemleri
    birini seçme; sor veya ikisini de belirt. Daha basit bir yol görüyorsan söyle.
 2. **Sade kal:** İsteneni karşılayan en az kodu yaz. İstenmemiş özellik,
    tek kullanımlık soyutlama, "ileride lazım olur" esnekliği ekleme.
+   Implementer ve QA alt ajanlarında bu ilke Ponytail kurallarıyla uygulanır
+   (`.claude/vendor/ponytail/`); öncelik sırası `.claude/rules/agent-common.md`'de.
 3. **Cerrahi değişiklik:** Yalnızca görevin gerektirdiği satırlara dokun.
    Komşu kodu, yorumları veya biçimlendirmeyi "iyileştirme". Senin değişikliğin
    yüzünden kullanılmaz kalan şeyi temizle; önceden var olan ölü kodu yalnızca raporla.

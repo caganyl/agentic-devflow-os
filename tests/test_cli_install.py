@@ -115,6 +115,7 @@ class CliInstallTest(unittest.TestCase):
         project = self.base / "my-project"
         project.mkdir()
         env = self.env(path_extra=[self.bin_dir])
+        env["DEVFLOW_PONYTAIL"] = "0"
         result = subprocess.run(["claude-devflow", "--model", "x"], capture_output=True,
                                 text=True, env=env, cwd=project)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -122,6 +123,42 @@ class CliInstallTest(unittest.TestCase):
         self.assertIn(f"FAKE-CLAUDE --plugin-dir {plugin_dir} --model x", result.stdout)
         self.assertTrue((project / ".devflow").is_dir())
         self.assertTrue((plugin_dir / ".claude-plugin" / "plugin.json").is_file())
+
+    @unittest.skipUnless(shutil.which("jq") and shutil.which("git"), "needs jq and git")
+    def test_claude_devflow_loads_ponytail_when_node_exists(self):
+        self.run_install()
+        node = self.tools / "node"
+        node.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        node.chmod(0o755)
+        fake = self.tools / "claude"
+        fake.write_text('#!/bin/sh\necho "FAKE-CLAUDE $*"\n'
+                        'echo "MODE=$PONYTAIL_DEFAULT_MODE MATCH=$PONYTAIL_SUBAGENT_MATCHER"\n',
+                        encoding="utf-8")
+        project = self.base / "my-project"
+        project.mkdir()
+        env = self.env(path_extra=[self.bin_dir])
+        env["PONYTAIL_DEFAULT_MODE"] = "ultra"
+        result = subprocess.run(["claude-devflow"], capture_output=True, text=True,
+                                env=env, cwd=project)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        plugin_dir = REPO_ROOT / "dist" / "devflow-plugin"
+        ponytail = REPO_ROOT / ".claude" / "vendor" / "ponytail"
+        self.assertIn(f"FAKE-CLAUDE --plugin-dir {plugin_dir} --plugin-dir {ponytail}", result.stdout)
+        self.assertIn("MODE=full MATCH=backend-engineer|", result.stdout)
+
+    def test_doctor_reports_ponytail(self):
+        self.run_install()
+        node = self.tools / "node"
+        node.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        node.chmod(0o755)
+        env = self.env(path_extra=[self.bin_dir])
+        result = subprocess.run([str(self.bin_dir / "claude-devflow"), "doctor"],
+                                capture_output=True, text=True, env=env)
+        self.assertIn("[ok]     ponytail", result.stdout)
+        env["DEVFLOW_PONYTAIL"] = "0"
+        result = subprocess.run([str(self.bin_dir / "claude-devflow"), "doctor"],
+                                capture_output=True, text=True, env=env)
+        self.assertIn("[kapalı] ponytail", result.stdout)
 
     def test_doctor_reports_missing_claude(self):
         self.run_install()

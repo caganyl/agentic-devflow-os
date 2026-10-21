@@ -34,7 +34,8 @@ secret, gerçek external MCP bağlantısı.
 ## Geçiş Sınırları
 
 - Framework → target: yalnızca plugin çıktısı ve bootstrap'ın kopyaladığı
-  `CLAUDE.md` şablonu ile rule'lar.
+  `CLAUDE.md` şablonu ile rule'lar. Ponytail de framework'teki vendored
+  plugin klasöründen `--plugin-dir` ile yüklenir; target'a dosya kopyalanmaz.
 - Target → framework: geri bildirim ve governance güncellemesi (PR ile).
 - Credential, API key veya secret hiçbir yönde geçmez.
 - Operations runner, target olarak framework repo verilirse exit 2 ile reddeder.

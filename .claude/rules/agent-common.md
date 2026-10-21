@@ -34,6 +34,21 @@ operations CLI ile yazılır; kayıt komutlarını (`record-*`,
   aynı işlemi tekrar deneme; blokajı ve gereken insan adımını tek özetle
   bildir ve dur.
 
+## Ponytail (Yalın Implementasyon)
+
+`claude-devflow` ve `launch`, Ponytail kurallarını yalnızca implementer ve QA
+alt ajanlarına verir (backend, frontend, database, ai-data, qa-automation).
+Bu rollerde Ponytail'in "en küçük tam değişiklik" merdiveni minimal
+implementasyonun tanımıdır. Çelişkide DevFlow kuralı kazanır:
+
+- Kapsamı AC, run'a kaydedilmiş contract, mimari profil ve manifestteki
+  `write_paths` belirler. Ponytail kapsamı daraltmaz; AC'den çıkan testler
+  kesilmez (`tdd-vertical-slice` her seam için test ister).
+- AC belirsizse "en küçük versiyonu" seçme; blocker raporla.
+- Yeni bağımlılık yine insan onayı ister.
+- `ultra` seviyesi kullanılmaz; kapsam tartışması insan ve product-analyst işidir.
+- `shortcut:` yorumları silinmez; sonuçta ve handoff notunda listelenir.
+
 ## Bağlam ve Sonuç
 
 - Belgeleri yalnızca görevin dokunduğu bölüm kadar oku. Eksik bağlamda

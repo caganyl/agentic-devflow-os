@@ -32,7 +32,9 @@ sonucunda ana oturuma raporla. Listede olmayan seam'e test yazma.
 1. **Kırmızı:** Tek bir davranış için başarısız olan testi yaz. Testi çalıştır,
    gerçekten doğru sebeple başarısız olduğunu gör.
 2. **Yeşil:** Yalnızca bu testi geçirecek kadar kod yaz. Gelecek testleri
-   öngörme, spekülatif özellik ekleme.
+   öngörme, spekülatif özellik ekleme. Ponytail aktifse "en az kod" onun
+   merdivenidir (önce repoda var olanı, sonra stdlib/platformu kullan);
+   ama seam listesindeki her test yine yazılır.
 3. Sonraki davranışa geç. Her test bir öncekinden öğrendiğine göre şekillenir.
 
 Refactor bu döngünün parçası değildir; review aşamasında yapılır.

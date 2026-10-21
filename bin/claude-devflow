@@ -20,6 +20,10 @@
 #   claude-devflow doctor     Ön koşulları ve kurulumu kontrol eder.
 #   claude-devflow --help     Bu yardımı gösterir.
 #
+# Ponytail (yalın implementasyon kuralları) node varsa ikinci plugin olarak
+# yüklenir ve yalnızca implementer/QA alt ajanlarına verilir. Kapatmak için
+# DEVFLOW_PONYTAIL=0. Kaynak: .claude/vendor/ponytail/VENDORED.md
+#
 # Kurulum: framework repo kökünde `./bin/install` (PATH'e symlink ekler).
 # DEVFLOW_HOME framework repo köküdür; verilmezse bu dosyanın gerçek konumunun
 # (symlink'ler çözülerek) bir üst klasörü.
@@ -43,6 +47,16 @@ self_dir() {
 DEVFLOW_HOME="${DEVFLOW_HOME:-$(cd "$(self_dir)/.." && pwd -P)}"
 export DEVFLOW_HOME
 PLUGIN_DIR="$DEVFLOW_HOME/dist/devflow-plugin"
+PONYTAIL_DIR="$DEVFLOW_HOME/.claude/vendor/ponytail"
+# Ponytail kurallarını alan alt ajanlar (agent_type içinde aranan regex).
+PONYTAIL_ROLES="backend-engineer|frontend-engineer|database-engineer|ai-data-engineer|qa-automation"
+
+# Ponytail hook'ları node ile çalışır; node yoksa veya DEVFLOW_PONYTAIL=0 ise yüklenmez.
+ponytail_enabled() {
+  [ "${DEVFLOW_PONYTAIL:-1}" != "0" ] &&
+    [ -f "$PONYTAIL_DIR/.claude-plugin/plugin.json" ] &&
+    command -v node >/dev/null 2>&1
+}
 
 die() {
   printf 'claude-devflow: %s\n' "$*" >&2
@@ -50,7 +64,7 @@ die() {
 }
 
 usage() {
-  sed -n '2,25p' "$DEVFLOW_HOME/bin/claude-devflow" | sed 's/^# \{0,1\}//'
+  sed -n '2,29p' "$DEVFLOW_HOME/bin/claude-devflow" | sed 's/^# \{0,1\}//'
   printf '\nDEVFLOW_HOME: %s\n' "$DEVFLOW_HOME"
 }
 
@@ -85,6 +99,15 @@ case "${1:-}" in
     else
       printf '  [yok]    plugin   ilk çalıştırmada build edilir\n'
     fi
+    if [ "${DEVFLOW_PONYTAIL:-1}" = "0" ]; then
+      printf '  [kapalı] ponytail DEVFLOW_PONYTAIL=0\n'
+    elif ! command -v node >/dev/null 2>&1; then
+      printf '  [uyarı]  ponytail node yok; ponytail yüklenmeyecek\n'
+    elif ponytail_enabled; then
+      printf '  [ok]     ponytail %s\n' "$PONYTAIL_DIR"
+    else
+      printf '  [uyarı]  ponytail %s bulunamadı\n' "$PONYTAIL_DIR"
+    fi
     if command -v claude-devflow >/dev/null 2>&1; then
       printf '  [ok]     PATH     %s\n' "$(command -v claude-devflow)"
     else
@@ -116,4 +139,14 @@ if [ ! -f "$PLUGIN_DIR/.claude-plugin/plugin.json" ]; then
   python3 "$DEVFLOW_HOME/scripts/build_devflow_plugin.py" >/dev/null
 fi
 
+if ponytail_enabled; then
+  # ultra isteği sorgular; onaylı REQ/AC ile çalışan DevFlow'da kullanılmaz.
+  case "${PONYTAIL_DEFAULT_MODE:-}" in
+    lite|off) ;;
+    *) PONYTAIL_DEFAULT_MODE=full ;;
+  esac
+  PONYTAIL_SUBAGENT_MATCHER="${PONYTAIL_SUBAGENT_MATCHER:-$PONYTAIL_ROLES}"
+  export PONYTAIL_DEFAULT_MODE PONYTAIL_SUBAGENT_MATCHER
+  exec claude --plugin-dir "$PLUGIN_DIR" --plugin-dir "$PONYTAIL_DIR" "$@"
+fi
 exec claude --plugin-dir "$PLUGIN_DIR" "$@"
