@@ -424,6 +424,20 @@ Code sürecinin PATH'inde olmalıdır; biri eksikse tüm Bash/Write/Edit çağr�
 reddedilir. `jq` kurulumu: `winget install jqlang.jq` — kurulumdan sonra Claude oturumunu
 yeniden başlatın.
 
+**Windows'ta `claude-devflow` komutu:** PowerShell'de `bin/claude-devflow` yerine
+`scripts/claude-devflow.ps1` çalışır; aynı alt komutları (`launch`, `office`, `map`, `doctor`)
+ve Ponytail yüklemesini sunar, Windows PowerShell 5.1 ile uyumludur. PowerShell profiline
+(`notepad $PROFILE`) elle yazılmış bir kopya yerine tek satır koyun; `git pull` onu güncel tutar:
+
+```powershell
+$env:DEVFLOW_HOME = "C:\Users\<kullanıcı>\agentic-devflow-os"
+function claude-devflow { & "$env:DEVFLOW_HOME\scripts\claude-devflow.ps1" @args }
+```
+
+Script proxy değişkenlerine dokunmaz; şirket proxy'sini açıp kapatma gibi kişisel ayarlar
+profildeki fonksiyonda, bu satırdan önce kalır. Git Bash farklı bir yerdeyse `DEVFLOW_BASH`
+ile yolunu verin.
+
 <a id="testler"></a>
 ## 🧪 Testler
 
